@@ -57,43 +57,54 @@ const (
 	errDropDB            = "cannot drop database"
 )
 
-type db interface {
-	Exec(ctx context.Context, query string) error
-	Scan(ctx context.Context, query string, dest ...interface{}) error
+// A Query that may be run against a DB.
+type Query struct {
+	String     string
+	Parameters []interface{}
 }
 
-type postgresDB struct {
+// A DB client.
+type DB interface {
+	Exec(ctx context.Context, q Query) error
+	Scan(ctx context.Context, q Query, dest ...interface{}) error
+}
+
+// A PostgresDB client.
+type PostgresDB struct {
 	dsn string
 }
 
-func newPostgresDB(creds map[string][]byte) db {
+// NewPostgresDB returns a new PostgreSQL database client.
+func NewPostgresDB(creds map[string][]byte) DB {
 	// TODO(negz): Support alternative connection secret formats?
-	return postgresDB{dsn: "postgres://" +
+	return PostgresDB{dsn: "postgres://" +
 		string(creds[runtimev1alpha1.ResourceCredentialsSecretUserKey]) + ":" +
 		string(creds[runtimev1alpha1.ResourceCredentialsSecretPasswordKey]) + "@" +
 		string(creds[runtimev1alpha1.ResourceCredentialsSecretEndpointKey]) + ":" +
 		string(creds[runtimev1alpha1.ResourceCredentialsSecretPortKey])}
 }
 
-func (c postgresDB) Exec(ctx context.Context, query string) error {
+// Exec the supplied query.
+func (c PostgresDB) Exec(ctx context.Context, q Query) error {
 	d, err := sql.Open("postgres", c.dsn)
 	if err != nil {
 		return err
 	}
 	defer d.Close() //nolint:errcheck
 
-	_, err = d.ExecContext(ctx, query)
+	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
 	return err
 }
 
-func (c postgresDB) Scan(ctx context.Context, query string, dest ...interface{}) error {
-	d, err := sql.Open("postgres", c.dsn)
+// Scan the results of the supplied query into the supplied destination.
+func (c PostgresDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
+	db, err := sql.Open("postgres", c.dsn)
 	if err != nil {
 		return err
 	}
-	defer d.Close() //nolint:errcheck
+	defer db.Close() //nolint:errcheck
 
-	return d.QueryRowContext(ctx, query).Scan(dest...)
+	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
 // Setup adds a controller that reconciles Database managed resources.
@@ -103,7 +114,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: newPostgresDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: NewPostgresDB}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -116,7 +127,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte) db
+	newDB func(creds map[string][]byte) DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -152,7 +163,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	return &external{db: c.newDB(s.Data)}, nil
 }
 
-type external struct{ db db }
+type external struct{ db DB }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Database)
@@ -182,9 +193,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"db.datistemplate, " +
 		"ts.spcname " +
 		"FROM pg_database AS db, pg_tablespace AS ts " +
-		"WHERE db.datname=" + pq.QuoteLiteral(meta.GetExternalName(cr)) + " AND db.dattablespace = ts.oid"
+		"WHERE db.datname=$1 AND db.dattablespace = ts.oid"
 
-	err := c.db.Scan(ctx, query,
+	err := c.db.Scan(ctx, Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
 		observed.Owner,
 		observed.Encoding,
 		observed.LCCollate,
@@ -261,7 +272,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *cr.Spec.ForProvider.IsTemplate))
 	}
 
-	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, b.String()), errCreateDB)
+	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, Query{String: b.String()}), errCreateDB)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -274,36 +285,36 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.Owner != nil {
-		query := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+		query := Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))
+			pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBOwner)
 		}
 	}
 
 	if cr.Spec.ForProvider.ConnectionLimit != nil {
-		query := fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
+		query := Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.ConnectionLimit)
+			*cr.Spec.ForProvider.ConnectionLimit)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBConnLimit)
 		}
 	}
 
 	if cr.Spec.ForProvider.AllowConnections != nil {
-		query := fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
+		query := Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.AllowConnections)
+			*cr.Spec.ForProvider.AllowConnections)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBAllowConns)
 		}
 	}
 
 	if cr.Spec.ForProvider.IsTemplate != nil {
-		query := fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
+		query := Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.IsTemplate)
+			*cr.Spec.ForProvider.IsTemplate)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBIsTmpl)
 		}
@@ -318,7 +329,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, "DROP DATABASE "+pq.QuoteIdentifier(meta.GetExternalName(cr)))
+	err := c.db.Exec(ctx, Query{String: "DROP DATABASE " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
 	return errors.Wrap(resource.Ignore(IsDoesNotExist, err), errDropDB)
 }
 

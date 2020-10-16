@@ -35,15 +35,15 @@ import (
 )
 
 type mockDB struct {
-	MockExec func(ctx context.Context, query string) error
-	MockScan func(ctx context.Context, query string, dest ...interface{}) error
+	MockExec func(ctx context.Context, q Query) error
+	MockScan func(ctx context.Context, q Query, dest ...interface{}) error
 }
 
-func (m mockDB) Exec(ctx context.Context, query string) error {
-	return m.MockExec(ctx, query)
+func (m mockDB) Exec(ctx context.Context, q Query) error {
+	return m.MockExec(ctx, q)
 }
-func (m mockDB) Scan(ctx context.Context, query string, dest ...interface{}) error {
-	return m.MockScan(ctx, query, dest)
+func (m mockDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
+	return m.MockScan(ctx, q, dest...)
 }
 
 func TestConnect(t *testing.T) {
@@ -52,7 +52,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte) db
+		newDB func(creds map[string][]byte) DB
 	}
 
 	type args struct {
@@ -168,7 +168,7 @@ func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db db
+		db DB
 	}
 
 	type args struct {
@@ -200,7 +200,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return ResourceExists: false when no database is found",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, query string, dest ...interface{}) error { return sql.ErrNoRows },
+					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return sql.ErrNoRows },
 				},
 			},
 			args: args{
@@ -214,7 +214,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return any errors encountered while trying to select the database",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, query string, dest ...interface{}) error { return errBoom },
+					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return errBoom },
 				},
 			},
 			args: args{
@@ -228,7 +228,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can successfully select our database",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, query string, dest ...interface{}) error { return nil },
+					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return nil },
 				},
 			},
 			args: args{
@@ -263,7 +263,7 @@ func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db db
+		db DB
 	}
 
 	type args struct {
@@ -295,7 +295,7 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error { return errBoom },
+					MockExec: func(ctx context.Context, q Query) error { return errBoom },
 				},
 			},
 			args: args{
@@ -309,7 +309,7 @@ func TestCreate(t *testing.T) {
 			reason: "No error should be returned when we successfully create a database",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error { return nil },
+					MockExec: func(ctx context.Context, q Query) error { return nil },
 				},
 			},
 			args: args{
@@ -353,7 +353,7 @@ func TestUpdate(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db db
+		db DB
 	}
 
 	type args struct {
@@ -385,7 +385,7 @@ func TestUpdate(t *testing.T) {
 			reason: "Errors altering the owner of a database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error {
+					MockExec: func(ctx context.Context, q Query) error {
 						return errBoom
 					},
 				},
@@ -407,7 +407,7 @@ func TestUpdate(t *testing.T) {
 			reason: "Errors altering the connection limit of a database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error {
+					MockExec: func(ctx context.Context, q Query) error {
 						return errBoom
 					},
 				},
@@ -429,7 +429,7 @@ func TestUpdate(t *testing.T) {
 			reason: "Errors altering whether a database allows connections should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error {
+					MockExec: func(ctx context.Context, q Query) error {
 						return errBoom
 					},
 				},
@@ -451,7 +451,7 @@ func TestUpdate(t *testing.T) {
 			reason: "Errors altering whether a database is a template should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error {
+					MockExec: func(ctx context.Context, q Query) error {
 						return errBoom
 					},
 				},
@@ -473,7 +473,7 @@ func TestUpdate(t *testing.T) {
 			reason: "No error should be returned when we successfully update a database",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error { return nil },
+					MockExec: func(ctx context.Context, q Query) error { return nil },
 				},
 			},
 			args: args{
@@ -512,7 +512,7 @@ func TestDelete(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db db
+		db DB
 	}
 
 	type args struct {
@@ -537,7 +537,7 @@ func TestDelete(t *testing.T) {
 			reason: "Errors dropping a database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, query string) error {
+					MockExec: func(ctx context.Context, q Query) error {
 						return errBoom
 					},
 				},
