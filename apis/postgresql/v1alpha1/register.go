@@ -25,7 +25,7 @@ import (
 
 // Package type metadata.
 const (
-	Group   = "template.crossplane.io"
+	Group   = "postgresql.sql.crossplane.io"
 	Version = "v1alpha1"
 )
 
@@ -58,7 +58,16 @@ var (
 	ProviderConfigUsageListGroupVersionKind = SchemeGroupVersion.WithKind(ProviderConfigUsageListKind)
 )
 
+// Database type metadata.
+var (
+	DatabaseKind             = reflect.TypeOf(Database{}).Name()
+	DatabaseGroupKind        = schema.GroupKind{Group: Group, Kind: DatabaseKind}.String()
+	DatabaseKindAPIVersion   = DatabaseKind + "." + SchemeGroupVersion.String()
+	DatabaseGroupVersionKind = SchemeGroupVersion.WithKind(DatabaseKind)
+)
+
 func init() {
 	SchemeBuilder.Register(&ProviderConfig{}, &ProviderConfigList{})
 	SchemeBuilder.Register(&ProviderConfigUsage{}, &ProviderConfigUsageList{})
+	SchemeBuilder.Register(&Database{}, &DatabaseList{})
 }

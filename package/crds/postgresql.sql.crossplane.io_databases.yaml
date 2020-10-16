@@ -1,38 +1,33 @@
-
----
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.4
   creationTimestamp: null
-  name: mytypes.sample.template.crossplane.io
+  name: databases.postgresql.sql.crossplane.io
 spec:
   additionalPrinterColumns:
-  - JSONPath: .status.bindingPhase
-    name: STATUS
+  - JSONPath: .status.conditions[?(@.type=='Ready')].status
+    name: READY
     type: string
-  - JSONPath: .status.atProvider.state
-    name: STATE
-    type: string
-  - JSONPath: .spec.classRef.name
-    name: CLASS
+  - JSONPath: .status.conditions[?(@.type=='Synced')].status
+    name: SYNCED
     type: string
   - JSONPath: .metadata.creationTimestamp
     name: AGE
     type: date
-  group: sample.template.crossplane.io
+  group: postgresql.sql.crossplane.io
   names:
-    kind: MyType
-    listKind: MyTypeList
-    plural: mytypes
-    singular: mytype
+    kind: Database
+    listKind: DatabaseList
+    plural: databases
+    singular: database
   scope: Cluster
   subresources:
     status: {}
   validation:
     openAPIV3Schema:
-      description: A MyType is an example API type
+      description: A Database represents the declarative state of a PostgreSQL database.
       properties:
         apiVersion:
           description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
@@ -43,7 +38,7 @@ spec:
         metadata:
           type: object
         spec:
-          description: A MyTypeSpec defines the desired state of a MyType.
+          description: A DatabaseSpec defines the desired state of a Database.
           properties:
             deletionPolicy:
               description: DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted - either "Delete" or "Orphan" the external resource. The "Delete" policy is the default when no policy is specified.
@@ -52,12 +47,35 @@ spec:
               - Delete
               type: string
             forProvider:
-              description: MyTypeParameters are the configurable fields of a MyType.
+              description: DatabaseParameters are the configurable fields of a Database.
               properties:
-                configurableField:
+                allowConnections:
+                  description: If false then no one can connect to this database. The default is true, allowing connections (except as restricted by other mechanisms, such as GRANT/REVOKE CONNECT).
+                  type: boolean
+                connectionLimit:
+                  description: How many concurrent connections can be made to this database. -1 (the default) means no limit.
+                  type: integer
+                encoding:
+                  description: Character set encoding to use in the new database. Specify a string constant (e.g., 'SQL_ASCII'), or an integer encoding number, or DEFAULT to use the default encoding (namely, the encoding of the template database). The character sets supported by the PostgreSQL server are described in Section 23.3.1. See below for additional restrictions.
                   type: string
-              required:
-              - configurableField
+                isTemplate:
+                  description: If true, then this database can be cloned by any user with CREATEDB privileges; if false (the default), then only superusers or the owner of the database can clone it.
+                  type: boolean
+                lcCType:
+                  description: Character classification (LC_CTYPE) to use in the new database. This affects the categorization of characters, e.g. lower, upper and digit. The default is to use the character classification of the template database. See below for additional restrictions.
+                  type: string
+                lcCollate:
+                  description: Collation order (LC_COLLATE) to use in the new database. This affects the sort order applied to strings, e.g. in queries with ORDER BY, as well as the order used in indexes on text columns. The default is to use the collation order of the template database. See below for additional restrictions.
+                  type: string
+                owner:
+                  description: The role name of the user who will own the new database, or DEFAULT to use the default (namely, the user executing the command). To create a database owned by another role, you must be a direct or indirect member of that role, or be a superuser.
+                  type: string
+                tablespace:
+                  description: The name of the tablespace that will be associated with the new database, or DEFAULT to use the template database's tablespace. This tablespace will be the default tablespace used for objects created in this database. See CREATE TABLESPACE for more information.
+                  type: string
+                template:
+                  description: The name of the template from which to create the new database, or DEFAULT to use the default template (template1).
+                  type: string
               type: object
             providerConfigRef:
               description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
@@ -94,14 +112,8 @@ spec:
           - forProvider
           type: object
         status:
-          description: A MyTypeStatus represents the observed state of a MyType.
+          description: A DatabaseStatus represents the observed state of a Database.
           properties:
-            atProvider:
-              description: MyTypeObservation are the observable fields of a MyType.
-              properties:
-                observableField:
-                  type: string
-              type: object
             conditions:
               description: Conditions of the resource.
               items:

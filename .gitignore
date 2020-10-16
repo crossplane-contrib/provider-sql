@@ -3,3 +3,6 @@
 /.vendor-new
 .vscode
 
+.cache
+.work
+_output

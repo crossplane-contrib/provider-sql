@@ -14,23 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package postgresql
 
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
-	"github.com/crossplane/provider-template/pkg/controller/config"
-	"github.com/crossplane/provider-template/pkg/controller/mytype"
+	"github.com/negz/provider-sql/pkg/controller/postgresql/config"
+	"github.com/negz/provider-sql/pkg/controller/postgresql/database"
 )
 
-// Setup creates all Template controllers with the supplied logger and adds them to
-// the supplied manager.
+// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// them to the supplied manager.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
 		config.Setup,
-		mytype.Setup,
+		database.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err

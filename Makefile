@@ -1,40 +1,75 @@
-# Set the shell to bash always
-SHELL := /bin/bash
+# Setup Project
+PROJECT_NAME := provider-sql
+PROJECT_REPO := github.com/negz/$(PROJECT_NAME)
 
-# Options
-ORG_NAME=crossplane
-PROVIDER_NAME=provider-template
+PLATFORMS ?= linux_amd64 linux_arm64
+-include build/makelib/common.mk
 
-build: generate test
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o ./bin/$(PROVIDER_NAME)-controller cmd/provider/main.go
+# Setup Output
+-include build/makelib/output.mk
 
-image: generate test
-	docker build . -t $(ORG_NAME)/$(PROVIDER_NAME):latest -f cluster/Dockerfile
+# Setup Go
+NPROCS ?= 1
+GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
+GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
+GO_LDFLAGS += -X $(GO_PROJECT)/pkg/version.Version=$(VERSION)
+GO_SUBDIRS += cmd pkg apis
+GO111MODULE = on
+-include build/makelib/golang.mk
 
-image-push:
-	docker push $(ORG_NAME)/$(PROVIDER_NAME):latest
+# Setup Kubernetes tools
+-include build/makelib/k8s_tools.mk
 
-run: generate
-	kubectl apply -f package/crds/ -R
-	go run cmd/provider/main.go -d
+# Setup Images
+DOCKER_REGISTRY = negz
+IMAGES = provider-sql-controller
+-include build/makelib/image.mk
 
-all: image image-push install
+fallthrough: submodules
+	@echo Initial setup complete. Running make again . . .
+	@make
 
-generate:
-	go generate ./...
+crds.clean:
+	@$(INFO) cleaning generated CRDs
+	@find package/crds -name *.yaml -exec sed -i.sed -e '1,2d' {} \; || $(FAIL)
+	@find package/crds -name *.yaml.sed -delete || $(FAIL)
+	@$(OK) cleaned generated CRDs
 
-lint:
-	$(LINT) run
+generate: crds.clean
 
-tidy:
-	go mod tidy
+# Ensure a PR is ready for review.
+reviewable: generate lint
+	@go mod tidy
 
-test:
-	go test -v ./...
+# Ensure branch is clean.
+check-diff: reviewable
+	@$(INFO) checking that branch is clean
+	@test -z "$$(git status --porcelain)" || $(FAIL)
+	@$(OK) branch is clean
 
-# Tools
+# Update the submodules, such as the common build scripts.
+submodules:
+	@git submodule sync
+	@git submodule update --init --recursive
 
-KIND=$(shell which kind)
-LINT=$(shell which golangci-lint)
+.PHONY: reviewable submodules fallthrough run crds.clean
 
-.PHONY: generate tidy lint clean build image all run
+# ====================================================================================
+# Special Targets
+
+define CROSSPLANE_MAKE_HELP
+Crossplane Targets:
+    reviewable            Ensure a PR is ready for review.
+    submodules            Update the submodules, such as the common build scripts.
+
+endef
+# The reason CROSSPLANE_MAKE_HELP is used instead of CROSSPLANE_HELP is because the crossplane
+# binary will try to use CROSSPLANE_HELP if it is set, and this is for something different.
+export CROSSPLANE_MAKE_HELP
+
+crossplane.help:
+	@echo "$$CROSSPLANE_MAKE_HELP"
+
+help-special: crossplane.help
+
+.PHONY: crossplane.help help-special
