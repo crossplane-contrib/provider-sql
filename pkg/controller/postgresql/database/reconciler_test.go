@@ -533,7 +533,7 @@ func TestDelete(t *testing.T) {
 			},
 			want: errors.New(errNotDatabase),
 		},
-		"ErrAlterIsTemplate": {
+		"ErrDropDB": {
 			reason: "Errors dropping a database should be returned",
 			fields: fields{
 				db: &mockDB{
@@ -543,13 +543,7 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Database{
-					Spec: v1alpha1.DatabaseSpec{
-						ForProvider: v1alpha1.DatabaseParameters{
-							IsTemplate: new(bool),
-						},
-					},
-				},
+				mg: &v1alpha1.Database{},
 			},
 			want: errors.Wrap(errBoom, errDropDB),
 		},
