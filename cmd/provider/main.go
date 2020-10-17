@@ -20,7 +20,9 @@ import (
 	"os"
 	"path/filepath"
 
+	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+
 	"gopkg.in/alecthomas/kingpin.v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"

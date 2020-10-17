@@ -14,23 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package mysql
 
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
-	"github.com/negz/provider-sql/pkg/controller/mysql"
-	"github.com/negz/provider-sql/pkg/controller/postgresql"
+	"github.com/negz/provider-sql/pkg/controller/mysql/config"
+	"github.com/negz/provider-sql/pkg/controller/mysql/database"
 )
 
-// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// Setup creates all MySQL controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
-		mysql.Setup,
-		postgresql.Setup,
+		config.Setup,
+		database.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err

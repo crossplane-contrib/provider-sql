@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/crossplane/crossplane-runtime v0.10.1-0.20201016030714-9c92df6bc3b8
 	github.com/crossplane/crossplane-tools v0.0.0-20201007233256-88b291e145bb
+	github.com/go-sql-driver/mysql v1.5.0
 	github.com/google/go-cmp v0.5.0
 	github.com/lib/pq v1.8.0
 	github.com/mattn/go-isatty v0.0.12 // indirect

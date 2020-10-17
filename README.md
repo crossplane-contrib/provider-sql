@@ -30,4 +30,29 @@ spec:
   forProvider: {}
 ```
 
+## MySQL
+
+To create a MySQL database named 'example':
+
+```yaml
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: MySQLConnectionSecret
+    connectionSecretRef:
+      namespace: default
+      name: db-conn
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: example
+spec:
+  forProvider: {}
+```
+
 [Crossplane]: https://crossplane.io
