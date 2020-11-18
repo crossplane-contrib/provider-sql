@@ -23,6 +23,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/config"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/user"
 )
 
 // Setup creates all MySQL controllers with the supplied logger and adds
@@ -31,6 +32,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
 		config.Setup,
 		database.Setup,
+		user.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err

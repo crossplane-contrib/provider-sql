@@ -1,0 +1,14 @@
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example
+spec:
+  #Using and existing password:
+  # forProvider:
+  #   passwordSecretRef:
+  #     name: example-pw
+  #     namespace: default
+  #     key: password
+  writeConnectionSecretToRef:
+    name: example-user-secret
+    namespace: crossplane-system
