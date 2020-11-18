@@ -66,8 +66,17 @@ var (
 	DatabaseGroupVersionKind = SchemeGroupVersion.WithKind(DatabaseKind)
 )
 
+// User type metadata.
+var (
+	UserKind             = reflect.TypeOf(User{}).Name()
+	UserGroupKind        = schema.GroupKind{Group: Group, Kind: UserKind}.String()
+	UserKindAPIVersion   = UserKind + "." + SchemeGroupVersion.String()
+	UserGroupVersionKind = SchemeGroupVersion.WithKind(UserKind)
+)
+
 func init() {
 	SchemeBuilder.Register(&ProviderConfig{}, &ProviderConfigList{})
 	SchemeBuilder.Register(&ProviderConfigUsage{}, &ProviderConfigUsageList{})
 	SchemeBuilder.Register(&Database{}, &DatabaseList{})
+	SchemeBuilder.Register(&User{}, &UserList{})
 }
