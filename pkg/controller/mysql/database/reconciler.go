@@ -18,11 +18,8 @@ package database
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"strings"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,69 +34,20 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/sql"
 )
 
 const (
-	errNotDatabase  = "managed resource is not a Database custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errSelectDB = "cannot select database"
-	errCreateDB = "cannot create database"
-	errDropDB   = "cannot drop database"
+	errNotDatabase = "managed resource is not a Database custom resource"
+	errSelectDB    = "cannot select database"
+	errCreateDB    = "cannot create database"
+	errDropDB      = "cannot drop database"
 )
-
-// A Query that may be run against a DB.
-type Query struct {
-	String     string
-	Parameters []interface{}
-}
-
-// A DB client.
-type DB interface {
-	Exec(ctx context.Context, q Query) error
-	Scan(ctx context.Context, q Query, dest ...interface{}) error
-}
-
-// A MySQLDB client.
-type MySQLDB struct {
-	dsn string
-}
-
-// NewMySQLDB returns a new MySQL database client.
-func NewMySQLDB(creds map[string][]byte) DB {
-	// TODO(negz): Support alternative connection secret formats?
-	return MySQLDB{dsn: fmt.Sprintf("%s:%s@tcp(%s:%s)/",
-		creds[runtimev1alpha1.ResourceCredentialsSecretUserKey],
-		creds[runtimev1alpha1.ResourceCredentialsSecretPasswordKey],
-		creds[runtimev1alpha1.ResourceCredentialsSecretEndpointKey],
-		creds[runtimev1alpha1.ResourceCredentialsSecretPortKey])}
-}
-
-// Exec the supplied query.
-func (c MySQLDB) Exec(ctx context.Context, q Query) error {
-	d, err := sql.Open("mysql", c.dsn)
-	if err != nil {
-		return err
-	}
-	defer d.Close() //nolint:errcheck
-
-	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
-	return err
-}
-
-// Scan the results of the supplied query into the supplied destination.
-func (c MySQLDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
-	if err != nil {
-		return err
-	}
-	defer db.Close() //nolint:errcheck
-
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
-}
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
@@ -108,7 +56,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: NewMySQLDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: sql.NewMySQLDB}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -121,7 +69,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte) DB
+	newDB func(creds map[string][]byte) sql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -157,7 +105,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	return &external{db: c.newDB(s.Data)}, nil
 }
 
-type external struct{ db DB }
+type external struct{ db sql.DB }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Database)
@@ -167,8 +115,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	var name string
 	query := "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?"
-	err := c.db.Scan(ctx, Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}}, &name)
-	if err == sql.ErrNoRows {
+	err := c.db.Scan(ctx, sql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}}, &name)
+	if sql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
@@ -193,7 +141,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, Query{String: "CREATE DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
+	err := c.db.Exec(ctx, sql.Query{String: "CREATE DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
 }
 
@@ -208,18 +156,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, Query{String: "DROP DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(resource.Ignore(IsDoesNotExist, err), errDropDB)
-}
-
-// IsDoesNotExist returns true if the supplied error indicates a database does
-// not exist.
-func IsDoesNotExist(err error) bool {
-	merr, ok := err.(*mysql.MySQLError)
-	if !ok {
-		return false
-	}
-	return merr.Number == 1008 // Can't drop database; database doesn't exist.
+	err := c.db.Exec(ctx, sql.Query{String: "DROP DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
+	return errors.Wrap(resource.Ignore(c.db.IsDoesNotExist, err), errDropDB)
 }
 
 func quoteIdentifier(id string) string {
