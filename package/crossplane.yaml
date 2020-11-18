@@ -1,0 +1,10 @@
+apiVersion: meta.pkg.crossplane.io/v1alpha1
+kind: Provider
+metadata:
+  name: provider-sql
+  annotations:
+    descriptionShort: |
+      The SQL Crossplane provider enables management of SQL servers.
+spec:
+  controller:
+    image: crossplane/provider-sql-controller:VERSION
