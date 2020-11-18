@@ -36,7 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
-	"github.com/negz/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 )
 
 const (

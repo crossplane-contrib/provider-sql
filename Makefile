@@ -1,6 +1,6 @@
 # Setup Project
 PROJECT_NAME := provider-sql
-PROJECT_REPO := github.com/negz/$(PROJECT_NAME)
+PROJECT_REPO := github.com/crossplane-contrib/$(PROJECT_NAME)
 
 PLATFORMS ?= linux_amd64 linux_arm64
 -include build/makelib/common.mk
@@ -21,7 +21,7 @@ GO111MODULE = on
 -include build/makelib/k8s_tools.mk
 
 # Setup Images
-DOCKER_REGISTRY = negz
+DOCKER_REGISTRY = crossplane
 IMAGES = provider-sql-controller
 -include build/makelib/image.mk
 
