@@ -20,8 +20,8 @@ package apis
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
-	mysql "github.com/negz/provider-sql/apis/mysql/v1alpha1"
-	postgresql "github.com/negz/provider-sql/apis/postgresql/v1alpha1"
+	mysql "github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	postgresql "github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 )
 
 func init() {
