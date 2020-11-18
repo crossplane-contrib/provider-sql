@@ -21,8 +21,8 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
-	"github.com/negz/provider-sql/pkg/controller/mysql/config"
-	"github.com/negz/provider-sql/pkg/controller/mysql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/config"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/database"
 )
 
 // Setup creates all MySQL controllers with the supplied logger and adds

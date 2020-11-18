@@ -21,8 +21,8 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
-	"github.com/negz/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
