@@ -99,38 +99,3 @@ type ProviderConfigUsageList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ProviderConfigUsage `json:"items"`
 }
-
-// A DatabaseSpec defines the desired state of a Database.
-type DatabaseSpec struct {
-	runtimev1alpha1.ResourceSpec `json:",inline"`
-}
-
-// A DatabaseStatus represents the observed state of a Database.
-type DatabaseStatus struct {
-	runtimev1alpha1.ResourceStatus `json:",inline"`
-}
-
-// +kubebuilder:object:root=true
-
-// A Database represents the declarative state of a MySQL database.
-// +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:resource:scope=Cluster
-type Database struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   DatabaseSpec   `json:"spec"`
-	Status DatabaseStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// DatabaseList contains a list of Database
-type DatabaseList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Database `json:"items"`
-}
