@@ -1,3 +1,4 @@
+# ====================================================================================
 # Setup Project
 PROJECT_NAME := provider-sql
 PROJECT_REPO := github.com/crossplane-contrib/$(PROJECT_NAME)
@@ -22,7 +23,7 @@ GO111MODULE = on
 
 # Setup Images
 DOCKER_REGISTRY = crossplane
-IMAGES = provider-sql-controller
+IMAGES = provider-sql provider-sql-controller
 -include build/makelib/image.mk
 
 fallthrough: submodules
@@ -47,12 +48,44 @@ check-diff: reviewable
 	@test -z "$$(git status --porcelain)" || $(FAIL)
 	@$(OK) branch is clean
 
+# integration tests
+e2e.run: test-integration
+
+# Run integration tests.
+test-integration: $(KIND) $(KUBECTL) $(HELM3)
+	@$(INFO) running integration tests using kind $(KIND_VERSION)
+	@$(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
+	@$(OK) integration tests passed
+
 # Update the submodules, such as the common build scripts.
 submodules:
 	@git submodule sync
 	@git submodule update --init --recursive
 
-.PHONY: reviewable submodules fallthrough run crds.clean
+# This is for running out-of-cluster locally, and is for convenience. Running
+# this make target will print out the command which was used. For more control,
+# try running the binary directly with different arguments.
+run: go.build
+	@$(INFO) Running Crossplane locally out-of-cluster . . .
+	@# To see other arguments that can be provided, run the command with --help instead
+	$(GO_OUT_DIR)/$(PROJECT_NAME) --debug
+
+dev: $(KIND) $(KUBECTL)
+	@$(INFO) Creating kind cluster
+	@$(KIND) create cluster --name=provider-sql-dev
+	@$(KUBECTL) cluster-info --context kind-provider-sql-dev
+	@$(INFO) Installing Crossplane CRDs
+	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
+	@$(INFO) Installing Provider SQL CRDs
+	@$(KUBECTL) apply -R -f package/crds
+	@$(INFO) Starting Provider SQL controllers
+	@$(GO) run cmd/provider/main.go --debug
+
+dev-clean: $(KIND) $(KUBECTL)
+	@$(INFO) Deleting kind cluster
+	@$(KIND) delete cluster --name=provider-sql-dev
+
+.PHONY: reviewable submodules fallthrough test-integration run crds.clean dev dev-clean
 
 # ====================================================================================
 # Special Targets
@@ -61,6 +94,7 @@ define CROSSPLANE_MAKE_HELP
 Crossplane Targets:
     reviewable            Ensure a PR is ready for review.
     submodules            Update the submodules, such as the common build scripts.
+    run                   Run crossplane locally, out-of-cluster. Useful for development.
 
 endef
 # The reason CROSSPLANE_MAKE_HELP is used instead of CROSSPLANE_HELP is because the crossplane
