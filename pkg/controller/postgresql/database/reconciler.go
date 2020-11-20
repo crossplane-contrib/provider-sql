@@ -18,7 +18,6 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -39,15 +38,16 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/sql"
 )
 
 const (
-	errNotDatabase  = "managed resource is not a Database custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
+	errNotDatabase       = "managed resource is not a Database custom resource"
 	errSelectDB          = "cannot select database"
 	errCreateDB          = "cannot create database"
 	errAlterDBOwner      = "cannot alter database owner"
@@ -57,56 +57,6 @@ const (
 	errDropDB            = "cannot drop database"
 )
 
-// A Query that may be run against a DB.
-type Query struct {
-	String     string
-	Parameters []interface{}
-}
-
-// A DB client.
-type DB interface {
-	Exec(ctx context.Context, q Query) error
-	Scan(ctx context.Context, q Query, dest ...interface{}) error
-}
-
-// A PostgresDB client.
-type PostgresDB struct {
-	dsn string
-}
-
-// NewPostgresDB returns a new PostgreSQL database client.
-func NewPostgresDB(creds map[string][]byte) DB {
-	// TODO(negz): Support alternative connection secret formats?
-	return PostgresDB{dsn: "postgres://" +
-		string(creds[runtimev1alpha1.ResourceCredentialsSecretUserKey]) + ":" +
-		string(creds[runtimev1alpha1.ResourceCredentialsSecretPasswordKey]) + "@" +
-		string(creds[runtimev1alpha1.ResourceCredentialsSecretEndpointKey]) + ":" +
-		string(creds[runtimev1alpha1.ResourceCredentialsSecretPortKey])}
-}
-
-// Exec the supplied query.
-func (c PostgresDB) Exec(ctx context.Context, q Query) error {
-	d, err := sql.Open("postgres", c.dsn)
-	if err != nil {
-		return err
-	}
-	defer d.Close() //nolint:errcheck
-
-	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
-	return err
-}
-
-// Scan the results of the supplied query into the supplied destination.
-func (c PostgresDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
-	db, err := sql.Open("postgres", c.dsn)
-	if err != nil {
-		return err
-	}
-	defer db.Close() //nolint:errcheck
-
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	name := managed.ControllerName(v1alpha1.DatabaseGroupKind)
@@ -114,7 +64,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: NewPostgresDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: sql.NewPostgresDB}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -127,7 +77,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte) DB
+	newDB func(creds map[string][]byte) sql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -163,7 +113,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	return &external{db: c.newDB(s.Data)}, nil
 }
 
-type external struct{ db DB }
+type external struct{ db sql.DB }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Database)
@@ -195,7 +145,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"FROM pg_database AS db, pg_tablespace AS ts " +
 		"WHERE db.datname=$1 AND db.dattablespace = ts.oid"
 
-	err := c.db.Scan(ctx, Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
+	err := c.db.Scan(ctx, sql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
 		observed.Owner,
 		observed.Encoding,
 		observed.LCCollate,
@@ -205,7 +155,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		observed.IsTemplate,
 		observed.Tablespace,
 	)
-	if err == sql.ErrNoRows {
+	if sql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
@@ -272,7 +222,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *cr.Spec.ForProvider.IsTemplate))
 	}
 
-	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, Query{String: b.String()}), errCreateDB)
+	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, sql.Query{String: b.String()}), errCreateDB)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -285,7 +235,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.Owner != nil {
-		query := Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -294,7 +244,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.ConnectionLimit != nil {
-		query := Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
+		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.ConnectionLimit)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -303,7 +253,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.AllowConnections != nil {
-		query := Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
+		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.AllowConnections)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -312,7 +262,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.IsTemplate != nil {
-		query := Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
+		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.IsTemplate)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -329,8 +279,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, Query{String: "DROP DATABASE " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(resource.Ignore(IsDoesNotExist, err), errDropDB)
+	err := c.db.Exec(ctx, sql.Query{String: "DROP DATABASE " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
+	return errors.Wrap(resource.Ignore(c.db.IsDoesNotExist, err), errDropDB)
 }
 
 func upToDate(observed, desired v1alpha1.DatabaseParameters) bool {
@@ -389,15 +339,4 @@ func quoteIfLiteral(literal string) string {
 		return literal
 	}
 	return pq.QuoteLiteral(literal)
-}
-
-// IsDoesNotExist returns true if the supplied error indicates a database does
-// not exist.
-func IsDoesNotExist(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// TODO(negz): Is there a less lame way to determine this?
-	return strings.HasSuffix(err.Error(), "does not exist")
 }
