@@ -32,18 +32,24 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
+
+	common "github.com/crossplane-contrib/provider-sql/pkg/clients/sql"
 )
 
 type mockDB struct {
-	MockExec func(ctx context.Context, q Query) error
-	MockScan func(ctx context.Context, q Query, dest ...interface{}) error
+	MockExec           func(ctx context.Context, q common.Query) error
+	MockScan           func(ctx context.Context, q common.Query, dest ...interface{}) error
+	MockIsDoesNotExist func(err error) bool
 }
 
-func (m mockDB) Exec(ctx context.Context, q Query) error {
+func (m mockDB) Exec(ctx context.Context, q common.Query) error {
 	return m.MockExec(ctx, q)
 }
-func (m mockDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
+func (m mockDB) Scan(ctx context.Context, q common.Query, dest ...interface{}) error {
 	return m.MockScan(ctx, q, dest...)
+}
+func (m mockDB) IsDoesNotExist(err error) bool {
+	return m.MockIsDoesNotExist(err)
 }
 
 func TestConnect(t *testing.T) {
@@ -52,7 +58,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte) DB
+		newDB func(creds map[string][]byte) common.DB
 	}
 
 	type args struct {
@@ -168,7 +174,7 @@ func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db DB
+		db common.DB
 	}
 
 	type args struct {
@@ -200,7 +206,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return ResourceExists: false when no database is found",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return sql.ErrNoRows },
+					MockScan: func(ctx context.Context, q common.Query, dest ...interface{}) error { return sql.ErrNoRows },
 				},
 			},
 			args: args{
@@ -214,7 +220,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return any errors encountered while trying to select the database",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return errBoom },
+					MockScan: func(ctx context.Context, q common.Query, dest ...interface{}) error { return errBoom },
 				},
 			},
 			args: args{
@@ -228,7 +234,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can successfully select our database",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q Query, dest ...interface{}) error { return nil },
+					MockScan: func(ctx context.Context, q common.Query, dest ...interface{}) error { return nil },
 				},
 			},
 			args: args{
@@ -263,7 +269,7 @@ func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db DB
+		db common.DB
 	}
 
 	type args struct {
@@ -295,7 +301,7 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q common.Query) error { return errBoom },
 				},
 			},
 			args: args{
@@ -309,7 +315,7 @@ func TestCreate(t *testing.T) {
 			reason: "No error should be returned when we successfully create a database",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q Query) error { return nil },
+					MockExec: func(ctx context.Context, q common.Query) error { return nil },
 				},
 			},
 			args: args{
@@ -339,7 +345,7 @@ func TestDelete(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db DB
+		db common.DB
 	}
 
 	type args struct {
@@ -364,9 +370,10 @@ func TestDelete(t *testing.T) {
 			reason: "Errors dropping a database should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q Query) error {
+					MockExec: func(ctx context.Context, q common.Query) error {
 						return errBoom
 					},
+					MockIsDoesNotExist: func(err error) bool { return false },
 				},
 			},
 			args: args{
