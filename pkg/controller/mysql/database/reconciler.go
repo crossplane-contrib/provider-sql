@@ -18,7 +18,6 @@ package database
 
 import (
 	"context"
-	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +33,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -56,7 +56,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: xsql.NewMySQLDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -141,7 +141,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
+	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))})
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
 }
 
@@ -156,10 +156,6 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + quoteIdentifier(meta.GetExternalName(cr))})
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))})
 	return errors.Wrap(err, errDropDB)
-}
-
-func quoteIdentifier(id string) string {
-	return "`" + strings.ReplaceAll(id, "`", "``") + "`"
 }

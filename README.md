@@ -53,8 +53,7 @@ apiVersion: mysql.sql.crossplane.io/v1alpha1
 kind: Database
 metadata:
   name: example
-spec:
-  forProvider: {}
+spec: {}
 ```
 
 ### User
@@ -74,5 +73,23 @@ spec:
 
 If no password is provided in `.spec.forProvider.passwordSecretRef`, a random one will be generated.
 
+### Grant
+
+To create a MySQL grant:
+
+```yaml
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    userRef:
+      name: example
+    databaseRef:
+      name: example
+```
 
 [Crossplane]: https://crossplane.io
