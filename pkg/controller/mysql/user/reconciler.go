@@ -19,7 +19,6 @@ package user
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -37,6 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -62,7 +62,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: xsql.NewMySQLDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithShortWait(10*time.Second),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
@@ -127,7 +127,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	var name string
-	username, host := splitUserHost(meta.GetExternalName(cr))
+	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
 	query := "SELECT User FROM mysql.user WHERE User = ? AND Host = ?"
 	err := c.db.Scan(ctx, xsql.Query{
@@ -163,7 +163,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
 
-	username, host := splitUserHost(meta.GetExternalName(cr))
+	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -174,7 +174,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalCreation{}, err
 		}
 	}
-	query := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", quoteValue(username), quoteValue(host), quoteValue(pw))
+	query := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: query,
 	}); err != nil {
@@ -197,14 +197,14 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	username, host := splitUserHost(meta.GetExternalName(cr))
+	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	pw, changed, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
 	if changed {
-		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", quoteValue(username), quoteValue(host), quoteValue(pw))
+		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
@@ -229,9 +229,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
-	username, host := splitUserHost(meta.GetExternalName(cr))
+	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", quoteValue(username), quoteValue(host)),
+		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host)),
 	}); err != nil {
 		return errors.Wrap(err, errDropUser)
 	}
@@ -241,19 +241,4 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.Wrap(err, errFlushPriv)
 	}
 	return nil
-}
-
-func quoteValue(id string) string {
-	return "'" + strings.ReplaceAll(id, "'", "''") + "'"
-}
-
-func splitUserHost(user string) (username, host string) {
-	username = user
-	host = "%"
-	if strings.Contains(user, "@") {
-		parts := strings.SplitN(user, "@", 2)
-		username = parts[0]
-		host = parts[1]
-	}
-	return username, host
 }

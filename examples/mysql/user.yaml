@@ -3,12 +3,11 @@ kind: User
 metadata:
   name: example-user
 spec:
-  #Using and existing password:
-  # forProvider:
-  #   passwordSecretRef:
-  #     name: example-pw
-  #     namespace: default
-  #     key: password
+  forProvider:
+    passwordSecretRef:
+      name: example-pw
+      namespace: default
+      key: password
   writeConnectionSecretToRef:
-    name: example-user-secret
-    namespace: crossplane-system
+    name: example-connection-secret
+    namespace: default

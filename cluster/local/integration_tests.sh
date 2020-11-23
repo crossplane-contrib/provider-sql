@@ -345,49 +345,55 @@ echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" apply -f -
 
 echo_step "creating MySQL Database resource"
 # create DB
-DATABASE_YAML="$( cat <<EOF
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: Database
-metadata:
-  name: example-db
-spec: {}
-EOF
-)"
-echo "${DATABASE_YAML}" | "${KUBECTL}" apply -f -
+"${KUBECTL}" apply -f ${projectdir}/examples/mysql/database.yaml
 
 echo_info "check if is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready database.mysql.sql.crossplane.io/example-db
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/database.yaml
 echo_step_completed
 
 echo_step "creating MySQL User resource"
 # create user
-USER_YAML="$( cat <<EOF
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: User
-metadata:
-  name: example-user
-spec:
-  writeConnectionSecretToRef:
-    name: example-connection-secret
-    namespace: default
-  forProvider: {}
-EOF
-)"
-echo "${USER_YAML}" | "${KUBECTL}" apply -f -
+user_pw="asdf1234"
+"${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}"
+"${KUBECTL}" apply -f ${projectdir}/examples/mysql/user.yaml
 
 echo_info "check if is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready user.mysql.sql.crossplane.io/example-user
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/user.yaml
 echo_step_completed
 
 echo_info "check if connection secret exists"
-"${KUBECTL}" get secret example-connection-secret
+pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
+[ "${pw}" == "${user_pw}" ]
+echo_step_completed
+
+echo_step "update MySQL User password"
+user_pw="newpassword"
+"${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --dry-run -oyaml | \
+  "${KUBECTL}" apply -f -
+
+# trigger reconcile
+"${KUBECTL}" annotate -f ${projectdir}/examples/mysql/user.yaml reconcile=now
+
+sleep 3
+
+echo_info "check if connection secret has been updated"
+pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
+[ "${pw}" == "${user_pw}" ]
+echo_step_completed
+
+echo_step "creating MySQL Grant resource"
+# create grant
+"${KUBECTL}" apply -f ${projectdir}/examples/mysql/grant.yaml
+
+echo_info "check if is ready"
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/grant.yaml
 echo_step_completed
 
 # uninstall
 echo_step "uninstalling ${PROJECT_NAME}"
-
-echo "${USER_YAML}" | "${KUBECTL}" delete -f -
-echo "${DATABASE_YAML}" | "${KUBECTL}" delete -f -
+"${KUBECTL}" delete -f ${projectdir}/examples/mysql/grant.yaml
+"${KUBECTL}" delete -f ${projectdir}/examples/mysql/database.yaml
+"${KUBECTL}" delete -f ${projectdir}/examples/mysql/user.yaml
 echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" delete -f -
 echo "${INSTALL_YAML}" | "${KUBECTL}" delete -f -
 

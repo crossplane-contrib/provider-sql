@@ -3,6 +3,7 @@ module github.com/crossplane-contrib/provider-sql
 go 1.13
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/crossplane/crossplane-runtime v0.10.1-0.20201016030714-9c92df6bc3b8
 	github.com/crossplane/crossplane-tools v0.0.0-20201007233256-88b291e145bb
 	github.com/go-sql-driver/mysql v1.5.0
@@ -16,6 +17,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.0-20200605160147-a5ece683394c // indirect
 	k8s.io/api v0.18.8
 	k8s.io/apimachinery v0.18.8
+	k8s.io/utils v0.0.0-20200603063816-c1c6865ac451
 	sigs.k8s.io/controller-runtime v0.6.2
 	sigs.k8s.io/controller-tools v0.3.0
 )

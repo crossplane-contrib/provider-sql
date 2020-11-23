@@ -23,6 +23,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/config"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/grant"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/user"
 )
 
@@ -33,6 +34,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		config.Setup,
 		database.Setup,
 		user.Setup,
+		grant.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
