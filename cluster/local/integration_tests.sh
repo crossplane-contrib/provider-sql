@@ -152,6 +152,7 @@ PACKAGE_NAME="provider-sql"
 # cleanup on exit
 if [ "$skipcleanup" != true ]; then
   function cleanup {
+    "${KUBECTL}" -n "${CROSSPLANE_NAMESPACE}" logs -l pkg.crossplane.io/revision || true
     echo_step "Cleaning up..."
     export KUBECONFIG=
     "${KIND}" delete cluster --name="${K8S_CLUSTER}"
@@ -159,6 +160,8 @@ if [ "$skipcleanup" != true ]; then
 
   trap cleanup EXIT
 fi
+
+export KUBECONFIG=$(mktemp)
 
 # setup package cache
 echo_step "setting up local package cache"
@@ -272,10 +275,20 @@ echo_step "installing ${PROJECT_NAME} into \"${CROSSPLANE_NAMESPACE}\" namespace
 
 INSTALL_YAML="$( cat <<EOF
 apiVersion: pkg.crossplane.io/v1alpha1
+kind: ControllerConfig
+metadata:
+  name: debug-config
+spec:
+  args:
+  - --debug
+---
+apiVersion: pkg.crossplane.io/v1alpha1
 kind: Provider
 metadata:
   name: "${PACKAGE_NAME}"
 spec:
+  controllerConfigRef:
+    name: debug-config
   package: "${PACKAGE_NAME}"
   packagePullPolicy: Never
 EOF
@@ -297,8 +310,85 @@ echo
 echo "--- pods ---"
 check_pods 3
 
+# install MariaDB chart
+echo_step "installing MariaDB Helm chart into default namespace"
+mariadb_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+
+"${HELM3}" repo add bitnami https://charts.bitnami.com/bitnami
+
+"${HELM3}" install mariadb bitnami/mariadb \
+    --version 9.0.1 \
+    --set auth.rootPassword="${mariadb_root_pw}" \
+    --wait
+
+# create ProviderConfig
+"${KUBECTL}" create secret generic mariadb-creds \
+    --from-literal username="root" \
+    --from-literal password="${mariadb_root_pw}" \
+    --from-literal endpoint="mariadb.default.svc.cluster.local" \
+    --from-literal port="3306"
+
+PROVIDER_CONFIG_YAML="$( cat <<EOF
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: MySQLConnectionSecret
+    connectionSecretRef:
+      namespace: default
+      name: mariadb-creds
+EOF
+)"
+echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" apply -f -
+
+echo_step "creating MySQL Database resource"
+# create DB
+DATABASE_YAML="$( cat <<EOF
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: example
+spec: {}
+EOF
+)"
+echo "${DATABASE_YAML}" | "${KUBECTL}" apply -f -
+
+echo_info "check if is ready"
+"${KUBECTL}" wait --timeout 2m --for condition=Ready database.mysql.sql.crossplane.io/example
+echo_step_completed
+
+echo_step "creating MySQL User resource"
+# create user
+USER_YAML="$( cat <<EOF
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example
+spec:
+  writeConnectionSecretToRef:
+    name: example-connection-secret
+    namespace: default
+  forProvider: {}
+EOF
+)"
+echo "${USER_YAML}" | "${KUBECTL}" apply -f -
+
+echo_info "check if is ready"
+"${KUBECTL}" wait --timeout 2m --for condition=Ready user.mysql.sql.crossplane.io/example
+echo_step_completed
+
+echo_info "check if connection secret exists"
+"${KUBECTL}" get secret example-connection-secret
+echo_step_completed
+
+# uninstall
 echo_step "uninstalling ${PROJECT_NAME}"
 
+echo "${USER_YAML}" | "${KUBECTL}" delete -f -
+echo "${DATABASE_YAML}" | "${KUBECTL}" delete -f -
+echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" delete -f -
 echo "${INSTALL_YAML}" | "${KUBECTL}" delete -f -
 
 # check pods deleted

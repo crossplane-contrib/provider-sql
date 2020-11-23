@@ -25,7 +25,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,7 +38,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/sql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 const (
@@ -64,7 +64,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: sql.NewPostgresDB}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: xsql.NewPostgresDB}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -77,7 +77,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte) sql.DB
+	newDB func(creds map[string][]byte) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -105,7 +105,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.New(errNoSecretRef)
 	}
 
-	s := &v1.Secret{}
+	s := &corev1.Secret{}
 	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
 		return nil, errors.Wrap(err, errGetSecret)
 	}
@@ -113,7 +113,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	return &external{db: c.newDB(s.Data)}, nil
 }
 
-type external struct{ db sql.DB }
+type external struct{ db xsql.DB }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Database)
@@ -145,7 +145,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"FROM pg_database AS db, pg_tablespace AS ts " +
 		"WHERE db.datname=$1 AND db.dattablespace = ts.oid"
 
-	err := c.db.Scan(ctx, sql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
 		observed.Owner,
 		observed.Encoding,
 		observed.LCCollate,
@@ -155,7 +155,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		observed.IsTemplate,
 		observed.Tablespace,
 	)
-	if sql.IsNoRows(err) {
+	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
@@ -222,7 +222,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *cr.Spec.ForProvider.IsTemplate))
 	}
 
-	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, sql.Query{String: b.String()}), errCreateDB)
+	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateDB)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -235,7 +235,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.Owner != nil {
-		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
+		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -244,7 +244,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.ConnectionLimit != nil {
-		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
+		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.ConnectionLimit)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -253,7 +253,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.AllowConnections != nil {
-		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
+		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.AllowConnections)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -262,7 +262,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if cr.Spec.ForProvider.IsTemplate != nil {
-		query := sql.Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
+		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
 			pq.QuoteIdentifier(meta.GetExternalName(cr)),
 			*cr.Spec.ForProvider.IsTemplate)}
 		if err := c.db.Exec(ctx, query); err != nil {
@@ -279,8 +279,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, sql.Query{String: "DROP DATABASE " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(resource.Ignore(c.db.IsDoesNotExist, err), errDropDB)
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
+	return errors.Wrap(err, errDropDB)
 }
 
 func upToDate(observed, desired v1alpha1.DatabaseParameters) bool {
