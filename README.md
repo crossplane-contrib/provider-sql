@@ -32,6 +32,8 @@ spec:
 
 ## MySQL
 
+### Database
+
 To create a MySQL database named 'example':
 
 ```yaml
@@ -54,5 +56,23 @@ metadata:
 spec:
   forProvider: {}
 ```
+
+### User
+
+To create a MySQL user named 'example':
+
+```yaml
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example
+spec:
+  writeConnectionSecretToRef:
+    name: example-user-secret
+    namespace: crossplane-system
+```
+
+If no password is provided in `.spec.forProvider.passwordSecretRef`, a random one will be generated.
+
 
 [Crossplane]: https://crossplane.io
