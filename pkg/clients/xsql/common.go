@@ -1,10 +1,12 @@
-package sql
+package xsql
 
 import (
 	"context"
 	"errors"
 
 	"database/sql"
+
+	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 )
 
 // A Query that may be run against a DB.
@@ -17,7 +19,7 @@ type Query struct {
 type DB interface {
 	Exec(ctx context.Context, q Query) error
 	Scan(ctx context.Context, q Query, dest ...interface{}) error
-	IsDoesNotExist(err error) bool
+	GetConnectionDetails(username, password string) managed.ConnectionDetails
 }
 
 // IsNoRows returns true if the supplied error indicates no rows were returned.

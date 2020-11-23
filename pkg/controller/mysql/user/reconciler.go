@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package database
+package user
 
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +31,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
+	"github.com/crossplane/crossplane-runtime/pkg/password"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
@@ -43,26 +45,30 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotDatabase = "managed resource is not a Database custom resource"
-	errSelectDB    = "cannot select database"
-	errCreateDB    = "cannot create database"
-	errDropDB      = "cannot drop database"
+	errNotUser                 = "managed resource is not a User custom resource"
+	errSelectUser              = "cannot select user"
+	errCreateUser              = "cannot create user"
+	errDropUser                = "cannot drop user"
+	errUpdateUser              = "cannot update user"
+	errFlushPriv               = "cannot flush privileges"
+	errGetPasswordSecretFailed = "cannot get password secret"
 )
 
-// Setup adds a controller that reconciles Database managed resources.
+// Setup adds a controller that reconciles User managed resources.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
-	name := managed.ControllerName(v1alpha1.DatabaseGroupKind)
+	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
+		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: xsql.NewMySQLDB}),
 		managed.WithLogger(l.WithValues("controller", name)),
+		managed.WithShortWait(10*time.Second),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&v1alpha1.Database{}).
+		For(&v1alpha1.User{}).
 		Complete(r)
 }
 
@@ -73,9 +79,9 @@ type connector struct {
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.Database)
+	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return nil, errors.New(errNotDatabase)
+		return nil, errors.New(errNotUser)
 	}
 
 	if err := c.usage.Track(ctx, mg); err != nil {
@@ -102,64 +108,151 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{db: c.newDB(s.Data)}, nil
+	return &external{
+		db:   c.newDB(s.Data),
+		kube: c.kube,
+	}, nil
 }
 
-type external struct{ db xsql.DB }
+type external struct {
+	db   xsql.DB
+	kube client.Client
+}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Database)
+	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDatabase)
+		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
 	var name string
-	query := "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}}, &name)
+	username, host := splitUserHost(meta.GetExternalName(cr))
+
+	query := "SELECT User FROM mysql.user WHERE User = ? AND Host = ?"
+	err := c.db.Scan(ctx, xsql.Query{
+		String: query,
+		Parameters: []interface{}{
+			username,
+			host,
+		},
+	}, &name)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDB)
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
 	cr.SetConditions(runtimev1alpha1.Available())
 
-	return managed.ExternalObservation{
-		ResourceExists: true,
+	_, pwdChanged, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ExternalObservation{}, err
+	}
 
-		// TODO(negz): Support these when we have anything to update.
-		ResourceLateInitialized: false,
-		ResourceUpToDate:        true,
+	return managed.ExternalObservation{
+		ResourceExists:   true,
+		ResourceUpToDate: !pwdChanged,
 	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-
-	cr, ok := mg.(*v1alpha1.Database)
+	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDatabase)
+		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + quoteIdentifier(meta.GetExternalName(cr))})
-	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+	username := meta.GetExternalName(cr)
+	pw, _, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+	if pw == "" {
+		pw, err = password.Generate()
+		if err != nil {
+			return managed.ExternalCreation{}, err
+		}
+	}
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "CREATE USER " + username + " IDENTIFIED BY " + quoteValue(pw),
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
+	}
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "FLUSH PRIVILEGES",
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+	}
+
+	user, _ := splitUserHost(username)
+
+	return managed.ExternalCreation{
+		ConnectionDetails: c.db.GetConnectionDetails(user, pw),
+	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	// TODO(negz): Support updates once we have anything to update.
+	cr, ok := mg.(*v1alpha1.User)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotUser)
+	}
+
+	username := meta.GetExternalName(cr)
+	pw, changed, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	if changed {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "ALTER USER " + username + " IDENTIFIED BY " + quoteValue(pw),
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+		}
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "FLUSH PRIVILEGES",
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		}
+
+		return managed.ExternalUpdate{
+			ConnectionDetails: c.db.GetConnectionDetails(username, pw),
+		}, nil
+	}
 	return managed.ExternalUpdate{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.Database)
+	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return errors.New(errNotDatabase)
+		return errors.New(errNotUser)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + quoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(err, errDropDB)
+	username := meta.GetExternalName(cr)
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "DROP USER IF EXISTS " + username,
+	}); err != nil {
+		return errors.Wrap(err, errDropUser)
+	}
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "FLUSH PRIVILEGES",
+	}); err != nil {
+		return errors.Wrap(err, errFlushPriv)
+	}
+	return nil
 }
 
-func quoteIdentifier(id string) string {
-	return "`" + strings.ReplaceAll(id, "`", "``") + "`"
+func quoteValue(id string) string {
+	return "'" + strings.ReplaceAll(id, "'", "''") + "'"
+}
+
+func splitUserHost(user string) (username, host string) {
+	username = user
+	host = "%"
+	if strings.Contains(user, "@") {
+		parts := strings.SplitN(user, "@", 2)
+		username = parts[0]
+		host = parts[1]
+	}
+	return username, host
 }
