@@ -18,6 +18,7 @@ package user
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -162,7 +163,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
 
-	username := meta.GetExternalName(cr)
+	username, host := splitUserHost(meta.GetExternalName(cr))
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -173,8 +174,9 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalCreation{}, err
 		}
 	}
+	query := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", quoteValue(username), quoteValue(host), quoteValue(pw))
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: "CREATE USER " + username + " IDENTIFIED BY " + quoteValue(pw),
+		String: query,
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
 	}
@@ -184,10 +186,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
 	}
 
-	user, _ := splitUserHost(username)
-
 	return managed.ExternalCreation{
-		ConnectionDetails: c.db.GetConnectionDetails(user, pw),
+		ConnectionDetails: c.db.GetConnectionDetails(username, pw),
 	}, nil
 }
 
@@ -197,15 +197,16 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	username := meta.GetExternalName(cr)
+	username, host := splitUserHost(meta.GetExternalName(cr))
 	pw, changed, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
 	if changed {
+		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", quoteValue(username), quoteValue(host), quoteValue(pw))
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: "ALTER USER " + username + " IDENTIFIED BY " + quoteValue(pw),
+			String: query,
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
@@ -228,9 +229,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
-	username := meta.GetExternalName(cr)
+	username, host := splitUserHost(meta.GetExternalName(cr))
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: "DROP USER IF EXISTS " + username,
+		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", quoteValue(username), quoteValue(host)),
 	}); err != nil {
 		return errors.Wrap(err, errDropUser)
 	}
