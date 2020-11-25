@@ -349,14 +349,14 @@ DATABASE_YAML="$( cat <<EOF
 apiVersion: mysql.sql.crossplane.io/v1alpha1
 kind: Database
 metadata:
-  name: example
+  name: example-db
 spec: {}
 EOF
 )"
 echo "${DATABASE_YAML}" | "${KUBECTL}" apply -f -
 
 echo_info "check if is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready database.mysql.sql.crossplane.io/example
+"${KUBECTL}" wait --timeout 2m --for condition=Ready database.mysql.sql.crossplane.io/example-db
 echo_step_completed
 
 echo_step "creating MySQL User resource"
@@ -365,7 +365,7 @@ USER_YAML="$( cat <<EOF
 apiVersion: mysql.sql.crossplane.io/v1alpha1
 kind: User
 metadata:
-  name: example
+  name: example-user
 spec:
   writeConnectionSecretToRef:
     name: example-connection-secret
@@ -376,7 +376,7 @@ EOF
 echo "${USER_YAML}" | "${KUBECTL}" apply -f -
 
 echo_info "check if is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready user.mysql.sql.crossplane.io/example
+"${KUBECTL}" wait --timeout 2m --for condition=Ready user.mysql.sql.crossplane.io/example-user
 echo_step_completed
 
 echo_info "check if connection secret exists"
