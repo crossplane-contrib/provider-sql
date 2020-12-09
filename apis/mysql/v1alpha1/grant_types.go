@@ -44,16 +44,28 @@ type GrantParameters struct {
 	User *string `json:"user,omitempty"`
 
 	// UserRef references the user object this grant is for.
+	// +immutable
 	// +optional
 	UserRef *runtimev1alpha1.Reference `json:"userRef,omitempty"`
+
+	// UserSelector selects a reference to a User this grant is for.
+	// +immutable
+	// +optional
+	UserSelector *runtimev1alpha1.Selector `json:"userSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this grant it for.
+	// +immutable
 	// +optional
 	DatabaseRef *runtimev1alpha1.Reference `json:"databaseRef,omitempty"`
+
+	// DatabaseSelector selects a reference to a Database this grant is for.
+	// +immutable
+	// +optional
+	DatabaseSelector *runtimev1alpha1.Selector `json:"databaseSelector,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
@@ -94,6 +106,7 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
 		To:           reference.To{Managed: &Database{}},
 		Extract:      reference.ExternalName(),
 	})
@@ -106,6 +119,7 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
 		Reference:    mg.Spec.ForProvider.UserRef,
+		Selector:     mg.Spec.ForProvider.UserSelector,
 		To:           reference.To{Managed: &User{}},
 		Extract:      reference.ExternalName(),
 	})
