@@ -242,7 +242,8 @@ echo "${PVC_YAML}" | "${KUBECTL}" create -f -
 # install crossplane from master channel
 echo_step "installing crossplane from master channel"
 "${HELM3}" repo add crossplane-master https://charts.crossplane.io/master/
-chart_version="$("${HELM3}" search repo crossplane-master/crossplane --devel | awk 'FNR == 2 {print $2}')"
+#chart_version="$("${HELM3}" search repo crossplane-master/crossplane | awk 'FNR == 2 {print $2}')"
+chart_version="0.14.0"
 echo_info "using crossplane version ${chart_version}"
 echo
 # we replace empty dir with our PVC so that the /cache dir in the kind node
