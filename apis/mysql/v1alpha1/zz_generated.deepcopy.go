@@ -193,6 +193,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = new(corev1alpha1.Reference)
 		**out = **in
 	}
+	if in.UserSelector != nil {
+		in, out := &in.UserSelector, &out.UserSelector
+		*out = new(corev1alpha1.Selector)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Database != nil {
 		in, out := &in.Database, &out.Database
 		*out = new(string)
@@ -202,6 +207,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
 		*out = new(corev1alpha1.Reference)
 		**out = **in
+	}
+	if in.DatabaseSelector != nil {
+		in, out := &in.DatabaseSelector, &out.DatabaseSelector
+		*out = new(corev1alpha1.Selector)
+		(*in).DeepCopyInto(*out)
 	}
 }
 
