@@ -22,7 +22,7 @@ GO111MODULE = on
 -include build/makelib/k8s_tools.mk
 
 # Setup Images
-DOCKER_REGISTRY = crossplane
+DOCKER_REGISTRY ?= crossplane
 IMAGES = provider-sql provider-sql-controller
 -include build/makelib/image.mk
 

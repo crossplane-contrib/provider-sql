@@ -1,40 +1,39 @@
-package xsql
+package postgresql
 
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 )
 
-// A MySQLDB client.
-type MySQLDB struct {
+type postgresDB struct {
 	dsn      string
 	endpoint string
 	port     string
 }
 
-// NewMySQLDB returns a new MySQL database client.
-func NewMySQLDB(creds map[string][]byte) DB {
+// New returns a new PostgreSQL database client.
+func New(creds map[string][]byte) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[runtimev1alpha1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[runtimev1alpha1.ResourceCredentialsSecretPortKey])
-	return MySQLDB{
-		dsn: fmt.Sprintf("%s:%s@tcp(%s:%s)/",
-			creds[runtimev1alpha1.ResourceCredentialsSecretUserKey],
-			creds[runtimev1alpha1.ResourceCredentialsSecretPasswordKey],
-			endpoint,
-			port),
+	return postgresDB{
+		dsn: "postgres://" +
+			string(creds[runtimev1alpha1.ResourceCredentialsSecretUserKey]) + ":" +
+			string(creds[runtimev1alpha1.ResourceCredentialsSecretPasswordKey]) + "@" +
+			endpoint + ":" +
+			port,
 		endpoint: endpoint,
 		port:     port,
 	}
 }
 
 // Exec the supplied query.
-func (c MySQLDB) Exec(ctx context.Context, q Query) error {
-	d, err := sql.Open("mysql", c.dsn)
+func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
+	d, err := sql.Open("postgres", c.dsn)
 	if err != nil {
 		return err
 	}
@@ -44,9 +43,21 @@ func (c MySQLDB) Exec(ctx context.Context, q Query) error {
 	return err
 }
 
+// Query the supplied query.
+func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+	d, err := sql.Open("postgres", c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close() //nolint:errcheck
+
+	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
+	return rows, err
+}
+
 // Scan the results of the supplied query into the supplied destination.
-func (c MySQLDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
+func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+	db, err := sql.Open("postgres", c.dsn)
 	if err != nil {
 		return err
 	}
@@ -56,7 +67,7 @@ func (c MySQLDB) Scan(ctx context.Context, q Query, dest ...interface{}) error {
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB
-func (c MySQLDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
+func (c postgresDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
 		runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte(username),
 		runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte(password),
