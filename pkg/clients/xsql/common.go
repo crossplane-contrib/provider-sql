@@ -19,6 +19,7 @@ type Query struct {
 type DB interface {
 	Exec(ctx context.Context, q Query) error
 	Scan(ctx context.Context, q Query, dest ...interface{}) error
+	Query(ctx context.Context, q Query) (*sql.Rows, error)
 	GetConnectionDetails(username, password string) managed.ConnectionDetails
 }
 
