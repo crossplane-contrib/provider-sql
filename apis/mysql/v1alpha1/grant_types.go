@@ -23,14 +23,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reference"
 )
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
-	runtimev1alpha1.ResourceSpec `json:",inline"`
-	ForProvider                  GrantParameters `json:"forProvider"`
+	xpv1.ResourceSpec `json:",inline"`
+	ForProvider       GrantParameters `json:"forProvider"`
 }
 
 // GrantParameters define the desired state of a MySQL grant instance.
@@ -46,12 +46,12 @@ type GrantParameters struct {
 	// UserRef references the user object this grant is for.
 	// +immutable
 	// +optional
-	UserRef *runtimev1alpha1.Reference `json:"userRef,omitempty"`
+	UserRef *xpv1.Reference `json:"userRef,omitempty"`
 
 	// UserSelector selects a reference to a User this grant is for.
 	// +immutable
 	// +optional
-	UserSelector *runtimev1alpha1.Selector `json:"userSelector,omitempty"`
+	UserSelector *xpv1.Selector `json:"userSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -60,17 +60,17 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *runtimev1alpha1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *runtimev1alpha1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
-	runtimev1alpha1.ResourceStatus `json:",inline"`
+	xpv1.ResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

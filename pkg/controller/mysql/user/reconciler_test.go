@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
@@ -55,10 +55,10 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 }
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte(username),
-		runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		runtimev1alpha1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-		runtimev1alpha1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
+		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
+		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+		xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 	}
 }
 
@@ -110,8 +110,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
@@ -132,8 +132,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
@@ -147,7 +147,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj runtime.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &runtimev1alpha1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -159,8 +159,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
@@ -271,7 +271,7 @@ func TestObserve(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[runtimev1alpha1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -281,15 +281,15 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &runtimev1alpha1.SecretKeySelector{
-								SecretReference: runtimev1alpha1.SecretReference{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
 									Name: "example",
 								},
 								Key: "password",
 							},
 						},
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							WriteConnectionSecretToReference: &runtimev1alpha1.SecretReference{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -391,10 +391,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						runtimev1alpha1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						runtimev1alpha1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -419,10 +419,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						runtimev1alpha1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						runtimev1alpha1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -459,8 +459,8 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &runtimev1alpha1.SecretKeySelector{
-								SecretReference: runtimev1alpha1.SecretReference{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
@@ -473,10 +473,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte("test1234"),
-						runtimev1alpha1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						runtimev1alpha1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte("test1234"),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -548,15 +548,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &runtimev1alpha1.SecretKeySelector{
-								SecretReference: runtimev1alpha1.SecretReference{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
 									Name: "connection-secret",
 								},
-								Key: runtimev1alpha1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							WriteConnectionSecretToReference: &runtimev1alpha1.SecretReference{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
 								Name: "password-secret",
 							},
 						},
@@ -567,7 +567,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[runtimev1alpha1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -607,15 +607,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &runtimev1alpha1.SecretKeySelector{
-								SecretReference: runtimev1alpha1.SecretReference{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
 									Name: "connection-secret",
 								},
-								Key: runtimev1alpha1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							WriteConnectionSecretToReference: &runtimev1alpha1.SecretReference{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -626,7 +626,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[runtimev1alpha1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -650,15 +650,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &runtimev1alpha1.SecretKeySelector{
-								SecretReference: runtimev1alpha1.SecretReference{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
 							},
 						},
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							WriteConnectionSecretToReference: &runtimev1alpha1.SecretReference{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -678,7 +678,7 @@ func TestUpdate(t *testing.T) {
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
 							}
-							secret.Data[runtimev1alpha1.ResourceCredentialsSecretPasswordKey] = []byte("oldpassword")
+							secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("oldpassword")
 							secret.DeepCopyInto(obj.(*corev1.Secret))
 							return nil
 						default:
@@ -691,10 +691,10 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalUpdate{
 					ConnectionDetails: managed.ConnectionDetails{
-						runtimev1alpha1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						runtimev1alpha1.ResourceCredentialsSecretPasswordKey: []byte("newpassword"),
-						runtimev1alpha1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						runtimev1alpha1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte("newpassword"),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
