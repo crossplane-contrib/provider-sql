@@ -22,9 +22,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
-	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/pkg/errors"
+
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 )
@@ -59,7 +60,7 @@ func (c *external) getPassword(ctx context.Context, user *v1alpha1.User) (newPwd
 	}
 	// if newPwd was set to some value, compare value in output secret with
 	// newPwd
-	changed = newPwd != "" && newPwd != string(s.Data[runtimev1alpha1.ResourceCredentialsSecretPasswordKey])
+	changed = newPwd != "" && newPwd != string(s.Data[xpv1.ResourceCredentialsSecretPasswordKey])
 
 	return newPwd, changed, nil
 }
