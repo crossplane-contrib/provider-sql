@@ -283,7 +283,7 @@ spec:
   args:
   - --debug
 ---
-apiVersion: pkg.crossplane.io/v1alpha1
+apiVersion: pkg.crossplane.io/v1beta1
 kind: Provider
 metadata:
   name: "${PACKAGE_NAME}"
