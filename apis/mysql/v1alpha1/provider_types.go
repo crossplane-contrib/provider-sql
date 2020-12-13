@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
@@ -32,24 +32,24 @@ const (
 	// CredentialsSourceMySQLConnectionSecret indicates that a provider
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a MySQL server.
-	CredentialsSourceMySQLConnectionSecret runtimev1alpha1.CredentialsSource = "MySQLConnectionSecret"
+	CredentialsSourceMySQLConnectionSecret xpv1.CredentialsSource = "MySQLConnectionSecret"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
 	// +kubebuilder:validation:Enum=MySQLConnectionSecret
-	Source runtimev1alpha1.CredentialsSource `json:"source"`
+	Source xpv1.CredentialsSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MySQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
-	ConnectionSecretRef *runtimev1alpha1.SecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
 type ProviderConfigStatus struct {
-	runtimev1alpha1.ProviderConfigStatus `json:",inline"`
+	xpv1.ProviderConfigStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true
@@ -88,7 +88,7 @@ type ProviderConfigUsage struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	runtimev1alpha1.ProviderConfigUsage `json:",inline"`
+	xpv1.ProviderConfigUsage `json:",inline"`
 }
 
 // +kubebuilder:object:root=true
