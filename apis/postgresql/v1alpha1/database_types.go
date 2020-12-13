@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
 // DatabaseParameters are the configurable fields of a Database.
@@ -77,13 +77,13 @@ type DatabaseParameters struct {
 
 // A DatabaseSpec defines the desired state of a Database.
 type DatabaseSpec struct {
-	runtimev1alpha1.ResourceSpec `json:",inline"`
-	ForProvider                  DatabaseParameters `json:"forProvider"`
+	xpv1.ResourceSpec `json:",inline"`
+	ForProvider       DatabaseParameters `json:"forProvider"`
 }
 
 // A DatabaseStatus represents the observed state of a Database.
 type DatabaseStatus struct {
-	runtimev1alpha1.ResourceStatus `json:",inline"`
+	xpv1.ResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

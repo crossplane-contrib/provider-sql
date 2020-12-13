@@ -33,7 +33,7 @@ import (
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
@@ -109,8 +109,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
@@ -131,8 +131,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
@@ -146,7 +146,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj runtime.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &runtimev1alpha1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -158,8 +158,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
-						ResourceSpec: runtimev1alpha1.ResourceSpec{
-							ProviderConfigReference: &runtimev1alpha1.Reference{},
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},

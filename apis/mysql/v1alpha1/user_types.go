@@ -19,19 +19,19 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	runtimev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
 // A UserSpec defines the desired state of a Database.
 type UserSpec struct {
-	runtimev1alpha1.ResourceSpec `json:",inline"`
-	ForProvider                  UserParameters `json:"forProvider"`
+	xpv1.ResourceSpec `json:",inline"`
+	ForProvider       UserParameters `json:"forProvider"`
 }
 
 // A UserStatus represents the observed state of a User.
 type UserStatus struct {
-	runtimev1alpha1.ResourceStatus `json:",inline"`
-	AtProvider                     UserObservation `json:"atProvider,omitempty"`
+	xpv1.ResourceStatus `json:",inline"`
+	AtProvider          UserObservation `json:"atProvider,omitempty"`
 }
 
 // UserParameters define the desired state of a MySQL user instance.
@@ -39,7 +39,7 @@ type UserParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *runtimev1alpha1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 }
 
 // A UserObservation represents the observed state of a MySQL user.

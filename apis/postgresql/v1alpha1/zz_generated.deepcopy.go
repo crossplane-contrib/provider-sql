@@ -21,7 +21,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1alpha1 "github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
+	"github.com/crossplane/crossplane-runtime/apis/common/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -331,7 +331,7 @@ func (in *ProviderCredentials) DeepCopyInto(out *ProviderCredentials) {
 	*out = *in
 	if in.ConnectionSecretRef != nil {
 		in, out := &in.ConnectionSecretRef, &out.ConnectionSecretRef
-		*out = new(corev1alpha1.SecretReference)
+		*out = new(v1.SecretReference)
 		**out = **in
 	}
 }
