@@ -1,3 +1,5 @@
+
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -21,9 +23,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: AGE
-      type: date
+    - jsonPath: .status.atProvider.privilegesAsClauses
+      name: PRIVILEGES
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -68,27 +70,26 @@ spec:
                     type: object
                   privileges:
                     description: Privileges to be granted.
-                    items:
-                      description: RolePrivilege is the PostgreSQL identifier to add or remove a permission on a role. See https://www.postgresql.org/docs/current/sql-createrole.html for available privileges.
-                      enum:
-                      - SUPERUSER
-                      - NOSUPERUSER
-                      - CREATEDB
-                      - NOCREATEDB
-                      - CREATEROLE
-                      - NOCREATEROLE
-                      - INHERIT
-                      - NOINHERIT
-                      - LOGIN
-                      - NOLOGIN
-                      - REPLICATION
-                      - NOREPLICATION
-                      - BYPASSRLS
-                      - NOBYPASSRLS
-                      type: string
-                    type: array
-                required:
-                - privileges
+                    properties:
+                      bypassRls:
+                        description: BypassRls grants BYPASSRLS when true, allowing the role to bypass row-level security policies.
+                        type: boolean
+                      createDb:
+                        description: CreateDb grants CREATEDB when true, allowing the role to create databases.
+                        type: boolean
+                      createRole:
+                        description: CreateRole grants CREATEROLE when true, allowing this role to create other roles.
+                        type: boolean
+                      login:
+                        description: Login grants LOGIN when true, allowing the role to login to the server.
+                        type: boolean
+                      replication:
+                        description: Replication grants REPLICATION when true, allowing the role to connect in replication mode.
+                        type: boolean
+                      superUser:
+                        description: SuperUser grants SUPERUSER privilege when true.
+                        type: boolean
+                    type: object
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
@@ -129,6 +130,35 @@ spec:
             properties:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
+                properties:
+                  privileges:
+                    description: Privileges granted by the role.
+                    properties:
+                      bypassRls:
+                        description: BypassRls grants BYPASSRLS when true, allowing the role to bypass row-level security policies.
+                        type: boolean
+                      createDb:
+                        description: CreateDb grants CREATEDB when true, allowing the role to create databases.
+                        type: boolean
+                      createRole:
+                        description: CreateRole grants CREATEROLE when true, allowing this role to create other roles.
+                        type: boolean
+                      login:
+                        description: Login grants LOGIN when true, allowing the role to login to the server.
+                        type: boolean
+                      replication:
+                        description: Replication grants REPLICATION when true, allowing the role to connect in replication mode.
+                        type: boolean
+                      superUser:
+                        description: SuperUser grants SUPERUSER privilege when true.
+                        type: boolean
+                    type: object
+                  privilegesAsClauses:
+                    description: Privileges granted by the role as a string of CLAUSES, space separated.
+                    type: string
+                required:
+                - privileges
+                - privilegesAsClauses
                 type: object
               conditions:
                 description: Conditions of the resource.

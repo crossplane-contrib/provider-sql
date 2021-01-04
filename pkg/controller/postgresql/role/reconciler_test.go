@@ -387,10 +387,10 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							Privileges: []v1alpha1.RolePrivilege{
-								"NOCREATEDB",
-								"NOCREATEROLE",
-								"LOGIN",
+							Privileges: v1alpha1.RolePrivilege{
+								CreateDb:   new(bool),
+								Login:      new(bool),
+								CreateRole: new(bool),
 							},
 						},
 					},
