@@ -5,7 +5,7 @@ go 1.13
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/crossplane/crossplane-runtime v0.12.0
-	github.com/crossplane/crossplane-tools v0.0.0-20201007233256-88b291e145bb
+	github.com/crossplane/crossplane-tools v0.0.0-20201201125637-9ddc70edfd0d
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/google/go-cmp v0.5.0
 	github.com/lib/pq v1.8.0

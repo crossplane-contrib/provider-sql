@@ -66,8 +66,17 @@ var (
 	DatabaseGroupVersionKind = SchemeGroupVersion.WithKind(DatabaseKind)
 )
 
+// Role type metadata.
+var (
+	RoleKind             = reflect.TypeOf(Role{}).Name()
+	RoleGroupKind        = schema.GroupKind{Group: Group, Kind: RoleKind}.String()
+	RoleKindAPIVersion   = RoleKind + "." + SchemeGroupVersion.String()
+	RoleGroupVersionKind = SchemeGroupVersion.WithKind(RoleKind)
+)
+
 func init() {
 	SchemeBuilder.Register(&ProviderConfig{}, &ProviderConfigList{})
 	SchemeBuilder.Register(&ProviderConfigUsage{}, &ProviderConfigUsageList{})
 	SchemeBuilder.Register(&Database{}, &DatabaseList{})
+	SchemeBuilder.Register(&Role{}, &RoleList{})
 }
