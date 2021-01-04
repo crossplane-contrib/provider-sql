@@ -1,0 +1,10 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: example-role
+spec:
+  forProvider:
+    privileges: []
+  writeConnectionSecretToRef:
+    name: example-connection-secret
+    namespace: default

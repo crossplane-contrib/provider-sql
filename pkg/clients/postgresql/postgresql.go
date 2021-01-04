@@ -26,7 +26,8 @@ func New(creds map[string][]byte) xsql.DB {
 			string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
 			string(creds[xpv1.ResourceCredentialsSecretPasswordKey]) + "@" +
 			endpoint + ":" +
-			port,
+			port +
+			"?sslmode=disable", // TODO (benagricola): Remove
 		endpoint: endpoint,
 		port:     port,
 	}
