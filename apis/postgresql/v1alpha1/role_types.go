@@ -37,13 +37,34 @@ type RoleStatus struct {
 // RolePrivilege is the PostgreSQL identifier to add or remove a permission
 // on a role.
 // See https://www.postgresql.org/docs/current/sql-createrole.html for available privileges.
-// +kubebuilder:validation:Enum=SUPERUSER;NOSUPERUSER;CREATEDB;NOCREATEDB;CREATEROLE;NOCREATEROLE;INHERIT;NOINHERIT;LOGIN;NOLOGIN;REPLICATION;NOREPLICATION;BYPASSRLS;NOBYPASSRLS
-type RolePrivilege string
+// INHERIT;NOINHERIT; not implemented here as we don't currently implement role membership.
+type RolePrivilege struct {
+	// SuperUser grants SUPERUSER privilege when true.
+	// +optional
+	SuperUser *bool `json:"superUser,omitempty"`
+
+	// CreateDb grants CREATEDB when true, allowing the role to create databases.
+	// +optional
+	CreateDb *bool `json:"createDb,omitempty"`
+
+	// CreateRole grants CREATEROLE when true, allowing this role to create other roles.
+	CreateRole *bool `json:"createRole,omitempty"`
+
+	// Login grants LOGIN when true, allowing the role to login to the server.
+	Login *bool `json:"login,omitempty"`
+
+	// Replication grants REPLICATION when true, allowing the role to connect in replication mode.
+	Replication *bool `json:"replication,omitempty"`
+
+	// BypassRls grants BYPASSRLS when true, allowing the role to bypass row-level security policies.
+	BypassRls *bool `json:"bypassRls,omitempty"`
+}
 
 // RoleParameters define the desired state of a PostgreSQL role instance.
 type RoleParameters struct {
 	// Privileges to be granted.
-	Privileges []RolePrivilege `json:"privileges"`
+	// +optional
+	Privileges RolePrivilege `json:"privileges,omitempty"`
 
 	// PasswordSecretRef references the secret that contains the password used
 	// for this role. If no reference is given, a password will be auto-generated.
@@ -53,6 +74,11 @@ type RoleParameters struct {
 
 // A RoleObservation represents the observed state of a PostgreSQL role.
 type RoleObservation struct {
+	// Privileges granted by the role.
+	Privileges *RolePrivilege `json:"privileges"`
+
+	// Privileges granted by the role as a string of CLAUSES, space separated.
+	PrivilegesAsClauses string `json:"privilegesAsClauses"`
 }
 
 // +kubebuilder:object:root=true
@@ -61,7 +87,7 @@ type RoleObservation struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".status.atProvider.privilegesAsClauses"
 // +kubebuilder:resource:scope=Cluster
 type Role struct {
 	metav1.TypeMeta   `json:",inline"`
