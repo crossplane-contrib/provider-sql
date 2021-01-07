@@ -141,6 +141,7 @@ func privilegesToPermissionClauses(p v1alpha1.RolePrivilege) string {
 	pc := []string{}
 
 	negateClause("SUPERUSER", p.SuperUser, &pc)
+	negateClause("INHERIT", p.Inherit, &pc)
 	negateClause("CREATEDB", p.CreateDb, &pc)
 	negateClause("CREATEROLE", p.CreateRole, &pc)
 	negateClause("LOGIN", p.Login, &pc)
@@ -160,6 +161,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	observed := &v1alpha1.RoleObservation{
 		Privileges: &v1alpha1.RolePrivilege{
 			SuperUser:   new(bool),
+			Inherit:     new(bool),
 			CreateDb:    new(bool),
 			CreateRole:  new(bool),
 			Login:       new(bool),
@@ -171,6 +173,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	query := "SELECT " +
 		"rolsuper, " +
+		"rolinherit, " +
 		"rolcreatedb, " +
 		"rolcreaterole, " +
 		"rolcanlogin, " +
@@ -187,6 +190,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 			},
 		},
 		&observed.Privileges.SuperUser,
+		&observed.Privileges.Inherit,
 		&observed.Privileges.CreateDb,
 		&observed.Privileges.CreateRole,
 		&observed.Privileges.Login,
@@ -339,6 +343,10 @@ func lateInit(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParamete
 
 	if desired.Privileges.SuperUser == nil {
 		desired.Privileges.SuperUser = observed.Privileges.SuperUser
+		li = true
+	}
+	if desired.Privileges.Inherit == nil {
+		desired.Privileges.Inherit = observed.Privileges.Inherit
 		li = true
 	}
 	if desired.Privileges.CreateDb == nil {

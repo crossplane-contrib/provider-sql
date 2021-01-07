@@ -87,6 +87,9 @@ spec:
                       createRole:
                         description: CreateRole grants CREATEROLE when true, allowing this role to create other roles.
                         type: boolean
+                      inherit:
+                        description: Inherit grants INHERIT when true, allowing the role to inherit permissions from other roles it is a member of.
+                        type: boolean
                       login:
                         description: Login grants LOGIN when true, allowing the role to login to the server.
                         type: boolean
@@ -154,6 +157,9 @@ spec:
                       createRole:
                         description: CreateRole grants CREATEROLE when true, allowing this role to create other roles.
                         type: boolean
+                      inherit:
+                        description: Inherit grants INHERIT when true, allowing the role to inherit permissions from other roles it is a member of.
+                        type: boolean
                       login:
                         description: Login grants LOGIN when true, allowing the role to login to the server.
                         type: boolean
@@ -168,8 +174,6 @@ spec:
                     description: Privileges granted by the role as a string of CLAUSES, space separated.
                     type: string
                 required:
-                - connectionLimit
-                - privileges
                 - privilegesAsClauses
                 type: object
               conditions:

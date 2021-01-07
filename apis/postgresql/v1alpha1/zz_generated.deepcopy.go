@@ -479,6 +479,11 @@ func (in *RolePrivilege) DeepCopyInto(out *RolePrivilege) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.Inherit != nil {
+		in, out := &in.Inherit, &out.Inherit
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Replication != nil {
 		in, out := &in.Replication, &out.Replication
 		*out = new(bool)

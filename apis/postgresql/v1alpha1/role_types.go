@@ -48,15 +48,24 @@ type RolePrivilege struct {
 	CreateDb *bool `json:"createDb,omitempty"`
 
 	// CreateRole grants CREATEROLE when true, allowing this role to create other roles.
+	// +optional
 	CreateRole *bool `json:"createRole,omitempty"`
 
 	// Login grants LOGIN when true, allowing the role to login to the server.
+	// +optional
 	Login *bool `json:"login,omitempty"`
 
+	// Inherit grants INHERIT when true, allowing the role to inherit permissions
+	// from other roles it is a member of.
+	// +optional
+	Inherit *bool `json:"inherit,omitempty"`
+
 	// Replication grants REPLICATION when true, allowing the role to connect in replication mode.
+	// +optional
 	Replication *bool `json:"replication,omitempty"`
 
 	// BypassRls grants BYPASSRLS when true, allowing the role to bypass row-level security policies.
+	// +optional
 	BypassRls *bool `json:"bypassRls,omitempty"`
 }
 
