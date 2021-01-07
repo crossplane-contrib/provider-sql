@@ -21,7 +21,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string
-    - jsonPath: .status.atProvider.connectionLimit
+    - jsonPath: .spec.forProvider.connectionLimit
       name: CONN LIMIT
       type: integer
     - jsonPath: .status.atProvider.privilegesAsClauses
@@ -139,40 +139,9 @@ spec:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
-                  connectionLimit:
-                    description: ConnectionLimit applied to the role
-                    format: int32
-                    type: integer
-                  privileges:
-                    description: Privileges granted by the role.
-                    properties:
-                      bypassRls:
-                        description: BypassRls grants BYPASSRLS when true, allowing the role to bypass row-level security policies.
-                        type: boolean
-                      createDb:
-                        description: CreateDb grants CREATEDB when true, allowing the role to create databases.
-                        type: boolean
-                      createRole:
-                        description: CreateRole grants CREATEROLE when true, allowing this role to create other roles.
-                        type: boolean
-                      inherit:
-                        description: Inherit grants INHERIT when true, allowing the role to inherit permissions from other roles it is a member of.
-                        type: boolean
-                      login:
-                        description: Login grants LOGIN when true, allowing the role to login to the server.
-                        type: boolean
-                      replication:
-                        description: Replication grants REPLICATION when true, allowing the role to connect in replication mode.
-                        type: boolean
-                      superUser:
-                        description: SuperUser grants SUPERUSER privilege when true.
-                        type: boolean
-                    type: object
                   privilegesAsClauses:
-                    description: Privileges granted by the role as a string of CLAUSES, space separated.
+                    description: PrivilegesAsClauses represents the applied privileges state, taking into account any defaults applied by Postgres, and expressed as a space separated string of ROLE PRIVILEGE clauses.
                     type: string
-                required:
-                - privilegesAsClauses
                 type: object
               conditions:
                 description: Conditions of the resource.

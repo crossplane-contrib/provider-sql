@@ -135,7 +135,7 @@ func negateClause(clause string, negate *bool, out *[]string) {
 	*out = append(*out, clause)
 }
 
-func privilegesToPermissionClauses(p v1alpha1.RolePrivilege) string {
+func privilegesToClauses(p v1alpha1.RolePrivilege) string {
 	// Never copy user inputted data to this string. These values are
 	// passed directly into the query.
 	pc := []string{}
@@ -158,8 +158,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotRole)
 	}
 
-	observed := &v1alpha1.RoleObservation{
-		Privileges: &v1alpha1.RolePrivilege{
+	observed := &v1alpha1.RoleParameters{
+		Privileges: v1alpha1.RolePrivilege{
 			SuperUser:   new(bool),
 			Inherit:     new(bool),
 			CreateDb:    new(bool),
@@ -168,7 +168,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 			Replication: new(bool),
 			BypassRls:   new(bool),
 		},
-		PrivilegesAsClauses: "",
 	}
 
 	query := "SELECT " +
@@ -211,12 +210,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	observed.PrivilegesAsClauses = privilegesToPermissionClauses(*observed.Privileges)
-
-	// Load privileges from query to status
-	cr.Status.AtProvider = *observed
-
 	cr.SetConditions(xpv1.Available())
+
+	// PrivilegesAsClauses is used as role status output
+	cr.Status.AtProvider.PrivilegesAsClauses = privilegesToClauses(observed.Privileges)
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
@@ -234,7 +231,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	cr.SetConditions(xpv1.Creating())
 
 	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
-	privs := privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges)
+	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
 
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
@@ -261,6 +258,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
 	}
 
+	// PrivilegesAsClauses is used as role status output
+	// Update here so that state is reflected to the user prior to the next
+	// reconciler loop.
+	cr.Status.AtProvider.PrivilegesAsClauses = privs
+
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
 	}, nil
@@ -278,7 +280,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
-	privs := privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges)
+	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
 
 	if pwchanged {
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -304,6 +306,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 	}
+	// PrivilegesAsClauses is used as role status output
+	// Update here so that state is reflected to the user prior to the next
+	// reconciler loop.
+	cr.Status.AtProvider.PrivilegesAsClauses = privs
 
 	// Only update connection details if password is changed
 	if pwchanged {
@@ -326,19 +332,35 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(err, errDropRole)
 }
 
-func upToDate(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
+func upToDate(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameters) bool {
 	if observed.ConnectionLimit != desired.ConnectionLimit {
 		return false
 	}
-
-	// Permission clauses are sorted, so we can just compare the string
-	if observed.PrivilegesAsClauses != privilegesToPermissionClauses(desired.Privileges) {
+	if observed.Privileges.SuperUser != desired.Privileges.SuperUser {
+		return false
+	}
+	if observed.Privileges.Inherit != desired.Privileges.Inherit {
+		return false
+	}
+	if observed.Privileges.CreateDb != desired.Privileges.CreateDb {
+		return false
+	}
+	if observed.Privileges.CreateRole != desired.Privileges.CreateRole {
+		return false
+	}
+	if observed.Privileges.Login != desired.Privileges.Login {
+		return false
+	}
+	if observed.Privileges.Replication != desired.Privileges.Replication {
+		return false
+	}
+	if observed.Privileges.BypassRls != desired.Privileges.BypassRls {
 		return false
 	}
 	return true
 }
 
-func lateInit(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
+func lateInit(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameters) bool {
 	li := false
 
 	if desired.Privileges.SuperUser == nil {
