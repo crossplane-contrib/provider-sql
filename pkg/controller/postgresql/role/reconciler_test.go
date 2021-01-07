@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -249,13 +250,20 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Role{},
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: nil,
+						},
+					},
+				},
 			},
 			want: want{
 				o: managed.ExternalObservation{
 					ResourceExists:          true,
 					ResourceUpToDate:        true,
-					ResourceLateInitialized: false,
+					ResourceLateInitialized: true,
 				},
 				err: nil,
 			},
@@ -287,6 +295,8 @@ func TestObserve(t *testing.T) {
 								},
 								Key: "password",
 							},
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: pointer.Int32Ptr(10),
 						},
 						ResourceSpec: xpv1.ResourceSpec{
 							WriteConnectionSecretToReference: &xpv1.SecretReference{
@@ -298,8 +308,9 @@ func TestObserve(t *testing.T) {
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: false,
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
+					ResourceLateInitialized: true,
 				},
 				err: nil,
 			},

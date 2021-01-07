@@ -23,6 +23,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string
+    - jsonPath: .status.atProvider.connectionLimit
+      name: CONN LIMIT
+      type: integer
     - jsonPath: .status.atProvider.privilegesAsClauses
       name: PRIVILEGES
       type: string
@@ -51,6 +54,10 @@ spec:
               forProvider:
                 description: RoleParameters define the desired state of a PostgreSQL role instance.
                 properties:
+                  connectionLimit:
+                    description: ConnectionLimit to be applied to the role.
+                    format: int32
+                    type: integer
                   passwordSecretRef:
                     description: PasswordSecretRef references the secret that contains the password used for this role. If no reference is given, a password will be auto-generated.
                     properties:
@@ -131,6 +138,10 @@ spec:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
+                  connectionLimit:
+                    description: ConnectionLimit applied to the role
+                    format: int32
+                    type: integer
                   privileges:
                     description: Privileges granted by the role.
                     properties:
@@ -157,6 +168,7 @@ spec:
                     description: Privileges granted by the role as a string of CLAUSES, space separated.
                     type: string
                 required:
+                - connectionLimit
                 - privileges
                 - privilegesAsClauses
                 type: object
