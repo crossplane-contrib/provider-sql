@@ -18,6 +18,7 @@ package role
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +26,6 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -175,7 +175,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"rolcreaterole, " +
 		"rolcanlogin, " +
 		"rolreplication, " +
-		"rolbypassrls " +
+		"rolbypassrls, " +
+		"rolconnlimit " +
 		"FROM pg_roles WHERE rolname = $1"
 
 	err := c.db.Scan(ctx,
@@ -191,6 +192,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		&observed.Privileges.Login,
 		&observed.Privileges.Replication,
 		&observed.Privileges.BypassRls,
+		&observed.ConnectionLimit,
 	)
 
 	if xsql.IsNoRows(err) {
@@ -205,8 +207,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	isLateInit := lateInit(observed, cr.Spec.ForProvider)
-
 	observed.PrivilegesAsClauses = privilegesToPermissionClauses(*observed.Privileges)
 
 	// Load privileges from query to status
@@ -214,11 +214,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	cr.SetConditions(xpv1.Available())
 
-	// TODO (benagricola): Check privilege changes
 	return managed.ExternalObservation{
 		ResourceExists:          true,
-		ResourceLateInitialized: isLateInit,
-		ResourceUpToDate:        !pwdChanged && equality.Semantic.DeepEqual(cr.Spec.ForProvider, observed),
+		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
+		ResourceUpToDate:        !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
 	}, nil
 }
 
@@ -230,9 +229,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	cr.SetConditions(xpv1.Creating())
 
-	var b strings.Builder
-	b.WriteString("CREATE ROLE ")
-	b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(cr)))
+	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
+	privs := privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges)
 
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
@@ -246,20 +244,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	b.WriteString(" PASSWORD ")
-	b.WriteString(pq.QuoteLiteral(pw))
-
-	// Privs must be inserted WITHOUT quoting.
-	// We generate a string based on boolean values from the user.
-	// Allowing direct user input here would mean the user could inject
-	// arbitrary SQL. In practice probably not particularly exploitable,
-	// but still unwanted.
-	privs := privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges)
-	b.WriteString(" ")
-	b.WriteString(privs)
-
+	// NOTE we're not using pq's "Parameters" setting here
+	// because it does not allow us to pass identifiers.
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: b.String(),
+		String: fmt.Sprintf(
+			"CREATE ROLE %s PASSWORD %s %s",
+			crn,
+			pq.QuoteLiteral(pw),
+			privs,
+		),
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
 	}
@@ -275,32 +268,41 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotRole)
 	}
 
-	pw, changed, err := c.getPassword(ctx, cr)
+	pw, pwchanged, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	// TODO(benagricola): Detect privilege changes and password
-	// changes separately and only run query when actually changed.
-	// RIGHT NOW, Privileges will only be changed with a corresponding
-	// password change.
-	if changed {
-		var b strings.Builder
-		b.WriteString("ALTER ROLE ")
-		b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(cr)))
+	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
+	privs := privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges)
 
-		b.WriteString(" PASSWORD ")
-		b.WriteString(pq.QuoteLiteral(pw))
-
-		b.WriteString(" ")
-		b.WriteString(privilegesToPermissionClauses(cr.Spec.ForProvider.Privileges))
-
+	if pwchanged {
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: b.String(),
+			String: fmt.Sprintf("ALTER ROLE %s PASSWORD %s", crn, pq.QuoteLiteral(pw)),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+	}
 
+	if len(privs) > 0 {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: fmt.Sprintf("ALTER ROLE %s %s", crn, privs),
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
+		}
+	}
+
+	cl := cr.Spec.ForProvider.ConnectionLimit
+	if cl != nil {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: fmt.Sprintf("ALTER ROLE %s CONNECTION LIMIT %d", crn, int64(*cl)),
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
+		}
+	}
+
+	// Only update connection details if password is changed
+	if pwchanged {
 		return managed.ExternalUpdate{
 			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
 		}, nil
@@ -314,15 +316,25 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotRole)
 	}
 	cr.SetConditions(xpv1.Deleting())
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "DROP ROLE " + pq.QuoteIdentifier(meta.GetExternalName(cr)),
-	}); err != nil {
-		return errors.Wrap(err, errDropRole)
-	}
-	return nil
+	err := c.db.Exec(ctx, xsql.Query{
+		String: "DROP ROLE IF EXISTS" + pq.QuoteIdentifier(meta.GetExternalName(cr)),
+	})
+	return errors.Wrap(err, errDropRole)
 }
 
-func lateInit(observed *v1alpha1.RoleObservation, desired v1alpha1.RoleParameters) bool {
+func upToDate(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
+	if observed.ConnectionLimit != desired.ConnectionLimit {
+		return false
+	}
+
+	// Permission clauses are sorted, so we can just compare the string
+	if observed.PrivilegesAsClauses != privilegesToPermissionClauses(desired.Privileges) {
+		return false
+	}
+	return true
+}
+
+func lateInit(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
 	li := false
 
 	if desired.Privileges.SuperUser == nil {
@@ -347,6 +359,10 @@ func lateInit(observed *v1alpha1.RoleObservation, desired v1alpha1.RoleParameter
 	}
 	if desired.Privileges.BypassRls == nil {
 		desired.Privileges.BypassRls = observed.Privileges.BypassRls
+		li = true
+	}
+	if desired.ConnectionLimit == nil {
+		desired.ConnectionLimit = observed.ConnectionLimit
 		li = true
 	}
 

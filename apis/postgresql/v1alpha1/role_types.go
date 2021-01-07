@@ -62,6 +62,11 @@ type RolePrivilege struct {
 
 // RoleParameters define the desired state of a PostgreSQL role instance.
 type RoleParameters struct {
+	// ConnectionLimit to be applied to the role.
+	// +kubebuilder:validation:Min=-1
+	// +optional
+	ConnectionLimit *int32 `json:"connectionLimit,omitempty"`
+
 	// Privileges to be granted.
 	// +optional
 	Privileges RolePrivilege `json:"privileges,omitempty"`
@@ -74,8 +79,11 @@ type RoleParameters struct {
 
 // A RoleObservation represents the observed state of a PostgreSQL role.
 type RoleObservation struct {
+	// ConnectionLimit applied to the role
+	ConnectionLimit *int32 `json:"connectionLimit,omitempty"`
+
 	// Privileges granted by the role.
-	Privileges *RolePrivilege `json:"privileges"`
+	Privileges *RolePrivilege `json:"privileges,omitempty"`
 
 	// Privileges granted by the role as a string of CLAUSES, space separated.
 	PrivilegesAsClauses string `json:"privilegesAsClauses"`
@@ -87,6 +95,7 @@ type RoleObservation struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
+// +kubebuilder:printcolumn:name="CONN LIMIT",type="integer",JSONPath=".status.atProvider.connectionLimit"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".status.atProvider.privilegesAsClauses"
 // +kubebuilder:resource:scope=Cluster
 type Role struct {

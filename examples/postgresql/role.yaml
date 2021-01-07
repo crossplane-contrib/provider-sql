@@ -4,9 +4,10 @@ metadata:
   name: example-role
 spec:
   forProvider:
+    connectionLimit: 10
     privileges:
       login: true
       createDb: true
   writeConnectionSecretToRef:
-    name: example-connection-secret
+    name: example-role-secret
     namespace: default
