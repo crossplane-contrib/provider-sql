@@ -1,12 +1,23 @@
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Role
 metadata:
-  name: example-role
+  name: parent-role
 spec:
   forProvider:
     connectionLimit: 10
     privileges:
       login: true
+  writeConnectionSecretToRef:
+    name: example-parent-role-secret
+    namespace: default
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: example-role
+spec:
+  forProvider:
+    privileges:
       createDb: true
   writeConnectionSecretToRef:
     name: example-role-secret

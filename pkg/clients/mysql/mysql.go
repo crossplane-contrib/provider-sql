@@ -7,9 +7,14 @@ import (
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/pkg/errors"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+)
+
+const (
+	errNotSupported = "%s not supported by mysql client"
 )
 
 type mySQLDB struct {
@@ -32,6 +37,11 @@ func New(creds map[string][]byte) xsql.DB {
 		endpoint: endpoint,
 		port:     port,
 	}
+}
+
+// ExecTx is unsupported in MySQL.
+func (c mySQLDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
+	return errors.Errorf(errNotSupported, "transactions")
 }
 
 // Exec the supplied query.

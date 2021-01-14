@@ -26,10 +26,43 @@ func New(creds map[string][]byte) xsql.DB {
 			string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
 			string(creds[xpv1.ResourceCredentialsSecretPasswordKey]) + "@" +
 			endpoint + ":" +
-			port,
+			port +
+			"?sslmode=disable",
 		endpoint: endpoint,
 		port:     port,
 	}
+}
+
+// ExecTx executes an array of queries, committing if all are successful and
+// rolling back immediately on failure.
+func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
+	d, err := sql.Open("postgres", c.dsn)
+	if err != nil {
+		return err
+	}
+
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	// Rollback or Commit based on error state. Defer close in defer to make
+	// sure the connection is always closed.
+	defer func() {
+		defer d.Close() //nolint:errcheck
+		if err != nil {
+			tx.Rollback() //nolint:errcheck
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	for _, q := range ql {
+		if _, err = tx.Exec(q.String, q.Parameters...); err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 // Exec the supplied query.
