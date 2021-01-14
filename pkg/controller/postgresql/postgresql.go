@@ -23,6 +23,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/config"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/grant"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/role"
 )
 
@@ -33,6 +34,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		config.Setup,
 		database.Setup,
 		role.Setup,
+		grant.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
