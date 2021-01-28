@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"context"
+	"sort"
 
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,12 +34,37 @@ type GrantSpec struct {
 	ForProvider       GrantParameters `json:"forProvider"`
 }
 
+// GrantPrivilege represents a privilege to be granted
+// +kubebuilder:validation:Pattern:=[A-Z]+
+type GrantPrivilege string
+
+// GrantPrivileges is a list of the privileges to be granted
+type GrantPrivileges []GrantPrivilege
+
+// ToStringSlice converts the slice of privileges to strings
+func (gp *GrantPrivileges) ToStringSlice() []string {
+	out := make([]string, len(*gp))
+	for i, v := range *gp {
+		out[i] = string(v)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
 	// +optional
-	Privileges []string `json:"privileges,omitempty"`
+	Privileges GrantPrivileges `json:"privileges,omitempty"`
+
+	// WithGrantOption allows a granted role to grant the given privileges to another role.
+	// +optional
+	WithGrantOption *bool `json:"withGrantOption,omitempty"`
+
+	// WithAdminOption allows a granted role to grant another role membership of a group.
+	// +optional
+	WithAdminOption *bool `json:"withAdminOption,omitempty"`
 
 	// Role this grant is for.
 	// +optional
@@ -81,11 +107,6 @@ type GrantParameters struct {
 	// +immutable
 	// +optional
 	MemberOfSelector *xpv1.Selector `json:"memberOfSelector,omitempty"`
-
-	// Tables that privileges are granted on.
-	// See https://www.postgresql.org/docs/current/sql-grant.html for table format.
-	// +optional
-	Tables []string `json:"tables,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
