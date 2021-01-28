@@ -6,7 +6,7 @@ spec:
   forProvider:
     privileges:
       - CONNECT
-      - TEMPORARY
+    withGrantOption: true
     roleRef:
       name: example-role
     databaseRef:

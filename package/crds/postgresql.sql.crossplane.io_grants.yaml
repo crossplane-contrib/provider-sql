@@ -100,6 +100,8 @@ spec:
                   privileges:
                     description: Privileges to be granted. See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
                     items:
+                      description: GrantPrivilege represents a privilege to be granted
+                      pattern: '[A-Z]+'
                       type: string
                     type: array
                   role:
@@ -126,11 +128,12 @@ spec:
                         description: MatchLabels ensures an object with matching labels is selected.
                         type: object
                     type: object
-                  tables:
-                    description: Tables that privileges are granted on. See https://www.postgresql.org/docs/current/sql-grant.html for table format.
-                    items:
-                      type: string
-                    type: array
+                  withAdminOption:
+                    description: WithAdminOption allows a granted role to grant another role membership of a group.
+                    type: boolean
+                  withGrantOption:
+                    description: WithGrantOption allows a granted role to grant the given privileges to another role.
+                    type: boolean
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
