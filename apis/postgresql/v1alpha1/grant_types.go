@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"context"
-	"sort"
 
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,7 +37,10 @@ type GrantSpec struct {
 // +kubebuilder:validation:Pattern:=[A-Z]+
 type GrantPrivilege string
 
+// If Privileges are specified, we should have at least one
+
 // GrantPrivileges is a list of the privileges to be granted
+// +kubebuilder:validation:MinItems:=1
 type GrantPrivileges []GrantPrivilege
 
 // ToStringSlice converts the slice of privileges to strings
@@ -47,7 +49,6 @@ func (gp *GrantPrivileges) ToStringSlice() []string {
 	for i, v := range *gp {
 		out[i] = string(v)
 	}
-	sort.Strings(out)
 	return out
 }
 

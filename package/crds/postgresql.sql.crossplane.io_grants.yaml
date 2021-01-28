@@ -103,6 +103,7 @@ spec:
                       description: GrantPrivilege represents a privilege to be granted
                       pattern: '[A-Z]+'
                       type: string
+                    minItems: 1
                     type: array
                   role:
                     description: Role this grant is for.
