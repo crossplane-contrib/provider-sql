@@ -255,7 +255,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("test-example"),
 							Role:       pointer.StringPtr("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
 						},
 					},
 				},

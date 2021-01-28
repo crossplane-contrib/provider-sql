@@ -149,6 +149,7 @@ func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
 	if pc < 1 {
 		return "", errors.New(errNoPrivileges)
 	}
+
 	// This is ROLE_DATABASE
 	return roleDatabase, nil
 }
@@ -185,15 +186,20 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		sp := gp.Privileges.ToStringSlice()
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
-		// permissions. Input permissions MUST be sorted.
-		q.String = "SELECT EXISTS(SELECT 1 FROM pg_database db, " +
+		// permissions.
+		q.String = "SELECT EXISTS(SELECT 1 " +
+			"FROM pg_database db, " +
 			"aclexplode(datacl) as acl " +
 			"INNER JOIN pg_authid s ON acl.grantee = s.oid " +
+			// Filter by database, role and grantable setting
 			"WHERE db.datname=$1 " +
 			"AND s.rolname=$2 " +
+			"AND acl.is_grantable=$3 " +
 			"GROUP BY db.datname, s.rolname, acl.is_grantable " +
-			"HAVING acl.is_grantable = $3 " +
-			"AND array_agg(acl.privilege_type ORDER BY privilege_type ASC) = $4::text[])"
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
 
 		q.Parameters = []interface{}{
 			gp.Database,
@@ -219,19 +225,19 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		return err
 	}
 
+	ro := pq.QuoteIdentifier(*gp.Role)
+
 	switch gt {
 	case roleMember:
 		if gp.MemberOf == nil || gp.Role == nil {
 			return errors.Errorf(errInvalidParams, roleMember)
 		}
+
+		mo := pq.QuoteIdentifier(*gp.MemberOf)
+
 		*ql = append(*ql,
-			xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s",
-				pq.QuoteIdentifier(*gp.MemberOf),
-				pq.QuoteIdentifier(*gp.Role),
-			)},
-			xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s",
-				pq.QuoteIdentifier(*gp.MemberOf),
-				pq.QuoteIdentifier(*gp.Role),
+			xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
+			xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
 				withOption("ADMIN", gp.WithAdminOption),
 			)},
 		)
@@ -241,18 +247,22 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 			return errors.Errorf(errInvalidParams, roleDatabase)
 		}
 
+		db := pq.QuoteIdentifier(*gp.Database)
+		sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
 		*ql = append(*ql,
-			// REVOKE ANY EXISTING PERMISSIONS
-			xsql.Query{String: fmt.Sprintf("REVOKE ALL ON DATABASE %s FROM %s",
-				pq.QuoteIdentifier(*gp.Database),
-				pq.QuoteIdentifier(*gp.Role),
+			// REVOKE ANY MATCHING EXISTING PERMISSIONS
+			xsql.Query{String: fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+				sp,
+				db,
+				ro,
 			)},
 
 			// GRANT REQUESTED PERMISSIONS
 			xsql.Query{String: fmt.Sprintf("GRANT %s ON DATABASE %s TO %s %s",
-				strings.Join(gp.Privileges.ToStringSlice(), ","),
-				pq.QuoteIdentifier(*gp.Database),
-				pq.QuoteIdentifier(*gp.Role),
+				sp,
+				db,
+				ro,
 				withOption("GRANT", gp.WithGrantOption),
 			)},
 		)
@@ -267,17 +277,20 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		return err
 	}
 
+	ro := pq.QuoteIdentifier(*gp.Role)
+
 	switch gt {
 	case roleMember:
 		q.String = fmt.Sprintf("REVOKE %s FROM %s",
 			pq.QuoteIdentifier(*gp.MemberOf),
-			pq.QuoteIdentifier(*gp.Role),
+			ro,
 		)
 		return nil
 	case roleDatabase:
-		q.String = fmt.Sprintf("REVOKE ALL ON DATABASE %s FROM %s",
+		q.String = fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			pq.QuoteIdentifier(*gp.Database),
-			pq.QuoteIdentifier(*gp.Role),
+			ro,
 		)
 		return nil
 	}
