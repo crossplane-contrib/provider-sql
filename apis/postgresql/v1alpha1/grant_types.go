@@ -125,6 +125,10 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.role"
+// +kubebuilder:printcolumn:name="MEMBER OF",type="string",JSONPath=".spec.forProvider.memberOf"
+// +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
+// +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
 // +kubebuilder:resource:scope=Cluster
 type Grant struct {
 	metav1.TypeMeta   `json:",inline"`
