@@ -45,6 +45,9 @@ type GrantPrivileges []GrantPrivilege
 
 // ToStringSlice converts the slice of privileges to strings
 func (gp *GrantPrivileges) ToStringSlice() []string {
+	if gp == nil {
+		return []string{}
+	}
 	out := make([]string, len(*gp))
 	for i, v := range *gp {
 		out[i] = string(v)

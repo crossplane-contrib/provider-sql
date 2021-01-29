@@ -309,15 +309,13 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	gp := cr.Spec.ForProvider
 	var query xsql.Query
-	err := selectGrantQuery(gp, &query)
-
-	if err != nil {
+	if err := selectGrantQuery(gp, &query); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
 	exists := false
 
-	if err = c.db.Scan(ctx, query, &exists); err != nil {
+	if err := c.db.Scan(ctx, query, &exists); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
 	}
 
@@ -349,11 +347,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
 
-	if err := c.db.ExecTx(ctx, queries); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
-	}
-
-	return managed.ExternalCreation{}, nil
+	err := c.db.ExecTx(ctx, queries)
+	return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -377,20 +372,4 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	return errors.Wrap(c.db.Exec(ctx, query), errRevokeGrant)
-}
-
-// QuoteIdentifierArray for PostgreSQL queries
-func QuoteIdentifierArray(ia []string) string {
-	if len(ia) < 1 {
-		return ""
-	}
-
-	o := make([]string, len(ia))
-
-	for i, s := range ia {
-		o[i] = pq.QuoteIdentifier(s)
-	}
-
-	return strings.Join(o, ",")
-
 }
