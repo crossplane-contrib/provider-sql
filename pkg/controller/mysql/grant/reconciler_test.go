@@ -274,7 +274,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("success-db"),
 							User:       pointer.StringPtr("no-user"),
-							Privileges: []string{"DROP", "CREATE"},
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
 				},
@@ -302,7 +302,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("success-db"),
 							User:       pointer.StringPtr("success-user"),
-							Privileges: []string{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
 				},
@@ -334,7 +334,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("success-db"),
 							User:       pointer.StringPtr("diff-user"),
-							Privileges: []string{"DROP"},
+							Privileges: v1alpha1.GrantPrivileges{"DROP"},
 						},
 					},
 				},
@@ -365,7 +365,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("success-db"),
 							User:       pointer.StringPtr("success-user"),
-							Privileges: []string{"DROP", "CREATE"},
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
 				},
@@ -558,7 +558,7 @@ func TestUpdate(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("test-example"),
 							User:       pointer.StringPtr("test-example"),
-							Privileges: []string{"CREATE", "DROP"},
+							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
 						},
 					},
 				},

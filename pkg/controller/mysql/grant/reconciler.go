@@ -143,7 +143,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return *result, nil
 	}
 
-	if !privilegesEqual(cr.Spec.ForProvider.Privileges, privileges) {
+	if !privilegesEqual(cr.Spec.ForProvider.Privileges.ToStringSlice(), privileges) {
 		return managed.ExternalObservation{
 			ResourceExists:   true,
 			ResourceUpToDate: false,
@@ -235,7 +235,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges, ", ")
+	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
 	query := createGrantQuery(privileges, dbname, username)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
@@ -254,7 +254,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges, ", ")
+	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
 	// Remove current grants since it's not possible to update grants.
@@ -298,7 +298,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges, ", ")
+	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
 	query := fmt.Sprintf("REVOKE %s ON %s.* FROM %s@%s",
