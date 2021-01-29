@@ -135,7 +135,7 @@ func negateClause(clause string, negate *bool, out *[]string) {
 	*out = append(*out, clause)
 }
 
-func privilegesToClauses(p v1alpha1.RolePrivilege) string {
+func privilegesToClauses(p v1alpha1.RolePrivilege) []string {
 	// Never copy user inputted data to this string. These values are
 	// passed directly into the query.
 	pc := []string{}
@@ -149,7 +149,7 @@ func privilegesToClauses(p v1alpha1.RolePrivilege) string {
 	negateClause("BYPASSRLS", p.BypassRls, &pc)
 
 	sort.Strings(pc)
-	return strings.Join(pc, " ")
+	return pc
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -252,7 +252,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			"CREATE ROLE %s PASSWORD %s %s",
 			crn,
 			pq.QuoteLiteral(pw),
-			privs,
+			strings.Join(privs, " "),
 		),
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
@@ -292,7 +292,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(privs) > 0 {
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: fmt.Sprintf("ALTER ROLE %s %s", crn, privs),
+			String: fmt.Sprintf("ALTER ROLE %s %s", crn, strings.Join(privs, " ")),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}

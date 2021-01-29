@@ -140,8 +140,10 @@ spec:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
                   privilegesAsClauses:
-                    description: PrivilegesAsClauses represents the applied privileges state, taking into account any defaults applied by Postgres, and expressed as a space separated string of ROLE PRIVILEGE clauses.
-                    type: string
+                    description: PrivilegesAsClauses represents the applied privileges state, taking into account any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
+                    items:
+                      type: string
+                    type: array
                 type: object
               conditions:
                 description: Conditions of the resource.
