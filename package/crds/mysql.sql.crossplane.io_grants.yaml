@@ -24,6 +24,15 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
+    - jsonPath: .spec.forProvider.user
+      name: ROLE
+      type: string
+    - jsonPath: .spec.forProvider.database
+      name: DATABASE
+      type: string
+    - jsonPath: .spec.forProvider.privileges
+      name: PRIVILEGES
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -76,7 +85,10 @@ spec:
                   privileges:
                     description: Privileges to be granted. See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
                     items:
+                      description: GrantPrivilege represents a privilege to be granted
+                      pattern: ^[A-Z_ ]+$
                       type: string
+                    minItems: 1
                     type: array
                   user:
                     description: User this grant is for.

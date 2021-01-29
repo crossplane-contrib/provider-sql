@@ -33,11 +33,33 @@ type GrantSpec struct {
 	ForProvider       GrantParameters `json:"forProvider"`
 }
 
+// GrantPrivilege represents a privilege to be granted
+// +kubebuilder:validation:Pattern:=^[A-Z_ ]+$
+type GrantPrivilege string
+
+// If Privileges are specified, we should have at least one
+
+// GrantPrivileges is a list of the privileges to be granted
+// +kubebuilder:validation:MinItems:=1
+type GrantPrivileges []GrantPrivilege
+
+// ToStringSlice converts the slice of privileges to strings
+func (gp *GrantPrivileges) ToStringSlice() []string {
+	if gp == nil {
+		return []string{}
+	}
+	out := make([]string, len(*gp))
+	for i, v := range *gp {
+		out[i] = string(v)
+	}
+	return out
+}
+
 // GrantParameters define the desired state of a MySQL grant instance.
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
-	Privileges []string `json:"privileges"`
+	Privileges GrantPrivileges `json:"privileges"`
 
 	// User this grant is for.
 	// +optional
@@ -80,6 +102,9 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
+// +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
+// +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
 // +kubebuilder:resource:scope=Cluster
 type Grant struct {
 	metav1.TypeMeta   `json:",inline"`
