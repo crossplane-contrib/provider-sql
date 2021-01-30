@@ -37,7 +37,6 @@ type RoleStatus struct {
 // RolePrivilege is the PostgreSQL identifier to add or remove a permission
 // on a role.
 // See https://www.postgresql.org/docs/current/sql-createrole.html for available privileges.
-// INHERIT;NOINHERIT; not implemented here as we don't currently implement role membership.
 type RolePrivilege struct {
 	// SuperUser grants SUPERUSER privilege when true.
 	// +optional
