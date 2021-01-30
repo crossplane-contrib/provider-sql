@@ -162,7 +162,7 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 
 	switch gt {
 	case roleMember:
-		ao := gp.WithAdminOption != nil && *gp.WithAdminOption
+		ao := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionAdmin
 
 		// Always returns a row with a true or false value
 		// A simpler query would use ::regrol to cast the
@@ -182,7 +182,7 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		}
 		return nil
 	case roleDatabase:
-		gro := gp.WithGrantOption != nil && *gp.WithGrantOption
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
 		sp := gp.Privileges.ToStringSlice()
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
@@ -212,9 +212,9 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	return errors.New(errUnknownGrant)
 }
 
-func withOption(option string, with *bool) string {
-	if with != nil && *with {
-		return fmt.Sprintf("WITH %s OPTION", option)
+func withOption(option *v1alpha1.GrantOption) string {
+	if option != nil {
+		return fmt.Sprintf("WITH %s OPTION", string(*option))
 	}
 	return ""
 }
@@ -238,7 +238,7 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		*ql = append(*ql,
 			xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
 			xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
-				withOption("ADMIN", gp.WithAdminOption),
+				withOption(gp.WithOption),
 			)},
 		)
 		return nil
@@ -263,7 +263,7 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 				sp,
 				db,
 				ro,
-				withOption("GRANT", gp.WithGrantOption),
+				withOption(gp.WithOption),
 			)},
 		)
 		return nil

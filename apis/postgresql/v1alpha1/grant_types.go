@@ -55,6 +55,17 @@ func (gp *GrantPrivileges) ToStringSlice() []string {
 	return out
 }
 
+// GrantOption represents an OPTION that will be applied to a grant.
+// This modifies the behaviour of the grant depending on the type of
+// grant and option applied.
+type GrantOption string
+
+// The possible values for grant option type.
+const (
+	GrantOptionAdmin GrantOption = "ADMIN"
+	GrantOptionGrant GrantOption = "GRANT"
+)
+
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 type GrantParameters struct {
 	// Privileges to be granted.
@@ -62,13 +73,12 @@ type GrantParameters struct {
 	// +optional
 	Privileges GrantPrivileges `json:"privileges,omitempty"`
 
-	// WithGrantOption allows a granted role to grant the given privileges to another role.
+	// WithOption allows an option to be set on the grant.
+	// See https://www.postgresql.org/docs/current/sql-grant.html for available
+	// options for each grant type, and the effects of applying the option.
+	// +kubebuilder:validation:Enum=ADMIN;GRANT
 	// +optional
-	WithGrantOption *bool `json:"withGrantOption,omitempty"`
-
-	// WithAdminOption allows a granted role to grant another role membership of a group.
-	// +optional
-	WithAdminOption *bool `json:"withAdminOption,omitempty"`
+	WithOption *GrantOption `json:"withOption,omitempty"`
 
 	// Role this grant is for.
 	// +optional

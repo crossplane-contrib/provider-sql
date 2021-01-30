@@ -244,14 +244,9 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = make(GrantPrivileges, len(*in))
 		copy(*out, *in)
 	}
-	if in.WithGrantOption != nil {
-		in, out := &in.WithGrantOption, &out.WithGrantOption
-		*out = new(bool)
-		**out = **in
-	}
-	if in.WithAdminOption != nil {
-		in, out := &in.WithAdminOption, &out.WithAdminOption
-		*out = new(bool)
+	if in.WithOption != nil {
+		in, out := &in.WithOption, &out.WithOption
+		*out = new(GrantOption)
 		**out = **in
 	}
 	if in.Role != nil {

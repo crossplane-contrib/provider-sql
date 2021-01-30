@@ -183,6 +183,8 @@ func TestConnect(t *testing.T) {
 
 func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
+	goa := v1alpha1.GrantOptionAdmin
+	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
 		db xsql.DB
@@ -241,7 +243,7 @@ func TestObserve(t *testing.T) {
 			},
 		},
 		"ErrSelectGrant": {
-			reason: "We should return any errors encountered while trying to show the grants",
+			reason: "We should return any errors encountered while trying to show the grant",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
@@ -256,6 +258,7 @@ func TestObserve(t *testing.T) {
 							Database:   pointer.StringPtr("test-example"),
 							Role:       pointer.StringPtr("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
+							WithOption: &gog,
 						},
 					},
 				},
@@ -264,8 +267,8 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errBoom, errSelectGrant),
 			},
 		},
-		"Success": {
-			reason: "We should return no error if we can find our grant",
+		"SuccessRoleDb": {
+			reason: "We should return no error if we can find our role-db grant",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
@@ -279,10 +282,40 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:        pointer.StringPtr("testdb"),
-							Role:            pointer.StringPtr("testrole"),
-							Privileges:      v1alpha1.GrantPrivileges{"ALL"},
-							WithAdminOption: pointer.BoolPtr(true),
+							Database:   pointer.StringPtr("testdb"),
+							Role:       pointer.StringPtr("testrole"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleMembership": {
+			reason: "We should return no error if we can find our role-membership grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:       pointer.StringPtr("testrole"),
+							MemberOf:   pointer.StringPtr("parentrole"),
+							WithOption: &goa,
 						},
 					},
 				},
