@@ -141,12 +141,12 @@ spec:
                         description: MatchLabels ensures an object with matching labels is selected.
                         type: object
                     type: object
-                  withAdminOption:
-                    description: WithAdminOption allows a granted role to grant another role membership of a group.
-                    type: boolean
-                  withGrantOption:
-                    description: WithGrantOption allows a granted role to grant the given privileges to another role.
-                    type: boolean
+                  withOption:
+                    description: WithOption allows an option to be set on the grant. See https://www.postgresql.org/docs/current/sql-grant.html for available options for each grant type, and the effects of applying the option.
+                    enum:
+                    - ADMIN
+                    - GRANT
+                    type: string
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.

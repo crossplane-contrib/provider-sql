@@ -6,7 +6,7 @@ spec:
   forProvider:
     privileges:
       - CREATE
-    withGrantOption: true
+    withOption: GRANT
     roleRef:
       name: example-role
     databaseRef:
@@ -21,7 +21,6 @@ spec:
     privileges:
       - CONNECT
       - TEMPORARY
-    withGrantOption: false
     roleRef:
       name: example-role
     databaseRef:
@@ -33,6 +32,7 @@ metadata:
   name: example-grant-role-membership
 spec:
   forProvider:
+    withOption: ADMIN
     roleRef:
       name: example-role
     memberOfRef:
