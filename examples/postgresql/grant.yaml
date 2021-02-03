@@ -1,0 +1,39 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-database
+spec:
+  forProvider:
+    privileges:
+      - CREATE
+    withOption: GRANT
+    roleRef:
+      name: example-role
+    databaseRef:
+      name: example
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-2-on-database
+spec:
+  forProvider:
+    privileges:
+      - CONNECT
+      - TEMPORARY
+    roleRef:
+      name: example-role
+    databaseRef:
+      name: example
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-membership
+spec:
+  forProvider:
+    withOption: ADMIN
+    roleRef:
+      name: example-role
+    memberOfRef:
+      name: parent-role

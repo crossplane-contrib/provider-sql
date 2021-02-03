@@ -14,20 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package user
+package role
 
 import (
 	"context"
 	"database/sql"
 	"testing"
 
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -57,12 +58,12 @@ func (m mockDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) err
 func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	return &sql.Rows{}, nil
 }
-func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
+func (m mockDB) GetConnectionDetails(rolename, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
+		xpv1.ResourceCredentialsSecretUserKey:     []byte(rolename),
 		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+		xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 	}
 }
 
@@ -86,12 +87,12 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
+		"ErrNotRole": {
+			reason: "An error should be returned if the managed resource is not a *Role",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotUser),
+			want: errors.New(errNotRole),
 		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
@@ -99,7 +100,7 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
 		},
@@ -112,8 +113,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -126,7 +127,7 @@ func TestConnect(t *testing.T) {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
 			fields: fields{
 				kube: &test.MockClient{
-					// We call get to populate the User struct, then again
+					// We call get to populate the Role struct, then again
 					// to populate the (empty) ProviderConfig struct, resulting
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
@@ -134,8 +135,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -161,8 +162,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -208,58 +209,65 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
+		"ErrNotRole": {
+			reason: "An error should be returned if the managed resource is not a *Role",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotUser),
+				err: errors.New(errNotRole),
 			},
 		},
-		"ErrNoUser": {
-			reason: "We should return ResourceExists: false when no user is found",
+		"ErrNoRole": {
+			reason: "We should return ResourceExists: false when no role is found",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
 			want: want{
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
-		"ErrSelectUser": {
-			reason: "We should return any errors encountered while trying to select the user",
+		"ErrSelectRole": {
+			reason: "We should return any errors encountered while trying to select the role",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errSelectUser),
+				err: errors.Wrap(errBoom, errSelectRole),
 			},
 		},
 		"Success": {
-			reason: "We should return no error if we can successfully select our user",
+			reason: "We should return no error if we can successfully select our role",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: nil,
+						},
+					},
+				},
 			},
 			want: want{
 				o: managed.ExternalObservation{
 					ResourceExists:          true,
 					ResourceUpToDate:        true,
-					ResourceLateInitialized: false,
+					ResourceLateInitialized: true,
 				},
 				err: nil,
 			},
@@ -282,15 +290,17 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
 							PasswordSecretRef: &xpv1.SecretKeySelector{
 								SecretReference: xpv1.SecretReference{
 									Name: "example",
 								},
 								Key: "password",
 							},
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: pointer.Int32Ptr(10),
 						},
 						ResourceSpec: xpv1.ResourceSpec{
 							WriteConnectionSecretToReference: &xpv1.SecretReference{
@@ -302,8 +312,9 @@ func TestObserve(t *testing.T) {
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: false,
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
+					ResourceLateInitialized: true,
 				},
 				err: nil,
 			},
@@ -352,69 +363,50 @@ func TestCreate(t *testing.T) {
 		args      args
 		want      want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
+		"ErrNotRole": {
+			reason: "An error should be returned if the managed resource is not a *Role",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotUser),
+				err: errors.New(errNotRole),
 			},
 		},
 		"ErrExec": {
-			reason: "Any errors encountered while creating the user should be returned",
+			reason: "Any errors encountered while creating the role should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateUser),
+				err: errors.Wrap(errBoom, errCreateRole),
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we successfully create a user",
+			reason: "No error should be returned when we successfully create a role",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
+				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
-				},
-			},
-			want: want{
-				err: nil,
-				c: managed.ExternalCreation{
-					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
-					},
-				},
-			},
-		},
-		"UserWithHost": {
-			reason: "The username must be split if it contains a host",
-			fields: fields{
-				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
-				},
-			},
-			args: args{
-				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
-						Annotations: map[string]string{
-							meta.AnnotationKeyExternalName: "example@127.0.0.1",
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							Privileges: v1alpha1.RolePrivilege{
+								CreateDb:   new(bool),
+								Login:      new(bool),
+								CreateRole: new(bool),
+							},
 						},
 					},
 				},
@@ -426,12 +418,12 @@ func TestCreate(t *testing.T) {
 						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
 						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
 						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
 		},
-		"UserWithPasswordRef": {
+		"RoleWithPasswordRef": {
 			reason:    "The password must be read from the secret",
 			comparePw: true,
 			fields: fields{
@@ -455,14 +447,14 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
+				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
-					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
 							PasswordSecretRef: &xpv1.SecretKeySelector{
 								SecretReference: xpv1.SecretReference{
 									Name: "example",
@@ -480,7 +472,7 @@ func TestCreate(t *testing.T) {
 						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
 						xpv1.ResourceCredentialsSecretPasswordKey: []byte("test1234"),
 						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
@@ -532,26 +524,26 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
+		"ErrNotRole": {
+			reason: "An error should be returned if the managed resource is not a *Role",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotUser),
+				err: errors.New(errNotRole),
 			},
 		},
 		"ErrExec": {
-			reason: "Any errors encountered while updating the user should be returned",
+			reason: "Any errors encountered while updating the role should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
 							PasswordSecretRef: &xpv1.SecretKeySelector{
 								SecretReference: xpv1.SecretReference{
 									Name: "connection-secret",
@@ -578,18 +570,18 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errUpdateUser),
+				err: errors.Wrap(errBoom, errUpdateRole),
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we don't have to update a user",
+			reason: "No error should be returned when we don't have to update a role",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
+				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
@@ -602,15 +594,21 @@ func TestUpdate(t *testing.T) {
 				c:   managed.ExternalUpdate{},
 			},
 		},
+		// WILL FAIL
 		"SamePassword": {
 			reason: "No DB query should be executed if the password didn't change",
 			fields: fields{
 				db: &mockDB{},
 			},
 			args: args{
-				mg: &v1alpha1.User{
-					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
 							PasswordSecretRef: &xpv1.SecretKeySelector{
 								SecretReference: xpv1.SecretReference{
 									Name: "connection-secret",
@@ -646,14 +644,14 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{
+				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
-					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
 							PasswordSecretRef: &xpv1.SecretKeySelector{
 								SecretReference: xpv1.SecretReference{
 									Name: "example",
@@ -698,7 +696,7 @@ func TestUpdate(t *testing.T) {
 						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
 						xpv1.ResourceCredentialsSecretPasswordKey: []byte("newpassword"),
 						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
@@ -740,15 +738,15 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
+		"ErrNotRole": {
+			reason: "An error should be returned if the managed resource is not a *Role",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotUser),
+			want: errors.New(errNotRole),
 		},
 		"ErrDropDB": {
-			reason: "Errors dropping a user should be returned",
+			reason: "Errors dropping a role should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
@@ -757,9 +755,9 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
-			want: errors.Wrap(errBoom, errDropUser),
+			want: errors.Wrap(errBoom, errDropRole),
 		},
 		"Success": {
 			reason: "No error should be returned",
@@ -771,7 +769,7 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.Role{},
 			},
 		},
 	}
