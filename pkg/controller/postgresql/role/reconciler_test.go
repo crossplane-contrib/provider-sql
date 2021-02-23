@@ -814,6 +814,60 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ErrComparePrivs": {
+			reason: "We should error if observed privilege list is shorter than desired privilege list",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							Privileges: v1alpha1.RolePrivilege{
+								Login:    pointer.BoolPtr(true),
+								Inherit:  pointer.BoolPtr(false),
+								CreateDb: pointer.BoolPtr(true),
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							// One privilege field observed but 3 privileges
+							// to apply. Throw error.
+							PrivilegesAsClauses: []string{"NOINHERIT"},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.New(errComparePrivileges), errUpdateRole),
+			},
+		},
 	}
 
 	for name, tc := range cases {
