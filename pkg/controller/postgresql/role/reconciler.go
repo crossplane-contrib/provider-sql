@@ -54,6 +54,7 @@ const (
 	errDropRole                = "cannot drop role"
 	errUpdateRole              = "cannot update role"
 	errGetPasswordSecretFailed = "cannot get password secret"
+	errComparePrivileges       = "cannot compare desired and observed privileges"
 )
 
 // Setup adds a controller that reconciles Role managed resources.
@@ -150,8 +151,15 @@ func privilegesToClauses(p v1alpha1.RolePrivilege) []string {
 	return pc
 }
 
-func changedPrivs(existing []string, desired []string) []string {
+func changedPrivs(existing []string, desired []string) ([]string, error) {
 	out := []string{}
+
+	// Make sure existing observation has at least as many items as
+	// desired. If it does not, then we cannot safely compare
+	// privileges.
+	if len(existing) < len(desired) {
+		return nil, errors.New(errComparePrivileges)
+	}
 
 	// The input slices here are outputted by privilegesToClauses above.
 	// Because these are created by repeated calls to negateClause in the
@@ -163,7 +171,7 @@ func changedPrivs(existing []string, desired []string) []string {
 			out = append(out, v)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -282,7 +290,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
+	// NOTE(benagricola): This is just a touch over the cyclomatic complexity
+	// limit, but is unlikely to become more complex unless new role features
+	// are added. Think about splitting this method up if new functionality
+	// is desired.
 	cr, ok := mg.(*v1alpha1.Role)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotRole)
@@ -304,7 +316,11 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
-	cp := changedPrivs(cr.Status.AtProvider.PrivilegesAsClauses, privs)
+	cp, err := changedPrivs(cr.Status.AtProvider.PrivilegesAsClauses, privs)
+
+	if err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
+	}
 
 	if len(cp) > 0 {
 		if err := c.db.Exec(ctx, xsql.Query{
