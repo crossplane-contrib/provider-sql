@@ -19,7 +19,6 @@ package role
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -148,8 +147,23 @@ func privilegesToClauses(p v1alpha1.RolePrivilege) []string {
 	negateClause("REPLICATION", p.Replication, &pc)
 	negateClause("BYPASSRLS", p.BypassRls, &pc)
 
-	sort.Strings(pc)
 	return pc
+}
+
+func changedPrivs(existing []string, desired []string) []string {
+	out := []string{}
+
+	// The input slices here are outputted by privilegesToClauses above.
+	// Because these are created by repeated calls to negateClause in the
+	// same order, we can rely on each clause being in the same array
+	// position in the 'desired' and 'existing' inputs.
+
+	for i, v := range desired {
+		if v != existing[i] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -280,7 +294,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
-	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
 
 	if pwchanged {
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -290,13 +303,21 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	if len(privs) > 0 {
+	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
+	cp := changedPrivs(cr.Status.AtProvider.PrivilegesAsClauses, privs)
+
+	if len(cp) > 0 {
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: fmt.Sprintf("ALTER ROLE %s %s", crn, strings.Join(privs, " ")),
+			String: fmt.Sprintf("ALTER ROLE %s %s", crn, strings.Join(cp, " ")),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 	}
+
+	// PrivilegesAsClauses is used as role status output
+	// Update here so that state is reflected to the user prior to the next
+	// reconciler loop.
+	cr.Status.AtProvider.PrivilegesAsClauses = privs
 
 	cl := cr.Spec.ForProvider.ConnectionLimit
 	if cl != nil {
@@ -306,10 +327,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 	}
-	// PrivilegesAsClauses is used as role status output
-	// Update here so that state is reflected to the user prior to the next
-	// reconciler loop.
-	cr.Status.AtProvider.PrivilegesAsClauses = privs
 
 	// Only update connection details if password is changed
 	if pwchanged {
