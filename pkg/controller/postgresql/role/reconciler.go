@@ -327,7 +327,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 	cr.SetConditions(xpv1.Deleting())
 	err := c.db.Exec(ctx, xsql.Query{
-		String: "DROP ROLE IF EXISTS" + pq.QuoteIdentifier(meta.GetExternalName(cr)),
+		String: "DROP ROLE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr)),
 	})
 	return errors.Wrap(err, errDropRole)
 }
