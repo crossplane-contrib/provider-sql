@@ -166,38 +166,41 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}},
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
 		Extract:      reference.ExternalName(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "spec.forProvider.database")
 	}
 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
 	// Resolve spec.forProvider.role
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
 		Reference:    mg.Spec.ForProvider.RoleRef,
 		Selector:     mg.Spec.ForProvider.RoleSelector,
-		To:           reference.To{Managed: &Role{}},
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
 		Extract:      reference.ExternalName(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "spec.forProvider.role")
 	}
 	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
 
 	// Resolve spec.forProvider.memberOf
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.MemberOf),
 		Reference:    mg.Spec.ForProvider.MemberOfRef,
 		Selector:     mg.Spec.ForProvider.MemberOfSelector,
-		To:           reference.To{Managed: &Role{}},
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
 		Extract:      reference.ExternalName(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "spec.forProvider.memberOf")
 	}
 	mg.Spec.ForProvider.MemberOf = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.MemberOfRef = rsp.ResolvedReference
 	return nil
 }
