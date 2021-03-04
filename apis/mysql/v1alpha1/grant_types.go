@@ -132,26 +132,28 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}},
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
 		Extract:      reference.ExternalName(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "spec.forProvider.database")
 	}
 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
 	// Resolve spec.forProvider.user
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
 		Reference:    mg.Spec.ForProvider.UserRef,
 		Selector:     mg.Spec.ForProvider.UserSelector,
-		To:           reference.To{Managed: &User{}},
+		To:           reference.To{Managed: &User{}, List: &UserList{}},
 		Extract:      reference.ExternalName(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "spec.forProvider.user")
 	}
 	mg.Spec.ForProvider.User = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.UserRef = rsp.ResolvedReference
 
 	return nil
 }
