@@ -170,8 +170,8 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		// if this is used with a nonexistent role name it will
 		// throw an error rather than return false.
 		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
-			"INNER JOIN pg_authid mo ON m.roleid = mo.oid " +
-			"INNER JOIN pg_authid r ON m.member = r.oid " +
+			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+			"INNER JOIN pg_roles r ON m.member = r.oid " +
 			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
 			"m.admin_option = $3)"
 
@@ -190,7 +190,7 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		q.String = "SELECT EXISTS(SELECT 1 " +
 			"FROM pg_database db, " +
 			"aclexplode(datacl) as acl " +
-			"INNER JOIN pg_authid s ON acl.grantee = s.oid " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
 			// Filter by database, role and grantable setting
 			"WHERE db.datname=$1 " +
 			"AND s.rolname=$2 " +
