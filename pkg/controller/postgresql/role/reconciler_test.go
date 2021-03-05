@@ -19,11 +19,13 @@ package role
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -594,7 +596,6 @@ func TestUpdate(t *testing.T) {
 				c:   managed.ExternalUpdate{},
 			},
 		},
-		// WILL FAIL
 		"SamePassword": {
 			reason: "No DB query should be executed if the password didn't change",
 			fields: fields{
@@ -699,6 +700,172 @@ func TestUpdate(t *testing.T) {
 						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
+			},
+		},
+		"NoUpdateUnchangedPrivs": {
+			reason: "We should only try to set privileges whose values have changed.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						// Verify that query contains only the identifier that we
+						// expect, otherwise return a boom.
+						crn := pq.QuoteIdentifier("example")
+						if q.String != fmt.Sprintf("ALTER ROLE %s NOINHERIT", crn) {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							Privileges: v1alpha1.RolePrivilege{
+								Login:   pointer.BoolPtr(true),
+								Inherit: pointer.BoolPtr(false),
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							// Observed status vs. Requested status means we should ALTER
+							// to NOINHERIT. Order is important here, make sure this
+							// matches the order in privilegesToClauses()
+							PrivilegesAsClauses: []string{"INHERIT", "LOGIN"},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{},
+		},
+		"NoUpdateQueryNoChangedPrivs": {
+			reason: "We should not execute an SQL query if privileges are unchanged.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							Privileges: v1alpha1.RolePrivilege{
+								Login:   pointer.BoolPtr(true),
+								Inherit: pointer.BoolPtr(false),
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							// Observed privileges are the same as requested,
+							// and in the same order. We should not make any
+							// query to update privileges.
+							PrivilegesAsClauses: []string{"NOINHERIT", "LOGIN"},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"ErrComparePrivs": {
+			reason: "We should error if observed privilege list is shorter than desired privilege list",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							Privileges: v1alpha1.RolePrivilege{
+								Login:    pointer.BoolPtr(true),
+								Inherit:  pointer.BoolPtr(false),
+								CreateDb: pointer.BoolPtr(true),
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							// One privilege field observed but 3 privileges
+							// to apply. Throw error.
+							PrivilegesAsClauses: []string{"NOINHERIT"},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj runtime.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.New(errComparePrivileges), errUpdateRole),
 			},
 		},
 	}
