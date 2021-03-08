@@ -10,7 +10,7 @@ spec:
   names:
     categories:
     - crossplane
-    - managed
+    - provider
     - sql
     kind: ProviderConfigUsage
     listKind: ProviderConfigUsageList
