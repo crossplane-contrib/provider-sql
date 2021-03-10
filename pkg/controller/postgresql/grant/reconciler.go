@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -56,6 +57,8 @@ const (
 	errUnknownGrant = "cannot identify grant type based on passed params"
 
 	errInvalidParams = "invalid parameters for grant type %s"
+
+	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
@@ -73,6 +76,9 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.Grant{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: maxConcurrency,
+		}).
 		Complete(r)
 }
 
