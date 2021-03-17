@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -56,6 +57,8 @@ const (
 	errAlterDBAllowConns = "cannot alter database allow connections"
 	errAlterDBIsTmpl     = "cannot alter database is template"
 	errDropDB            = "cannot drop database"
+
+	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Database managed resources.
@@ -72,6 +75,9 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.Database{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: maxConcurrency,
+		}).
 		Complete(r)
 }
 
