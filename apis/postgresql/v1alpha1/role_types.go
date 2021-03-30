@@ -100,7 +100,7 @@ type RoleObservation struct {
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="CONN LIMIT",type="integer",JSONPath=".spec.forProvider.connectionLimit"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".status.atProvider.privilegesAsClauses"
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
 type Role struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

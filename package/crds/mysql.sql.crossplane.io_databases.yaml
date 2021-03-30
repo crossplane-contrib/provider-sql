@@ -8,6 +8,10 @@ metadata:
 spec:
   group: mysql.sql.crossplane.io
   names:
+    categories:
+    - crossplane
+    - managed
+    - sql
     kind: Database
     listKind: DatabaseList
     plural: databases
