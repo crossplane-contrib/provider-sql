@@ -8,6 +8,10 @@ metadata:
 spec:
   group: postgresql.sql.crossplane.io
   names:
+    categories:
+    - crossplane
+    - provider
+    - sql
     kind: ProviderConfigUsage
     listKind: ProviderConfigUsageList
     plural: providerconfigusages

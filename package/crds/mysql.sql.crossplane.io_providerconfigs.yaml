@@ -8,6 +8,10 @@ metadata:
 spec:
   group: mysql.sql.crossplane.io
   names:
+    categories:
+    - crossplane
+    - provider
+    - sql
     kind: ProviderConfig
     listKind: ProviderConfigList
     plural: providerconfigs
