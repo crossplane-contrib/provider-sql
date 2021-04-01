@@ -135,7 +135,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"WHERE extname=$1"
 
 	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
-		observed.Extension,
 		observed.Version,
 	)
 
