@@ -121,7 +121,7 @@ spec:
             - forProvider
             type: object
           status:
-            description: A Extensiontatus represents the observed state of a Extension.
+            description: A ExtensionStatus represents the observed state of a Extension.
             properties:
               conditions:
                 description: Conditions of the resource.

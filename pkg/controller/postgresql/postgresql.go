@@ -23,9 +23,9 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/config"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/extension"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/grant"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/role"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/extension"
 )
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds

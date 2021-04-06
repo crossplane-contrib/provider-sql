@@ -48,10 +48,10 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotExtension      = "managed resource is not a Extension custom resource"
-	errSelectExtension   = "cannot select extension"
-	errCreateExtension   = "cannot create extension"
-	errDropExtension     = "cannot drop extension"
+	errNotExtension    = "managed resource is not a Extension custom resource"
+	errSelectExtension = "cannot select extension"
+	errCreateExtension = "cannot create extension"
+	errDropExtension   = "cannot drop extension"
 
 	maxConcurrency = 5
 )
@@ -125,8 +125,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	// If the Extension exists, it will have all of these properties.
 	observed := v1alpha1.ExtensionParameters{
-		Extension:          new(string),
-		Version:            new(string),
+		Extension: new(string),
+		Version:   new(string),
 	}
 
 	query := "SELECT " +
@@ -170,8 +170,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	var b strings.Builder
 	b.WriteString("CREATE EXTENSION ")
 
-	if cr.Spec.ForProvider.Extension != "" {
-		b.WriteString(pq.QuoteIdentifier(*&cr.Spec.ForProvider.Extension))
+	if cr.Spec.ForProvider.Extension != nil {
+		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Extension))
 	}
 	if cr.Spec.ForProvider.Version != nil {
 		b.WriteString(" VERSION ")
@@ -185,7 +185,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
 
-	cr, ok := mg.(*v1alpha1.Extension)
+	_, ok := mg.(*v1alpha1.Extension)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotExtension)
 	}
@@ -211,7 +211,7 @@ func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {
 	li := false
 
-	if desired.Extension == "" {
+	if desired.Extension == nil {
 		desired.Extension = observed.Extension
 		li = true
 	}

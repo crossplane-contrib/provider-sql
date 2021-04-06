@@ -25,7 +25,7 @@ import (
 // ExtensionParameters are the configurable fields of a Extension.
 type ExtensionParameters struct {
 	// Extension name to be installed
-	Extension string `json:"extension"`
+	Extension *string `json:"extension"`
 
 	// Extension Version to be installed
 	// +immutable
@@ -51,10 +51,9 @@ type ExtensionParameters struct {
 type ExtensionSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
 	ForProvider       ExtensionParameters `json:"forProvider"`
-
 }
 
-// A Extensiontatus represents the observed state of a Extension.
+// A ExtensionStatus represents the observed state of a Extension.
 type ExtensionStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
 }
