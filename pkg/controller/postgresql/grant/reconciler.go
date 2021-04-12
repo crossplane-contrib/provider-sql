@@ -79,7 +79,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte) xsql.DB
+	newDB func(creds map[string][]byte, database string) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -112,7 +112,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 	return &external{
-		db:   c.newDB(s.Data),
+		db:   c.newDB(s.Data, ""),
 		kube: c.kube,
 	}, nil
 }

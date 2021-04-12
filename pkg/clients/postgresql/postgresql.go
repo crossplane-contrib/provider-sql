@@ -16,8 +16,10 @@ type postgresDB struct {
 	port     string
 }
 
-// New returns a new PostgreSQL database client.
-func New(creds map[string][]byte) xsql.DB {
+// New returns a new PostgreSQL database client. The default database name is
+// an empty string. The underlying pq library will default to either using the
+// value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
+func New(creds map[string][]byte, database string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
@@ -26,7 +28,8 @@ func New(creds map[string][]byte) xsql.DB {
 			string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
 			string(creds[xpv1.ResourceCredentialsSecretPasswordKey]) + "@" +
 			endpoint + ":" +
-			port,
+			port + "/" +
+			database,
 		endpoint: endpoint,
 		port:     port,
 	}
