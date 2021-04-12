@@ -70,6 +70,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		resource.ManagedKind(v1alpha1.GrantGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
 		managed.WithLogger(l.WithValues("controller", name)),
+		managed.WithPollInterval(10*time.Minute),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
