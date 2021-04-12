@@ -128,7 +128,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	query := "SELECT " +
-		"extversion, " +
+		"extversion " +
 		"FROM pg_extension " +
 		"WHERE extname=$1"
 
