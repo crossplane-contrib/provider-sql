@@ -25,7 +25,7 @@ import (
 // ExtensionParameters are the configurable fields of a Extension.
 type ExtensionParameters struct {
 	// Extension name to be installed
-	Extension *string `json:"extension"`
+	Extension string `json:"extension"`
 
 	// Extension Version to be installed
 	// +immutable
@@ -35,16 +35,6 @@ type ExtensionParameters struct {
 	// Database for extension install.
 	// +optional
 	Database *string `json:"database"`
-
-	// DatabaseRef references the database object this extensions it for.
-	// +immutable
-	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef"`
-
-	// DatabaseSelector selects a reference to a Database this extension is for.
-	// +immutable
-	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector"`
 }
 
 // A ExtensionSpec defines the desired state of a Extension.

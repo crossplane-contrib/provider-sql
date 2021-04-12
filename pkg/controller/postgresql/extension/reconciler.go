@@ -33,7 +33,6 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
-	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
@@ -125,8 +124,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	// If the Extension exists, it will have all of these properties.
 	observed := v1alpha1.ExtensionParameters{
-		Extension: new(string),
-		Version:   new(string),
+		Version: new(string),
 	}
 
 	query := "SELECT " +
@@ -134,7 +132,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"FROM pg_extension " +
 		"WHERE extname=$1"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Extension}},
 		observed.Version,
 	)
 
@@ -170,8 +168,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	var b strings.Builder
 	b.WriteString("CREATE EXTENSION ")
 
-	if cr.Spec.ForProvider.Extension != nil {
-		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Extension))
+	if cr.Spec.ForProvider.Extension != "" {
+		b.WriteString(pq.QuoteIdentifier(cr.Spec.ForProvider.Extension))
 	}
 	if cr.Spec.ForProvider.Version != nil {
 		b.WriteString(" VERSION ")
@@ -199,7 +197,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotExtension)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION " + pq.QuoteIdentifier(cr.Spec.ForProvider.Extension)})
 	return errors.Wrap(err, errDropExtension)
 }
 
@@ -211,7 +209,7 @@ func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {
 	li := false
 
-	if desired.Extension == nil {
+	if desired.Extension == "" {
 		desired.Extension = observed.Extension
 		li = true
 	}
