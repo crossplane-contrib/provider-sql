@@ -96,4 +96,5 @@ func init() {
 	SchemeBuilder.Register(&Database{}, &DatabaseList{})
 	SchemeBuilder.Register(&Role{}, &RoleList{})
 	SchemeBuilder.Register(&Grant{}, &GrantList{})
+	SchemeBuilder.Register(&Extension{}, &ExtensionList{})
 }
