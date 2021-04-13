@@ -202,8 +202,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 }
 
 func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
-	// Template is only used at create time.
-	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(v1alpha1.ExtensionParameters{}, "Template"))
+	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(v1alpha1.ExtensionParameters{}))
 }
 
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {
