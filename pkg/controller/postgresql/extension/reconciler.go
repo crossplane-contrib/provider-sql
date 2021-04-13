@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -127,14 +126,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		Version: new(string),
 	}
 
-	query := "SELECT " +
-		"extversion " +
-		"FROM pg_extension " +
-		"WHERE extname=$1"
+	var b strings.Builder
+	b.WriteString("SELECT extversion FROM pg_extension WHERE")
+    b.WriteString(" extname = ")
+	b.WriteString(pq.QuoteLiteral(cr.Spec.ForProvider.Extension))
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Extension}},
-		observed.Version,
-	)
+    err := c.db.Exec(ctx, xsql.Query{String: b.String()})
 
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -154,6 +151,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
 		ResourceUpToDate:        upToDate(observed, cr.Spec.ForProvider),
 	}, nil
+
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) { //nolint:gocyclo
@@ -202,7 +200,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 }
 
 func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
-	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(v1alpha1.ExtensionParameters{}))
+	return cmp.Equal(desired, observed)
 }
 
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {
