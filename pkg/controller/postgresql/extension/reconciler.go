@@ -115,6 +115,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 type external struct{ db xsql.DB }
 
+/*
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Extension)
 	if !ok {
@@ -130,9 +131,14 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	b.WriteString("SELECT extversion FROM pg_extension WHERE")
     b.WriteString(" extname = ")
 	b.WriteString(pq.QuoteLiteral(cr.Spec.ForProvider.Extension))
+    b.WriteString(";")
+
+	fmt.Println("------------------")
+	fmt.Println(b.String())
+	fmt.Println("------------------")
 
     err := c.db.Exec(ctx, xsql.Query{String: b.String()})
-
+	fmt.Println(err)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -153,6 +159,50 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 
 }
+*/
+
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+	cr, ok := mg.(*v1alpha1.Extension)
+	if !ok {
+		return managed.ExternalObservation{}, errors.New(errNotExtension)
+	}
+
+	// If the Extension exists, it will have all of these properties.
+	observed := v1alpha1.ExtensionParameters{
+		Version: new(string),
+	}
+
+	query := "SELECT " +
+		"extversion " +
+		"FROM pg_extension " +
+		"WHERE extname = $1"
+
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{pq.QuoteLiteral(cr.Spec.ForProvider.Extension)}},
+		observed.Version,
+	)
+
+	fmt.Println(err)
+
+	if xsql.IsNoRows(err) || ( err.Error() == "sql: no rows in result set" ) {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectExtension)
+	}
+
+	cr.SetConditions(xpv1.Available())
+
+	return managed.ExternalObservation{
+		ResourceExists: true,
+
+		// NOTE(negz): The ordering is important here. We want to late init any
+		// values that weren't supplied before we determine if an update is
+		// required.
+		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
+		ResourceUpToDate:        upToDate(observed, cr.Spec.ForProvider),
+	}, nil
+}
+
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
@@ -164,13 +214,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	var b strings.Builder
-	b.WriteString("CREATE EXTENSION ")
+	b.WriteString("CREATE EXTENSION IF NOT EXISTS ")
 
 	if cr.Spec.ForProvider.Extension != "" {
-		b.WriteString(pq.QuoteIdentifier(cr.Spec.ForProvider.Extension))
+		b.WriteString(cr.Spec.ForProvider.Extension)
 	}
 	if cr.Spec.ForProvider.Version != nil {
-		b.WriteString(" VERSION ")
+		b.WriteString(" WITH VERSION ")
 		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Version))
 	}
 
@@ -195,7 +245,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotExtension)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION " + pq.QuoteIdentifier(cr.Spec.ForProvider.Extension)})
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION IF EXISTS " + cr.Spec.ForProvider.Extension})
 	return errors.Wrap(err, errDropExtension)
 }
 
@@ -206,12 +256,7 @@ func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {
 	li := false
 
-	if desired.Extension == "" {
-		desired.Extension = observed.Extension
-		li = true
-	}
-
-	if desired.Version == nil {
+	if desired.Version == nil && observed.Version != nil {
 		desired.Version = observed.Version
 		li = true
 	}
