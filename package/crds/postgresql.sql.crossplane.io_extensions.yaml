@@ -25,6 +25,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string
+    - jsonPath: .spec.forProvider.extension
+      name: EXTENSION
+      type: string
+    - jsonPath: .spec.forProvider.version
+      name: VERSION
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
@@ -53,11 +59,11 @@ spec:
               forProvider:
                 description: ExtensionParameters are the configurable fields of a Extension.
                 properties:
-                  database:
-                    description: Database for extension install.
-                    type: string
                   extension:
                     description: Extension name to be installed
+                    type: string
+                  schema:
+                    description: Schema for extension install.
                     type: string
                   version:
                     description: Extension Version to be installed

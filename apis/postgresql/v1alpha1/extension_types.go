@@ -32,9 +32,9 @@ type ExtensionParameters struct {
 	// +optional
 	Version *string `json:"version,omitempty"`
 
-	// Database for extension install.
+	// Schema for extension install.
 	// +optional
-	Database *string `json:"database"`
+	Schema *string `json:"schema,omitempty"`
 }
 
 // A ExtensionSpec defines the desired state of a Extension.
@@ -54,6 +54,8 @@ type ExtensionStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
+// +kubebuilder:printcolumn:name="EXTENSION",type="string",JSONPath=".spec.forProvider.extension"
+// +kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.forProvider.version"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
 type Extension struct {

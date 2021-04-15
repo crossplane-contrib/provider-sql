@@ -1,0 +1,10 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Extension
+metadata:
+  name: hstore-extension
+spec:
+  forProvider:
+    extension: hstore
+    version: "1.4"
+  providerConfigRef:
+    name: provider-config-name

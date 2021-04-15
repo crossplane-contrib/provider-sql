@@ -244,8 +244,8 @@ func (in *ExtensionParameters) DeepCopyInto(out *ExtensionParameters) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.Database != nil {
-		in, out := &in.Database, &out.Database
+	if in.Schema != nil {
+		in, out := &in.Schema, &out.Schema
 		*out = new(string)
 		**out = **in
 	}
