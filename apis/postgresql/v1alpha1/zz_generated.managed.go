@@ -75,6 +75,62 @@ func (mg *Database) SetWriteConnectionSecretToReference(r *xpv1.SecretReference)
 	mg.Spec.WriteConnectionSecretToReference = r
 }
 
+// GetCondition of this Extension.
+func (mg *Extension) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
+	return mg.Status.GetCondition(ct)
+}
+
+// GetDeletionPolicy of this Extension.
+func (mg *Extension) GetDeletionPolicy() xpv1.DeletionPolicy {
+	return mg.Spec.DeletionPolicy
+}
+
+// GetProviderConfigReference of this Extension.
+func (mg *Extension) GetProviderConfigReference() *xpv1.Reference {
+	return mg.Spec.ProviderConfigReference
+}
+
+/*
+GetProviderReference of this Extension.
+Deprecated: Use GetProviderConfigReference.
+*/
+func (mg *Extension) GetProviderReference() *xpv1.Reference {
+	return mg.Spec.ProviderReference
+}
+
+// GetWriteConnectionSecretToReference of this Extension.
+func (mg *Extension) GetWriteConnectionSecretToReference() *xpv1.SecretReference {
+	return mg.Spec.WriteConnectionSecretToReference
+}
+
+// SetConditions of this Extension.
+func (mg *Extension) SetConditions(c ...xpv1.Condition) {
+	mg.Status.SetConditions(c...)
+}
+
+// SetDeletionPolicy of this Extension.
+func (mg *Extension) SetDeletionPolicy(r xpv1.DeletionPolicy) {
+	mg.Spec.DeletionPolicy = r
+}
+
+// SetProviderConfigReference of this Extension.
+func (mg *Extension) SetProviderConfigReference(r *xpv1.Reference) {
+	mg.Spec.ProviderConfigReference = r
+}
+
+/*
+SetProviderReference of this Extension.
+Deprecated: Use SetProviderConfigReference.
+*/
+func (mg *Extension) SetProviderReference(r *xpv1.Reference) {
+	mg.Spec.ProviderReference = r
+}
+
+// SetWriteConnectionSecretToReference of this Extension.
+func (mg *Extension) SetWriteConnectionSecretToReference(r *xpv1.SecretReference) {
+	mg.Spec.WriteConnectionSecretToReference = r
+}
+
 // GetCondition of this Grant.
 func (mg *Grant) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
 	return mg.Status.GetCondition(ct)
