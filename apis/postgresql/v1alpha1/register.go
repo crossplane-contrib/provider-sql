@@ -58,6 +58,14 @@ var (
 	ProviderConfigUsageListGroupVersionKind = SchemeGroupVersion.WithKind(ProviderConfigUsageListKind)
 )
 
+// Extension type metadata.
+var (
+	ExtensionKind             = reflect.TypeOf(Extension{}).Name()
+	ExtensionGroupKind        = schema.GroupKind{Group: Group, Kind: ExtensionKind}.String()
+	ExtensionKindAPIVersion   = ExtensionKind + "." + SchemeGroupVersion.String()
+	ExtensionGroupVersionKind = SchemeGroupVersion.WithKind(ExtensionKind)
+)
+
 // Database type metadata.
 var (
 	DatabaseKind             = reflect.TypeOf(Database{}).Name()
@@ -88,4 +96,5 @@ func init() {
 	SchemeBuilder.Register(&Database{}, &DatabaseList{})
 	SchemeBuilder.Register(&Role{}, &RoleList{})
 	SchemeBuilder.Register(&Grant{}, &GrantList{})
+	SchemeBuilder.Register(&Extension{}, &ExtensionList{})
 }
