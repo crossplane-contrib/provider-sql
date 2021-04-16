@@ -35,6 +35,20 @@ type ExtensionParameters struct {
 	// Schema for extension install.
 	// +optional
 	Schema *string `json:"schema,omitempty"`
+
+	// Database for extension install.
+	// +optional
+	Database *string `json:"database,omitempty"`
+
+	// DatabaseRef references the database object this grant it for.
+	// +immutable
+	// +optional
+	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+
+	// DatabaseSelector selects a reference to a Database this grant is for.
+	// +immutable
+	// +optional
+	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 }
 
 // A ExtensionSpec defines the desired state of a Extension.
@@ -73,4 +87,24 @@ type ExtensionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Extension `json:"items"`
+}
+
+// ResolveReferences of this Extension
+func (mg *Extension) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
+
+	// Resolve spec.forProvider.database
+	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.database")
+	}
+	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+	return nil
 }

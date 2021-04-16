@@ -45,6 +45,7 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
+	errNotDatabase     = "managed resource is not a Database custom resource"
 	errNotExtension    = "managed resource is not a Extension custom resource"
 	errSelectExtension = "cannot select extension"
 	errCreateExtension = "cannot create extension"
@@ -109,7 +110,10 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{db: c.newDB(s.Data)}, nil
+	if cr.Spec.ForProvider.Database != nil {
+		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database)}, nil
+	}
+	return &external{db: c.newDB(s.Data, "")}, nil
 }
 
 type external struct{ db xsql.DB }
