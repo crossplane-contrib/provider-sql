@@ -67,7 +67,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
 		managed.WithLogger(l.WithValues("controller", name)),
-		managed.WithShortWait(10*time.Second),
+		managed.WithPollInterval(10*time.Minute),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).

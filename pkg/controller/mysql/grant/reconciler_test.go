@@ -29,7 +29,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -147,7 +146,7 @@ func TestConnect(t *testing.T) {
 			reason: "An error should be returned if we can't get our ProviderConfig's connection secret",
 			fields: fields{
 				kube: &test.MockClient{
-					MockGet: test.NewMockGetFn(nil, func(obj runtime.Object) error {
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
 							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}

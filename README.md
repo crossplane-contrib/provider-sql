@@ -5,6 +5,9 @@ by creating databases, users, etc. It does not create SQL servers. provider-sql
 can be used in conjunction with other providers (e.g. provider-azure) to define
 a composite resource that creates both an SQL server and a new database.
 
+To reduce load on the managed databases and increase responsiveness with many
+managed resources, this provider reconciles it's managed resources every 10 minutes.
+
 ## PostgreSQL
 
 To create a PostgreSQL database named 'example':
