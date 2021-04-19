@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -17,27 +18,37 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pq.ErrorCode("3D000")
+
+	sslModeKey = "sslmode"
 )
 
 type postgresDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	sslmode  string
 }
 
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
-func New(creds map[string][]byte, database string) xsql.DB {
+func New(creds map[string][]byte, database string, sslmode string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
 	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	dsn := DSN(username, password, endpoint, port, database)
+
+	if sslmode != "" {
+		dsn = fmt.Sprintf("%s?sslmode=%s", dsn, sslmode)
+	}
+
 	return postgresDB{
-		dsn:      DSN(username, password, endpoint, port, database),
+		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
+		sslmode:  sslmode,
 	}
 }
 
@@ -128,6 +139,7 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
+		sslModeKey:                                []byte(c.sslmode),
 	}
 }
 
