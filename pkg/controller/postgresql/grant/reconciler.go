@@ -58,6 +58,8 @@ const (
 
 	errInvalidParams = "invalid parameters for grant type %s"
 
+	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
+
 	maxConcurrency = 5
 )
 
@@ -143,7 +145,7 @@ func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
 	// then this is still a roleMember grant type.
 	if gp.MemberOfRef != nil || gp.MemberOfSelector != nil || gp.MemberOf != nil {
 		if gp.Database != nil || pc > 0 {
-			return "", errors.Errorf(errInvalidParams, roleMember)
+			return "", errors.New(errMemberOfWithDatabaseOrPrivileges)
 		}
 		return roleMember, nil
 	}
