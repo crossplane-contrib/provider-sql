@@ -5,9 +5,16 @@ import (
 	"database/sql"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/lib/pq"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+)
+
+const (
+	// https://www.postgresql.org/docs/current/errcodes-appendix.html
+	// These are not available as part of the pq library.
+	pqInvalidCatalog = pq.ErrorCode("3D000")
 )
 
 type postgresDB struct {
@@ -110,4 +117,13 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
 	}
+}
+
+// IsInvalidCatalog returns true if passed a pq error indicating
+// that the database does not exist.
+func IsInvalidCatalog(err error) bool {
+	if pqe, ok := err.(*pq.Error); ok {
+		return pqe.Code == pqInvalidCatalog
+	}
+	return false
 }

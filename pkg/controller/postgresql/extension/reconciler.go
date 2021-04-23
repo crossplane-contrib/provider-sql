@@ -40,11 +40,10 @@ import (
 )
 
 const (
-	errDBRefUnresolved = "database reference not resolved"
-	errTrackPCUsage    = "cannot track ProviderConfig usage"
-	errGetPC           = "cannot get ProviderConfig"
-	errNoSecretRef     = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret       = "cannot get credentials Secret"
+	errTrackPCUsage = "cannot track ProviderConfig usage"
+	errGetPC        = "cannot get ProviderConfig"
+	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
+	errGetSecret    = "cannot get credentials Secret"
 
 	errNotExtension    = "managed resource is not a Extension custom resource"
 	errSelectExtension = "cannot select extension"
@@ -116,9 +115,6 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database)}, nil
 	}
 
-	if cr.Spec.ForProvider.DatabaseSelector != nil || cr.Spec.ForProvider.DatabaseRef != nil {
-		return nil, errors.New(errDBRefUnresolved)
-	}
 	return &external{db: c.newDB(s.Data, "")}, nil
 }
 
@@ -147,7 +143,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		observed.Version,
 	)
 
-	if xsql.IsNoRows(err) {
+	// If the database we try to connect on does not exist then
+	// there cannot be an extension on that database either.
+	if xsql.IsNoRows(err) || postgresql.IsInvalidCatalog(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
