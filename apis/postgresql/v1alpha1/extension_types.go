@@ -29,10 +29,10 @@ import (
 
 // ExtensionParameters are the configurable fields of a Extension.
 type ExtensionParameters struct {
-	// Extension name to be installed
+	// Extension name to be installed.
 	Extension string `json:"extension"`
 
-	// Extension Version to be installed
+	// Version of the extension to be installed.
 	// +immutable
 	// +optional
 	Version *string `json:"version,omitempty"`
@@ -69,10 +69,11 @@ type ExtensionStatus struct {
 
 // +kubebuilder:object:root=true
 
-// A Extension represents the declarative state of a PostgreSQL Extension.
+// An Extension represents the declarative state of a PostgreSQL Extension.
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
+// +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="EXTENSION",type="string",JSONPath=".spec.forProvider.extension"
 // +kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.forProvider.version"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"

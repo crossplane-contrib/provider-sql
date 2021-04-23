@@ -25,6 +25,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Synced')].status
       name: SYNCED
       type: string
+    - jsonPath: .spec.forProvider.database
+      name: DATABASE
+      type: string
     - jsonPath: .spec.forProvider.extension
       name: EXTENSION
       type: string
@@ -37,7 +40,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A Extension represents the declarative state of a PostgreSQL Extension.
+        description: An Extension represents the declarative state of a PostgreSQL Extension.
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
@@ -84,13 +87,13 @@ spec:
                         type: object
                     type: object
                   extension:
-                    description: Extension name to be installed
+                    description: Extension name to be installed.
                     type: string
                   schema:
                     description: Schema for extension install.
                     type: string
                   version:
-                    description: Extension Version to be installed
+                    description: Version of the extension to be installed.
                     type: string
                 required:
                 - extension
