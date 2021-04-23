@@ -45,7 +45,7 @@ type ExtensionParameters struct {
 	// +optional
 	Database *string `json:"database,omitempty"`
 
-	// DatabaseRef references the database object this extension it for.
+	// DatabaseRef references the database object this extension is for.
 	// +immutable
 	// +optional
 	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
@@ -56,7 +56,7 @@ type ExtensionParameters struct {
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 }
 
-// A ExtensionSpec defines the desired state of a Extension.
+// ExtensionSpec defines the desired state of an Extension.
 type ExtensionSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
 	ForProvider       ExtensionParameters `json:"forProvider"`
