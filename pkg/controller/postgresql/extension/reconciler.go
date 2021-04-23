@@ -40,10 +40,11 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
+	errDBRefUnresolved = "database reference not resolved"
+	errTrackPCUsage    = "cannot track ProviderConfig usage"
+	errGetPC           = "cannot get ProviderConfig"
+	errNoSecretRef     = "ProviderConfig does not reference a credentials Secret"
+	errGetSecret       = "cannot get credentials Secret"
 
 	errNotExtension    = "managed resource is not a Extension custom resource"
 	errSelectExtension = "cannot select extension"
@@ -109,8 +110,14 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	// We do not want to create an extension on the default DB
+	// if the user was expecting a database name to be resolved.
 	if cr.Spec.ForProvider.Database != nil {
 		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database)}, nil
+	}
+
+	if cr.Spec.ForProvider.DatabaseSelector != nil || cr.Spec.ForProvider.DatabaseRef != nil {
+		return nil, errors.New(errDBRefUnresolved)
 	}
 	return &external{db: c.newDB(s.Data, "")}, nil
 }
@@ -194,8 +201,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 }
 
 func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {
-	return desired.Version == nil ||
-		desired.Version != observed.Version
+	if desired.Version == nil || (observed.Version != nil && *desired.Version == *observed.Version) {
+		return true
+	}
+	return false
 }
 
 func lateInit(observed v1alpha1.ExtensionParameters, desired *v1alpha1.ExtensionParameters) bool {

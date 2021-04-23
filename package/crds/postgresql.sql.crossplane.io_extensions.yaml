@@ -48,7 +48,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: A ExtensionSpec defines the desired state of a Extension.
+            description: ExtensionSpec defines the desired state of an Extension.
             properties:
               deletionPolicy:
                 description: DeletionPolicy specifies what will happen to the underlying external when this managed resource is deleted - either "Delete" or "Orphan" the external resource. The "Delete" policy is the default when no policy is specified.
@@ -63,7 +63,7 @@ spec:
                     description: Database for extension install.
                     type: string
                   databaseRef:
-                    description: DatabaseRef references the database object this extension it for.
+                    description: DatabaseRef references the database object this extension is for.
                     properties:
                       name:
                         description: Name of the referenced object.
