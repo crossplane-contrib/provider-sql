@@ -163,37 +163,6 @@ func TestConnect(t *testing.T) {
 			},
 			want: errors.Wrap(errBoom, errGetSecret),
 		},
-		"SuccessDBSelector": {
-			reason: "No error should be returned when DB Selector is provided",
-			fields: fields{
-				kube: &test.MockClient{
-					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
-						switch o := obj.(type) {
-						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
-						case *corev1.Secret:
-							return nil
-						}
-						return nil
-					}),
-				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
-			},
-			args: args{
-				mg: &v1alpha1.Extension{
-					Spec: v1alpha1.ExtensionSpec{
-						ForProvider: v1alpha1.ExtensionParameters{
-							DatabaseRef:      &xpv1.Reference{},
-							DatabaseSelector: &xpv1.Selector{},
-						},
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
-						},
-					},
-				},
-			},
-			want: errors.New(errDBRefUnresolved),
-		},
 	}
 
 	for name, tc := range cases {
