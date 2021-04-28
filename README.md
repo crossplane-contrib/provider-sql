@@ -10,6 +10,8 @@ managed resources, this provider reconciles it's managed resources every 10 minu
 
 ## PostgreSQL
 
+### Database
+
 To create a PostgreSQL database named 'example':
 
 ```yaml
@@ -31,6 +33,80 @@ metadata:
   name: example
 spec:
   forProvider: {}
+```
+
+### Extension
+
+To create a PostgreSQL 'hstore' extension on database 'example':
+
+```yaml
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Extension
+metadata:
+  name: example
+spec:
+  forProvider:
+    extension: hstore
+    databaseRef:
+      name: example
+```
+
+### Role
+
+To create a PostgreSQL role named 'example', that allows logins:
+
+```yaml
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: example
+spec:
+  forProvider:
+    privileges:
+      login: true
+  writeConnectionSecretToRef:
+    name: example-role-secret
+    namespace: crossplane-system
+```
+
+If no password is provided in `.spec.forProvider.passwordSecretRef`, a random one will be generated.
+
+### Grant
+
+To create a PostgreSQL role membership grant between 'parent-role' and 'child-role':
+
+```yaml
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-membership
+spec:
+  forProvider:
+    roleRef:
+      name: example-role
+    memberOfRef:
+      name: parent-role
+```
+
+To create a PostgreSQL permissions grant on role 'example' and database 'example':
+
+```yaml
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-connect-to-role-on-database
+spec:
+  forProvider:
+    privileges:
+      - CONNECT
+    roleRef:
+      name: example
+    databaseRef:
+      name: example
 ```
 
 ## MySQL
