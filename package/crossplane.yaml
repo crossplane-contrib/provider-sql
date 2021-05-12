@@ -9,8 +9,7 @@ metadata:
     meta.crossplane.io/source: github.com/crossplane-contrib/provider-sql
     meta.crossplane.io/license: Apache-2.0
     meta.crossplane.io/description: |
-      The Helm Crossplane provider enables resource management of Helm Releases
-      on Kubernetes Clusters, typically provisioned by Crossplane.
+      The SQL Crossplane provider enables resource management of SQL servers.
 
     meta.crossplane.io/readme: |
       `provider-sql` is a Crossplane Provider that enables management of SQL
