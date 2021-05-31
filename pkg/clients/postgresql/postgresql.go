@@ -3,7 +3,6 @@ package postgresql
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -30,11 +29,11 @@ type postgresDB struct {
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
-func New(creds map[string][]byte, database string) xsql.DB {
+// The sslmode defines the mode used to set up the connection for the provider.
+func New(creds map[string][]byte, database string, sslmode string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-	sslmode := string(creds[sslModeKey])
 
 	dsn := "postgres://" +
 		string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
@@ -44,7 +43,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 		database
 
 	if sslmode != "" {
-		dsn = fmt.Sprintf("%s?sslmode=%s", dsn, sslmode)
+		dsn = dsn + "?sslmode=" + sslmode
 	}
 
 	return postgresDB{
