@@ -115,7 +115,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database)}, nil
 	}
 
-	return &external{db: c.newDB(s.Data, "")}, nil
+	return &external{db: c.newDB(s.Data, pc.Spec.DBName)}, nil
 }
 
 type external struct{ db xsql.DB }
