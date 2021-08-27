@@ -4,6 +4,10 @@ kind: ProviderConfig
 metadata:
   name: default
 spec:
+  # defaultDatabase is the default database to be used in DSN.
+  # Similar to PGDATABASE environment variable and defaults to "postgres"
+  # if not set.
+  # defaultDatabase: postgres
   credentials:
     source: PostgreSQLConnectionSecret
     connectionSecretRef:

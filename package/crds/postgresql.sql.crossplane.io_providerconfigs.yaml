@@ -66,13 +66,12 @@ spec:
                 required:
                 - source
                 type: object
-              dbName:
+              defaultDatabase:
                 default: postgres
                 description: Defines the database name used to set up a connection to the provided PostgreSQL instance. Same as PGDATABASE environment variable.
                 type: string
             required:
             - credentials
-            - dbName
             type: object
           status:
             description: A ProviderConfigStatus reflects the observed state of a ProviderConfig.
