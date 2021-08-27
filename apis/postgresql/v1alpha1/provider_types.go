@@ -26,6 +26,10 @@ import (
 type ProviderConfigSpec struct {
 	// Credentials required to authenticate to this provider.
 	Credentials ProviderCredentials `json:"credentials"`
+	// Defines the database name used to set up a connection to the provided
+	// PostgreSQL instance. Same as PGDATABASE environment variable.
+	// +kubebuilder:default="postgres"
+	DefaultDatabase string `json:"defaultDatabase,omitempty"`
 }
 
 const (
