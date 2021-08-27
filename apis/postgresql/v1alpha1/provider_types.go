@@ -29,7 +29,7 @@ type ProviderConfigSpec struct {
 	// Defines the database name used to set up a connection to the provided
 	// PostgreSQL instance. Same as PGDATABASE environment variable.
 	// +kubebuilder:default="postgres"
-	DBName string `json:"dbName"`
+	DefaultDatabase string `json:"defaultDatabase,omitempty"`
 }
 
 const (
