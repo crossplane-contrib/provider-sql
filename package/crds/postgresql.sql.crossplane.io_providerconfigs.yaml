@@ -66,6 +66,10 @@ spec:
                 required:
                 - source
                 type: object
+              defaultDatabase:
+                default: postgres
+                description: Defines the database name used to set up a connection to the provided PostgreSQL instance. Same as PGDATABASE environment variable.
+                type: string
             required:
             - credentials
             type: object

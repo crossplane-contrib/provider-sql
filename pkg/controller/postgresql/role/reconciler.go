@@ -118,7 +118,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, ""),
+		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase),
 		kube: c.kube,
 	}, nil
 }
