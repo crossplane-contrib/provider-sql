@@ -36,6 +36,14 @@ type UserStatus struct {
 
 // UserParameters define the desired state of a MSSQL user instance.
 type UserParameters struct {
+	// +crossplane:generate:reference:type=Database
+	Database *string `json:"database,omitempty"`
+	// DatabaseRef allows you to specify custom resource name of the Database
+	// to fill Database field.
+	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	// DatabaseSelector allows you to use selector constraints to select a
+	// Database.
+	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
