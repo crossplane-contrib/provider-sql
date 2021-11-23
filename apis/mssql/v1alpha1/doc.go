@@ -16,6 +16,6 @@ limitations under the License.
 
 // Package v1alpha1 contains the core resources of the SQL provider.
 // +kubebuilder:object:generate=true
-// +groupName=postgresql.sql.crossplane.io
+// +groupName=mssql.sql.crossplane.io
 // +versionName=v1alpha1
 package v1alpha1
