@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	_ "github.com/denisenkom/go-mssqldb"
@@ -26,14 +27,27 @@ type mssqlDB struct {
 }
 
 // New returns a new mssql database client.
-func New(creds map[string][]byte) xsql.DB {
+func New(creds map[string][]byte, database string) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+
+	host := endpoint
+	if port != "" {
+		fmt.Sprintf("%s:%s", endpoint, port)
+	}
+
+	query := url.Values{}
+	if database != "" {
+		query.Add("database", database)
+	}
+	u := &url.URL{
+		Scheme:   "sqlserver",
+		User:     url.UserPassword(string(creds[xpv1.ResourceCredentialsSecretUserKey]), string(creds[xpv1.ResourceCredentialsSecretPasswordKey])),
+		Host:     host,
+		RawQuery: query.Encode(),
+	}
 	return mssqlDB{
-		dsn: fmt.Sprintf("sqlserver://%s:%s@%s",
-			creds[xpv1.ResourceCredentialsSecretUserKey],
-			creds[xpv1.ResourceCredentialsSecretPasswordKey],
-			endpoint),
+		dsn: u.String(),
 		endpoint: endpoint,
 		port:     port,
 	}
@@ -91,22 +105,10 @@ func (c mssqlDB) GetConnectionDetails(username, password string) managed.Connect
 
 // QuoteIdentifier for mssql queries
 func QuoteIdentifier(id string) string {
-	return "\"" + strings.ReplaceAll(id, "\"", "\"\"") + "\""
+	return "[" + id + "]"
 }
 
 // QuoteValue for mssql queries
 func QuoteValue(id string) string {
 	return "'" + strings.ReplaceAll(id, "'", "''") + "'"
-}
-
-// SplitUserHost splits a mssql user by name and host
-func SplitUserHost(user string) (username, host string) {
-	username = user
-	host = "%"
-	if strings.Contains(user, "@") {
-		parts := strings.SplitN(user, "@", 2)
-		username = parts[0]
-		host = parts[1]
-	}
-	return username, host
 }
