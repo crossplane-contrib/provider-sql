@@ -1,7 +1,7 @@
 apiVersion: mssql.sql.crossplane.io/v1alpha1
 kind: User
 metadata:
-  name: example-user-db
+  name: example-user
 spec:
   forProvider:
     databaseRef:

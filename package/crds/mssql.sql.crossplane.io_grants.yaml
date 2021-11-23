@@ -34,8 +34,8 @@ spec:
     - jsonPath: .spec.forProvider.database
       name: DATABASE
       type: string
-    - jsonPath: .spec.forProvider.privileges
-      name: PRIVILEGES
+    - jsonPath: .spec.forProvider.permissions
+      name: PERMISSIONS
       type: string
     name: v1alpha1
     schema:
@@ -86,10 +86,10 @@ spec:
                         description: MatchLabels ensures an object with matching labels is selected.
                         type: object
                     type: object
-                  privileges:
-                    description: Privileges to be granted. See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
+                  permissions:
+                    description: Permissions to be granted. See https://docs.microsoft.com/en-us/sql/t-sql/statements/grant-database-permissions-transact-sql?view=sql-server-ver15#remarks for available privileges.
                     items:
-                      description: GrantPrivilege represents a privilege to be granted
+                      description: GrantPermission represents a permission to be granted
                       pattern: ^[A-Z_ ]+$
                       type: string
                     minItems: 1
@@ -119,7 +119,7 @@ spec:
                         type: object
                     type: object
                 required:
-                - privileges
+                - permissions
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
