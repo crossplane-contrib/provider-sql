@@ -1,0 +1,14 @@
+apiVersion: mssql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant
+spec:
+  forProvider:
+    permissions:
+      - CREATE TABLE
+      - INSERT
+      - SELECT
+    userRef:
+      name: example-user
+    databaseRef:
+      name: example-db

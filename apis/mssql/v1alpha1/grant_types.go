@@ -17,14 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
-	"github.com/pkg/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/pkg/reference"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -33,18 +27,18 @@ type GrantSpec struct {
 	ForProvider       GrantParameters `json:"forProvider"`
 }
 
-// GrantPrivilege represents a privilege to be granted
+// GrantPermission represents a permission to be granted
 // +kubebuilder:validation:Pattern:=^[A-Z_ ]+$
-type GrantPrivilege string
+type GrantPermission string
 
-// If Privileges are specified, we should have at least one
+// If Permissions are specified, we should have at least one
 
-// GrantPrivileges is a list of the privileges to be granted
+// GrantPermissions is a list of the privileges to be granted
 // +kubebuilder:validation:MinItems:=1
-type GrantPrivileges []GrantPrivilege
+type GrantPermissions []GrantPermission
 
 // ToStringSlice converts the slice of privileges to strings
-func (gp *GrantPrivileges) ToStringSlice() []string {
+func (gp *GrantPermissions) ToStringSlice() []string {
 	if gp == nil {
 		return []string{}
 	}
@@ -57,12 +51,14 @@ func (gp *GrantPrivileges) ToStringSlice() []string {
 
 // GrantParameters define the desired state of a MSSQL grant instance.
 type GrantParameters struct {
-	// Privileges to be granted.
-	// See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
-	Privileges GrantPrivileges `json:"privileges"`
+	// Permissions to be granted.
+	// See https://docs.microsoft.com/en-us/sql/t-sql/statements/grant-database-permissions-transact-sql?view=sql-server-ver15#remarks
+	// for available privileges.
+	Permissions GrantPermissions `json:"permissions"`
 
 	// User this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=User
 	User *string `json:"user,omitempty"`
 
 	// UserRef references the user object this grant is for.
@@ -77,6 +73,7 @@ type GrantParameters struct {
 
 	// Database this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this grant it for.
@@ -104,7 +101,7 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
-// +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
+// +kubebuilder:printcolumn:name="PERMISSIONS",type="string",JSONPath=".spec.forProvider.permissions"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
 type Grant struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -121,39 +118,4 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
-}
-
-// ResolveReferences of this Grant
-func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.user
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
-		Reference:    mg.Spec.ForProvider.UserRef,
-		Selector:     mg.Spec.ForProvider.UserSelector,
-		To:           reference.To{Managed: &User{}, List: &UserList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.user")
-	}
-	mg.Spec.ForProvider.User = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.UserRef = rsp.ResolvedReference
-
-	return nil
 }

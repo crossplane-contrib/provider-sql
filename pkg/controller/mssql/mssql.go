@@ -17,6 +17,7 @@ limitations under the License.
 package mssql
 
 import (
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/grant"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
@@ -33,6 +34,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		config.Setup,
 		database.Setup,
 		user.Setup,
+		grant.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
