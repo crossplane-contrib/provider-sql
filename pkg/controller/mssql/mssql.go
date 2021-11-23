@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2021 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,25 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package mssql
 
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/config"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/grant"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/user"
 )
 
-// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// Setup creates all MSSQL controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
-		mssql.Setup,
-		mysql.Setup,
-		postgresql.Setup,
+		config.Setup,
+		database.Setup,
+		user.Setup,
+		grant.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
