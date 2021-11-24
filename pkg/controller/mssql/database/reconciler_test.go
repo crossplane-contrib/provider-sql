@@ -64,7 +64,6 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte, database string) xsql.DB
 	}
 
 	type args struct {

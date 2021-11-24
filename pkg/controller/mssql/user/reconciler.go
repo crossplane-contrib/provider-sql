@@ -225,7 +225,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return nil
 }
 
-func stringValue(p *string) string  {
+func stringValue(p *string) string {
 	if p == nil {
 		return ""
 	}
