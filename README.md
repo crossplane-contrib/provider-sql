@@ -1,174 +1,44 @@
-# provider-sql
+# Crossplane Provider for SQL
 
-A [Crossplane] provider for SQL. Note that provider-sql orchestrates SQL servers
-by creating databases, users, etc. It does not create SQL servers. provider-sql
-can be used in conjunction with other providers (e.g. provider-azure) to define
-a composite resource that creates both an SQL server and a new database.
+A [Crossplane] provider for SQL. Note that `provider-sql` orchestrates SQL
+servers by creating databases, users, etc. It does not create SQL servers.
+`provider-sql` can be used in conjunction with other providers
+(e.g. provider-azure) to define a composite resource that creates both an SQL
+server and a new database.
 
 To reduce load on the managed databases and increase responsiveness with many
 managed resources, this provider reconciles it's managed resources every 10 minutes.
 
-## PostgreSQL
+It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
-### Database
+## Usage
 
-To create a PostgreSQL database named 'example':
+1. Create a connection secret:
 
-```yaml
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: PostgreSQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: db-conn
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: Database
-metadata:
-  name: example
-spec:
-  forProvider: {}
+To create resources in this repository, you will first need a k8s secret
+with the connection details to an existing SQL server.
+
+This could either be [created automatically] by provisioning an SQL server with
+a Crossplane provider (e.g. a [CloudSQLInstance] with provider-gcp) or you can
+create for an existing server as follows:
+
+```
+kubectl create secret generic database-connection \
+  --from-literal=username=admin \
+  --from-literal=password=t0ps3cr3t \
+  --from-literal=endpoint=my.sql-server.com \
+  --from-literal=port=3306
 ```
 
-### Extension
+2. Create managed resource for your SQL server flavor:
 
-To create a PostgreSQL 'hstore' extension on database 'example':
-
-```yaml
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: Extension
-metadata:
-  name: example
-spec:
-  forProvider:
-    extension: hstore
-    databaseRef:
-      name: example
-```
-
-### Role
-
-To create a PostgreSQL role named 'example', that allows logins:
-
-```yaml
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: Role
-metadata:
-  name: example
-spec:
-  forProvider:
-    privileges:
-      login: true
-  writeConnectionSecretToRef:
-    name: example-role-secret
-    namespace: crossplane-system
-```
-
-If no password is provided in `.spec.forProvider.passwordSecretRef`, a random one will be generated.
-
-### Grant
-
-To create a PostgreSQL role membership grant between 'parent-role' and 'child-role':
-
-```yaml
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: Grant
-metadata:
-  name: example-grant-role-membership
-spec:
-  forProvider:
-    roleRef:
-      name: example-role
-    memberOfRef:
-      name: parent-role
-```
-
-To create a PostgreSQL permissions grant on role 'example' and database 'example':
-
-```yaml
----
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: Grant
-metadata:
-  name: example-grant-connect-to-role-on-database
-spec:
-  forProvider:
-    privileges:
-      - CONNECT
-    roleRef:
-      name: example
-    databaseRef:
-      name: example
-```
-
-## MySQL
-
-### Database
-
-To create a MySQL database named 'example':
-
-```yaml
----
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: db-conn
----
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: Database
-metadata:
-  name: example
-spec: {}
-```
-
-### User
-
-To create a MySQL user named 'example':
-
-```yaml
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: User
-metadata:
-  name: example
-spec:
-  writeConnectionSecretToRef:
-    name: example-user-secret
-    namespace: crossplane-system
-```
-
-If no password is provided in `.spec.forProvider.passwordSecretRef`, a random one will be generated.
-
-### Grant
-
-To create a MySQL grant:
-
-```yaml
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: Grant
-metadata:
-  name: example
-spec:
-  forProvider:
-    privileges:
-      - ALL
-    userRef:
-      name: example
-    databaseRef:
-      name: example
-```
+- [**MySQL**]: `Database`, `Grant`, `User`
+- [**PostgreSQL**]: `Database`, `Grant`, `Extension`, `Role`
+- [**MSSQL**]: `Database`, `Grant`, `User`
 
 [Crossplane]: https://crossplane.io
+[CloudSQLInstance]: https://doc.crds.dev/github.com/crossplane/provider-gcp/database.gcp.crossplane.io/CloudSQLInstance/v1beta1@v0.18.0
+[created automatically]: https://crossplane.io/docs/v1.5/concepts/managed-resources.html#connection-details
+[**MySQL**]: examples/mysql
+[**PostgreSQL**]: examples/postgresql
+[**MSSQL**]: examples/mssql
