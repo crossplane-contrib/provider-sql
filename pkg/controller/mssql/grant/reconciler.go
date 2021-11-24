@@ -51,8 +51,7 @@ const (
 	errRevoke          = "cannot revoke"
 	errCannotGetGrants = "cannot get current grants"
 
-	errCodeNoSuchGrant = 1141
-	maxConcurrency     = 5
+	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
