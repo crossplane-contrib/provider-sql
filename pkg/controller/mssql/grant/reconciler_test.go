@@ -23,8 +23,6 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
@@ -37,6 +35,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -258,43 +257,15 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errBoom, errCannotGetGrants),
 			},
 		},
-		"SuccessNoUser": {
-			reason: "We should return no error if the user doesn't exist",
-			fields: fields{
-				db: mockDB{
-					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-						return mockRowsToSQLRows(
-							sqlmock.NewRows([]string{"Grants"}).
-								AddRow("GRANT CREATE, DROP ON `success-db`.* TO 'no-user'@%").
-								RowError(0, &mysql.MySQLError{Number: errCodeNoSuchGrant}),
-						), nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("no-user"),
-							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{ResourceExists: false},
-			},
-		},
 		"Success": {
-			reason: "We should return no error if we can successfully show our grants",
+			reason: "We should return no error if we can successfully get our permissions",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 						return mockRowsToSQLRows(
 							sqlmock.NewRows(
 								[]string{"Grants"},
-							).AddRow("GRANT CREATE TABLE ON `success-db`.* TO 'success-user'@%"),
+							).AddRow("CREATE TABLE"),
 						), nil
 					},
 				},
@@ -303,9 +274,9 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
-							Privileges: v1alpha1.GrantPrivileges{"CREATE TABLE"},
+							Database:    pointer.StringPtr("success-db"),
+							User:        pointer.StringPtr("success-user"),
+							Permissions: v1alpha1.GrantPermissions{"CREATE TABLE"},
 						},
 					},
 				},
@@ -318,15 +289,15 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
-		"SuccessDiffGrants": {
-			reason: "We should return no error if different grants exist",
+		"SuccessDiffPermissions": {
+			reason: "We should return no error if different permissions exist",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 						return mockRowsToSQLRows(
 							sqlmock.NewRows(
 								[]string{"Grants"},
-							).AddRow("GRANT CREATE ON `success-db`.* TO 'diff-user'@%"),
+							).AddRow("CREATE TABLE"),
 						), nil
 					},
 				},
@@ -335,9 +306,9 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("diff-user"),
-							Privileges: v1alpha1.GrantPrivileges{"DROP"},
+							Database:    pointer.StringPtr("success-db"),
+							User:        pointer.StringPtr("diff-user"),
+							Permissions: v1alpha1.GrantPermissions{"DELETE"},
 						},
 					},
 				},
@@ -349,15 +320,16 @@ func TestObserve(t *testing.T) {
 				},
 			},
 		},
-		"SuccessManyGrants": {
-			reason: "We should return no error if there are more than one grant for a user",
+		"SuccessManyPermissions": {
+			reason: "We should return no error if there are more than one permission for a user",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 						return mockRowsToSQLRows(
 							sqlmock.NewRows([]string{"Grants"}).
-								AddRow("GRANT CREATE, DROP ON `success-db`.* TO 'success-user'@%").
-								AddRow("GRANT EVENT ON `success-db`.* TO 'success-user'@%"),
+								AddRow("CREATE").
+								AddRow("DELETE").
+								AddRow("EVENT"),
 						), nil
 					},
 				},
@@ -366,9 +338,9 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
-							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
+							Database:    pointer.StringPtr("success-db"),
+							User:        pointer.StringPtr("success-user"),
+							Permissions: v1alpha1.GrantPermissions{"DELETE", "CREATE"},
 						},
 					},
 				},
@@ -461,8 +433,9 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database:    pointer.StringPtr("test-example"),
+							User:        pointer.StringPtr("test-example"),
+							Permissions: v1alpha1.GrantPermissions{"DELETE", "CREATE"},
 						},
 					},
 				},
@@ -523,6 +496,9 @@ func TestUpdate(t *testing.T) {
 			reason: "Any errors encountered while updating the grant should be returned",
 			fields: fields{
 				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
@@ -530,25 +506,26 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database:    pointer.StringPtr("test-example"),
+							User:        pointer.StringPtr("test-example"),
+							Permissions: v1alpha1.GrantPermissions{"DELETE", "CREATE"},
 						},
 					},
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errRevoke),
+				err: errors.Wrap(errBoom, errGrant),
 			},
 		},
 		"Success": {
 			reason: "No error should be returned when we update a grant",
 			fields: fields{
 				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						if strings.HasPrefix(q.String, "REVOKE") || strings.HasPrefix(q.String, "FLUSH") {
-							return nil
-						}
-						if strings.Contains(q.String, "CREATE, DROP") {
+						if strings.Contains(q.String, "CREATE, DELETE") {
 							return nil
 						}
 						return errBoom
@@ -559,9 +536,9 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
+							Database:    pointer.StringPtr("test-example"),
+							User:        pointer.StringPtr("test-example"),
+							Permissions: v1alpha1.GrantPermissions{"CREATE", "DELETE"},
 						},
 					},
 				},
@@ -676,4 +653,101 @@ func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
 		return nil
 	}
 	return rows
+}
+
+func Test_diffPermissions(t *testing.T) {
+	type args struct {
+		desired  []string
+		observed []string
+	}
+	type want struct {
+		toGrant  []string
+		toRevoke []string
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"AsDesired": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"CREATE TABLE", "DELETE"},
+			},
+			want: want{
+				toGrant:  nil,
+				toRevoke: nil,
+			},
+		},
+		"AsDesiredOrderNotMatter": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"DELETE", "CREATE TABLE"},
+			},
+			want: want{
+				toGrant:  nil,
+				toRevoke: nil,
+			},
+		},
+		"NeedsGrant": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"CREATE TABLE"},
+			},
+			want: want{
+				toGrant: []string{"DELETE"},
+			},
+		},
+		"NeedsRevoke": {
+			args: args{
+				desired:  []string{"CREATE TABLE"},
+				observed: []string{"CREATE TABLE", "DELETE"},
+			},
+			want: want{
+				toRevoke: []string{"DELETE"},
+			},
+		},
+		"NeedsBoth": {
+			args: args{
+				desired:  []string{"CREATE TABLE"},
+				observed: []string{"DELETE"},
+			},
+			want: want{
+				toGrant:  []string{"CREATE TABLE"},
+				toRevoke: []string{"DELETE"},
+			},
+		},
+		"GrantAll": {
+			args: args{
+				desired: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+			want: want{
+				toGrant: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+		},
+		"RevokeAll": {
+			args: args{
+				observed: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+			want: want{
+				toRevoke: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			gotToGrant, gotToRevoke := diffPermissions(tc.args.desired, tc.args.observed)
+			if diff := cmp.Diff(tc.want.toGrant, gotToGrant, equateSlices()); diff != "" {
+				t.Errorf("\ndiffPermissions(...): -want toGrant, +got toGrant:\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.want.toRevoke, gotToRevoke, equateSlices()); diff != "" {
+				t.Errorf("\ndiffPermissions(...): -want toRevoke, +got toRevoke:\n%s", diff)
+			}
+		})
+	}
+}
+
+func equateSlices() cmp.Option {
+	return cmpopts.SortSlices(func(x, y string) bool {
+		return x < y
+	})
 }
