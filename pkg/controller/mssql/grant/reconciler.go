@@ -19,7 +19,6 @@ package grant
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -47,11 +46,10 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotGrant     = "managed resource is not a Grant custom resource"
-	errCreateGrant  = "cannot create grant"
-	errRevokeGrant  = "cannot revoke grant"
+	errNotGrant        = "managed resource is not a Grant custom resource"
+	errGrant           = "cannot grant"
+	errRevoke          = "cannot revoke"
 	errCannotGetGrants = "cannot get current grants"
-	errFlushPriv    = "cannot flush privileges"
 
 	errCodeNoSuchGrant = 1141
 	maxConcurrency     = 5
@@ -103,7 +101,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	// We don't need to check the credentials source because we currently only
-	// support one source (MySQLConnectionSecret), which is required and
+	// support one source (MSSQLConnectionSecret), which is required and
 	// enforced by the ProviderConfig schema.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
@@ -132,9 +130,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
-
-	permissions, err := c.getPermissions(ctx, username)
+	permissions, err := c.getPermissions(ctx, *cr.Spec.ForProvider.User)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -144,27 +140,77 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	cr.SetConditions(xpv1.Available())
 
+	g, r := diffPermissions(cr.Spec.ForProvider.Permissions.ToStringSlice(), permissions)
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: permissionsEqual(cr.Spec.ForProvider.Permissions.ToStringSlice(), permissions),
+		ResourceUpToDate: len(g) == 0 && len(r) == 0,
 	}, nil
 }
 
-func permissionsEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
+func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+	cr, ok := mg.(*v1alpha1.Grant)
+	if !ok {
+		return managed.ExternalCreation{}, errors.New(errNotGrant)
 	}
-	sort.Strings(a)
-	sort.Strings(b)
 
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	username := *cr.Spec.ForProvider.User
+	permissions := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
+
+	query := fmt.Sprintf("GRANT %s TO %s", permissions, mssql.QuoteIdentifier(username))
+	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errGrant)
 }
 
+func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*v1alpha1.Grant)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotGrant)
+	}
+
+	desired := cr.Spec.ForProvider.Permissions.ToStringSlice()
+	observed, err := c.getPermissions(ctx, *cr.Spec.ForProvider.User)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+	toGrant, toRevoke := diffPermissions(desired, observed)
+
+	if len(toRevoke) > 0 {
+		query := fmt.Sprintf("REVOKE %s FROM %s",
+			strings.Join(toRevoke, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errRevoke)
+		}
+	}
+	if len(toGrant) > 0 {
+		query := fmt.Sprintf("GRANT %s TO %s",
+			strings.Join(toGrant, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errGrant)
+		}
+	}
+	return managed.ExternalUpdate{}, nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+	cr, ok := mg.(*v1alpha1.Grant)
+	if !ok {
+		return errors.New(errNotGrant)
+	}
+
+	username := *cr.Spec.ForProvider.User
+
+	query := fmt.Sprintf("REVOKE %s FROM %s",
+		strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", "),
+		mssql.QuoteIdentifier(username),
+	)
+	return errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errRevoke)
+}
+
+func stringValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
 
 func (c *external) getPermissions(ctx context.Context, username string) ([]string, error) {
 	query := fmt.Sprintf(`SELECT pe.permission_name
@@ -186,8 +232,10 @@ func (c *external) getPermissions(ctx context.Context, username string) ([]strin
 			return nil, errors.Wrap(err, errCannotGetGrants)
 		}
 		if strings.EqualFold(grant, "CONNECT") {
-			// Ignore CONNECT permission which is granted by default at user
-			// creation.
+			// Todo(turkenh): CONNECT permission is granted by default at user
+			//  creation. Here, we are ignoring it but another alternative could
+			//  be making an exception for this specific permission and late-init
+			//  it to CR spec. Figure out if should better late-init.
 			continue
 		}
 		permissions = append(permissions, grant)
@@ -198,72 +246,31 @@ func (c *external) getPermissions(ctx context.Context, username string) ([]strin
 	return permissions, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotGrant)
+func diffPermissions(desired, observed []string) ([]string, []string) {
+	md := make(map[string]struct{}, len(desired))
+	mo := make(map[string]struct{}, len(observed))
+
+	for _, v := range desired {
+		md[v] = struct{}{}
+	}
+	for _, v := range observed {
+		mo[v] = struct{}{}
 	}
 
-	username := *cr.Spec.ForProvider.User
-	permissions := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
+	var toGrant []string
+	var toRevoke []string
 
-	query := fmt.Sprintf("GRANT %s TO %s", permissions, mssql.QuoteIdentifier(username))
-	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errCreateGrant)
-}
-
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	_, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotGrant)
-	}
-	return managed.ExternalUpdate{}, nil
-/*
-	username := *cr.Spec.ForProvider.User
-	dbname := *cr.Spec.ForProvider.Database
-
-	privileges := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
-
-	// Remove current grants since it's not possible to update grants.
-	// This might leave applications with no access to the DB for a short time
-	// until the privileges are granted again.
-	// Using a transaction is unfortunately not possible because a GRANT triggers
-	// an implicit commit: https://dev.mssql.com/doc/refman/8.0/en/implicit-commit.html
-	query := fmt.Sprintf("REVOKE ALL ON %s.* FROM %s@%s",
-		mssql.QuoteIdentifier(dbname),
-		mssql.QuoteValue(username),
-	)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
+	for p := range md {
+		if _, ok := mo[p]; !ok {
+			toGrant = append(toGrant, p)
+		}
 	}
 
-	query = createGrantQuery(privileges, username)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalUpdate{}, err
-	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)*/
-}
-
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return errors.New(errNotGrant)
+	for p := range mo {
+		if _, ok := md[p]; !ok {
+			toRevoke = append(toRevoke, p)
+		}
 	}
 
-	username := *cr.Spec.ForProvider.User
-
-	privileges := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
-
-	query := fmt.Sprintf("REVOKE %s FROM %s",
-		privileges,
-		mssql.QuoteIdentifier(username),
-	)
-	return errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errRevokeGrant)
-}
-
-func stringValue(p *string) string  {
-	if p == nil {
-		return ""
-	}
-	return *p
+	return toGrant, toRevoke
 }

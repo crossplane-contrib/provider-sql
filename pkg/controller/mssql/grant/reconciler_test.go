@@ -447,7 +447,7 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateGrant),
+				err: errors.Wrap(errBoom, errGrant),
 			},
 		},
 		"Success": {
@@ -537,7 +537,7 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errRevokeGrant),
+				err: errors.Wrap(errBoom, errRevoke),
 			},
 		},
 		"Success": {
@@ -633,7 +633,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errRevokeGrant),
+			want: errors.Wrap(errBoom, errRevoke),
 		},
 		"Success": {
 			reason: "No error should be returned if the grant was revoked",
