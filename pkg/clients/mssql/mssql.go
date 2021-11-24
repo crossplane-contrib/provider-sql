@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/pkg/errors"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -33,7 +32,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 
 	host := endpoint
 	if port != "" {
-		fmt.Sprintf("%s:%s", endpoint, port)
+		host = fmt.Sprintf("%s:%s", endpoint, port)
 	}
 
 	query := url.Values{}
@@ -47,7 +46,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 		RawQuery: query.Encode(),
 	}
 	return mssqlDB{
-		dsn: u.String(),
+		dsn:      u.String(),
 		endpoint: endpoint,
 		port:     port,
 	}

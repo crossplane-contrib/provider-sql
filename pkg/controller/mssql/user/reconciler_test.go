@@ -402,34 +402,6 @@ func TestCreate(t *testing.T) {
 				},
 			},
 		},
-		"UserWithHost": {
-			reason: "The username must be split if it contains a host",
-			fields: fields{
-				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
-				},
-			},
-			args: args{
-				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
-						Annotations: map[string]string{
-							meta.AnnotationKeyExternalName: "example@127.0.0.1",
-						},
-					},
-				},
-			},
-			want: want{
-				err: nil,
-				c: managed.ExternalCreation{
-					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
-					},
-				},
-			},
-		},
 		"UserWithPasswordRef": {
 			reason:    "The password must be read from the secret",
 			comparePw: true,
