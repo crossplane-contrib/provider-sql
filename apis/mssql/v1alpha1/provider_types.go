@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2021 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,7 +43,8 @@ type ProviderCredentials struct {
 
 	// A CredentialsSecretRef is a reference to a MSSQL connection secret
 	// that contains the credentials that must be used to connect to the
-	// provider. +optional
+	// provider.
+	// +optional
 	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
 }
 
@@ -54,7 +55,7 @@ type ProviderConfigStatus struct {
 
 // +kubebuilder:object:root=true
 
-// A ProviderConfig configures a Template provider.
+// A ProviderConfig configures a SQL provider.
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentialsSecretRef.name",priority=1

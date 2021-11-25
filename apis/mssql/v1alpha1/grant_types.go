@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2021 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,9 +31,8 @@ type GrantSpec struct {
 // +kubebuilder:validation:Pattern:=^[A-Z_ ]+$
 type GrantPermission string
 
-// If Permissions are specified, we should have at least one
-
 // GrantPermissions is a list of the privileges to be granted
+// If Permissions are specified, we should have at least one
 // +kubebuilder:validation:MinItems:=1
 type GrantPermissions []GrantPermission
 

@@ -1,13 +1,14 @@
 # Crossplane Provider for SQL
 
-A [Crossplane] provider for SQL. Note that `provider-sql` orchestrates SQL
-servers by creating databases, users, etc. It does not create SQL servers.
-`provider-sql` can be used in conjunction with other providers
-(e.g. provider-azure) to define a composite resource that creates both an SQL
-server and a new database.
+A [Crossplane] provider for SQL.
+A [Crossplane] provider for RDBMS schema management/manipulation. Note that
+`provider-sql` orchestrates relational database servers by creating databases,
+users, etc. It does not create server instances themselves. `provider-sql` can
+be used in conjunction with other providers (e.g. provider-azure) to define a
+composite resource that creates both an RDBMS server and a new database schema.
 
 To reduce load on the managed databases and increase responsiveness with many
-managed resources, this provider reconciles it's managed resources every 10 minutes.
+managed resources, this provider reconciles its managed resources every 10 minutes.
 
 It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
@@ -23,7 +24,7 @@ a Crossplane provider (e.g. a [CloudSQLInstance] with provider-gcp) or you can
 create for an existing server as follows:
 
 ```
-kubectl create secret generic database-connection \
+kubectl create secret generic db-conn \
   --from-literal=username=admin \
   --from-literal=password=t0ps3cr3t \
   --from-literal=endpoint=my.sql-server.com \
