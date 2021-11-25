@@ -5,6 +5,9 @@ metadata:
 spec:
   forProvider:
     permissions:
+      # CONNECT permission is added by default when user created. So, make sure
+      # to include it unless you are sure that you don't need it.
+      - CONNECT
       - CREATE TABLE
       - INSERT
       - SELECT

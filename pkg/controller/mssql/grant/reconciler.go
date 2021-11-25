@@ -227,13 +227,6 @@ func (c *external) getPermissions(ctx context.Context, username string) ([]strin
 		if err := rows.Scan(&grant); err != nil {
 			return nil, errors.Wrap(err, errCannotGetGrants)
 		}
-		if strings.EqualFold(grant, "CONNECT") {
-			// TODO(turkenh): CONNECT permission is granted by default at user
-			//  creation. Here, we are ignoring it but another alternative could
-			//  be making an exception for this specific permission and late-init
-			//  it to CR spec. Figure out if should better late-init.
-			continue
-		}
 		permissions = append(permissions, grant)
 	}
 	if err := rows.Err(); err != nil {
