@@ -7,5 +7,5 @@ spec:
   credentials:
     source: MSSQLConnectionSecret
     connectionSecretRef:
-      namespace: crossplane-system
-      name: conn-example-mssqlserver
+      namespace: default
+      name: db-conn

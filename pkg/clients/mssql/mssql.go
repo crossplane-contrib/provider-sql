@@ -1,3 +1,19 @@
+/*
+Copyright 2021 The Crossplane Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package mssql
 
 import (
@@ -16,7 +32,9 @@ import (
 )
 
 const (
-	errNotSupported = "%s not supported by ms sql client"
+	driverName = "sqlserver"
+
+	errNotSupported = "%s not supported by MSSQL client"
 )
 
 type mssqlDB struct {
@@ -40,7 +58,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 		query.Add("database", database)
 	}
 	u := &url.URL{
-		Scheme:   "sqlserver",
+		Scheme:   driverName,
 		User:     url.UserPassword(string(creds[xpv1.ResourceCredentialsSecretUserKey]), string(creds[xpv1.ResourceCredentialsSecretPasswordKey])),
 		Host:     host,
 		RawQuery: query.Encode(),
@@ -53,13 +71,13 @@ func New(creds map[string][]byte, database string) xsql.DB {
 }
 
 // ExecTx is unsupported in mssql.
-func (c mssqlDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
+func (c mssqlDB) ExecTx(_ context.Context, _ []xsql.Query) error {
 	return errors.Errorf(errNotSupported, "transactions")
 }
 
 // Exec the supplied query.
 func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("sqlserver", c.dsn)
+	d, err := sql.Open(driverName, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -71,19 +89,18 @@ func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("sqlserver", c.dsn)
+	d, err := sql.Open(driverName, c.dsn)
 	if err != nil {
 		return nil, err
 	}
 	defer d.Close() //nolint:errcheck
 
-	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
-	return rows, err
+	return d.QueryContext(ctx, q.String, q.Parameters...)
 }
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("sqlserver", c.dsn)
+	db, err := sql.Open(driverName, c.dsn)
 	if err != nil {
 		return err
 	}

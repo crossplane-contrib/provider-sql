@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2021 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -61,7 +62,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.GrantGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mssql.New}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: mssql.New}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithPollInterval(10*time.Minute),
@@ -77,9 +78,9 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 }
 
 type connector struct {
-	kube  client.Client
-	usage resource.Tracker
-	newDB func(creds map[string][]byte, database string) xsql.DB
+	kube      client.Client
+	usage     resource.Tracker
+	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -113,7 +114,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, stringValue(cr.Spec.ForProvider.Database)),
+		db:   c.newClient(s.Data, pointer.StringPtrDerefOr(cr.Spec.ForProvider.Database, "")),
 		kube: c.kube,
 	}, nil
 }
@@ -165,11 +166,11 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotGrant)
 	}
 
-	desired := cr.Spec.ForProvider.Permissions.ToStringSlice()
 	observed, err := c.getPermissions(ctx, *cr.Spec.ForProvider.User)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
+	desired := cr.Spec.ForProvider.Permissions.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desired, observed)
 
 	if len(toRevoke) > 0 {
@@ -204,14 +205,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errRevoke)
 }
 
-func stringValue(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
 func (c *external) getPermissions(ctx context.Context, username string) ([]string, error) {
+	// TODO(turkenh/ulucinar): Possible performance improvement. We first
+	//  calculate the Cartesian product, and then filter. It would be more
+	//  efficient to first filter principals by name, and then join.
 	query := fmt.Sprintf(`SELECT pe.permission_name
 	FROM sys.database_principals AS pr  
 	JOIN sys.database_permissions AS pe  
@@ -231,7 +228,7 @@ func (c *external) getPermissions(ctx context.Context, username string) ([]strin
 			return nil, errors.Wrap(err, errCannotGetGrants)
 		}
 		if strings.EqualFold(grant, "CONNECT") {
-			// Todo(turkenh): CONNECT permission is granted by default at user
+			// TODO(turkenh): CONNECT permission is granted by default at user
 			//  creation. Here, we are ignoring it but another alternative could
 			//  be making an exception for this specific permission and late-init
 			//  it to CR spec. Figure out if should better late-init.
