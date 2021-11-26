@@ -20,6 +20,7 @@ package apis
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
+	mssql "github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
 	mysql "github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	postgresql "github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 )
@@ -27,6 +28,7 @@ import (
 func init() {
 	// Register the types with the Scheme so the components can map objects to GroupVersionKinds and back
 	AddToSchemes = append(AddToSchemes,
+		mssql.SchemeBuilder.AddToScheme,
 		mysql.SchemeBuilder.AddToScheme,
 		postgresql.SchemeBuilder.AddToScheme,
 	)
