@@ -16,30 +16,27 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
 1. Create a connection secret:
 
-To create resources in this repository, you will first need a k8s secret
-with the connection details to an existing SQL server.
+   To create provider-sql managed resources, you will first need a K8s secret
+   with the connection details to an existing SQL server.
 
-This could either be [created automatically] by provisioning an SQL server with
-a Crossplane provider (e.g. a [CloudSQLInstance] with provider-gcp) or you can
-create for an existing server as follows:
+   This secret could either be [created automatically] by provisioning an SQL server
+   with a Crossplane provider (e.g. a [CloudSQLInstance] with provider-gcp) or you can
+   create for an existing server as follows:
 
-```
-kubectl create secret generic db-conn \
-  --from-literal=username=admin \
-  --from-literal=password=t0ps3cr3t \
-  --from-literal=endpoint=my.sql-server.com \
-  --from-literal=port=3306
-```
+    ```
+    kubectl create secret generic db-conn \
+      --from-literal=username=admin \
+      --from-literal=password='t0ps3cr3t' \
+      --from-literal=endpoint=my.sql-server.com \
+      --from-literal=port=3306
+    ```
 
 2. Create managed resource for your SQL server flavor:
 
-- [**MySQL**]: `Database`, `Grant`, `User`
-- [**PostgreSQL**]: `Database`, `Grant`, `Extension`, `Role`
-- [**MSSQL**]: `Database`, `Grant`, `User`
+    - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
+    - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
+    - **MSSQL**: `Database`, `Grant`, `User` (See [the examples](examples/mssql))
 
 [Crossplane]: https://crossplane.io
 [CloudSQLInstance]: https://doc.crds.dev/github.com/crossplane/provider-gcp/database.gcp.crossplane.io/CloudSQLInstance/v1beta1@v0.18.0
 [created automatically]: https://crossplane.io/docs/v1.5/concepts/managed-resources.html#connection-details
-[**MySQL**]: examples/mysql
-[**PostgreSQL**]: examples/postgresql
-[**MSSQL**]: examples/mssql
