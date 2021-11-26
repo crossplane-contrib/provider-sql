@@ -40,17 +40,7 @@ crds.clean:
 	@find package/crds -name *.yaml.sed -delete || $(FAIL)
 	@$(OK) cleaned generated CRDs
 
-generate: crds.clean
-
-# Ensure a PR is ready for review.
-reviewable: generate lint
-	@go mod tidy
-
-# Ensure branch is clean.
-check-diff: reviewable
-	@$(INFO) checking that branch is clean
-	@test -z "$$(git status --porcelain)" || $(FAIL)
-	@$(OK) branch is clean
+generate.done: crds.clean
 
 # integration tests
 e2e.run: test-integration
