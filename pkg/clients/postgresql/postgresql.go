@@ -30,16 +30,23 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
+	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
 	return postgresDB{
-		dsn: "postgres://" +
-			string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
-			string(creds[xpv1.ResourceCredentialsSecretPasswordKey]) + "@" +
-			endpoint + ":" +
-			port + "/" +
-			database,
+		dsn:      DSN(username, password, endpoint, port, database),
 		endpoint: endpoint,
 		port:     port,
 	}
+}
+
+// DSN returns the DSN URL
+func DSN(username string, password string, endpoint string, port string, database string) string {
+	return "postgres://" +
+		username + ":" +
+		password + "@" +
+		endpoint + ":" +
+		port + "/" +
+		database
 }
 
 // ExecTx executes an array of queries, committing if all are successful and
