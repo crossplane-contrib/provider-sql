@@ -70,6 +70,22 @@ spec:
                     - name
                     - namespace
                     type: object
+                  resourceOptions:
+                    description: ResourceOptions sets account specific resource limits. See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
+                    properties:
+                      maxConnectionsPerHour:
+                        description: MaxConnectionsPerHour sets the number of times an account can connect to the server per hour
+                        type: integer
+                      maxQueriesPerHour:
+                        description: MaxQueriesPerHour sets the number of queries an account can issue per hour
+                        type: integer
+                      maxUpdatesPerHour:
+                        description: MaxUpdatesPerHour sets the number of updates an account can issue per hour
+                        type: integer
+                      maxUserConnections:
+                        description: MaxUserConnections sets The number of simultaneous connections to the server by an account
+                        type: integer
+                    type: object
                 type: object
               providerConfigRef:
                 description: ProviderConfigReference specifies how the provider that will be used to create, observe, update, and delete this managed resource should be configured.
@@ -110,6 +126,12 @@ spec:
             properties:
               atProvider:
                 description: A UserObservation represents the observed state of a MySQL user.
+                properties:
+                  resourceOptionsAsClauses:
+                    description: ResourceOptionsAsClauses represents the applied resource options
+                    items:
+                      type: string
+                    type: array
                 type: object
               conditions:
                 description: Conditions of the resource.
