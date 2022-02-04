@@ -135,7 +135,7 @@ func handleClause(clause string, value *int, out *[]string) {
 		return
 	}
 
-	*out = append(*out, fmt.Sprintf("%s %d", clause, value))
+	*out = append(*out, fmt.Sprintf("%s %d", clause, *value))
 }
 
 func resourceOptionsToClauses(r v1alpha1.ResourceOptions) []string {
@@ -366,32 +366,32 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 func lateInit(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
 	li := false
 
-	if observed.ResourceOptions.MaxQueriesPerHour == desired.ResourceOptions.MaxQueriesPerHour {
+	if *observed.ResourceOptions.MaxQueriesPerHour == *desired.ResourceOptions.MaxQueriesPerHour {
 		li = true
 	}
-	if observed.ResourceOptions.MaxUpdatesPerHour == desired.ResourceOptions.MaxUpdatesPerHour {
+	if *observed.ResourceOptions.MaxUpdatesPerHour == *desired.ResourceOptions.MaxUpdatesPerHour {
 		li = true
 	}
-	if observed.ResourceOptions.MaxConnectionsPerHour == desired.ResourceOptions.MaxConnectionsPerHour {
+	if *observed.ResourceOptions.MaxConnectionsPerHour == *desired.ResourceOptions.MaxConnectionsPerHour {
 		li = true
 	}
-	if observed.ResourceOptions.MaxUserConnections == desired.ResourceOptions.MaxUserConnections {
+	if *observed.ResourceOptions.MaxUserConnections == *desired.ResourceOptions.MaxUserConnections {
 		li = true
 	}
 	return li
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
-	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
+	if *observed.ResourceOptions.MaxQueriesPerHour != *desired.ResourceOptions.MaxQueriesPerHour {
 		return false
 	}
-	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
+	if *observed.ResourceOptions.MaxUpdatesPerHour != *desired.ResourceOptions.MaxUpdatesPerHour {
 		return false
 	}
-	if observed.ResourceOptions.MaxConnectionsPerHour != desired.ResourceOptions.MaxConnectionsPerHour {
+	if *observed.ResourceOptions.MaxConnectionsPerHour != *desired.ResourceOptions.MaxConnectionsPerHour {
 		return false
 	}
-	if observed.ResourceOptions.MaxUserConnections != desired.ResourceOptions.MaxUserConnections {
+	if *observed.ResourceOptions.MaxUserConnections != *desired.ResourceOptions.MaxUserConnections {
 		return false
 	}
 	return true
