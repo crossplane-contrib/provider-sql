@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -54,6 +55,7 @@ const (
 	errUpdateUser              = "cannot update user"
 	errFlushPriv               = "cannot flush privileges"
 	errGetPasswordSecretFailed = "cannot get password secret"
+	errCompareResourceOptions  = "cannot compare desired and observed resource options"
 
 	maxConcurrency = 5
 )
@@ -126,23 +128,88 @@ type external struct {
 	kube client.Client
 }
 
+func handleClause(clause string, value *int, out *[]string) {
+	// If clause is not set (nil pointer), do not push a setting.
+	// This means the default is applied.
+	if value == nil {
+		return
+	}
+
+	*out = append(*out, fmt.Sprintf("%s %d", clause, value))
+}
+
+func resourceOptionsToClauses(r v1alpha1.ResourceOptions) []string {
+	// Never copy user inputted data to this string. These values are
+	// passed directly into the query.
+	ro := []string{}
+
+	handleClause("MAX_QUERIES_PER_HOUR", r.MaxQueriesPerHour, &ro)
+	handleClause("MAX_UPDATES_PER_HOUR", r.MaxUpdatesPerHour, &ro)
+	handleClause("MAX_CONNECTIONS_PER_HOUR", r.MaxConnectionsPerHour, &ro)
+	handleClause("MAX_USER_CONNECTIONS", r.MaxUserConnections, &ro)
+
+	return ro
+}
+
+func changedResourceOptions(existing []string, desired []string) ([]string, error) {
+	out := []string{}
+
+	// Make sure existing observation has at least as many items as
+	// desired. If it does not, then we cannot safely compare
+	// resource options.
+	if len(existing) < len(desired) {
+		return nil, errors.New(errCompareResourceOptions)
+	}
+
+	// The input slices here are outputted by resourceOptionsToClauses above.
+	// Because these are created by repeated calls to negateClause in the
+	// same order, we can rely on each clause being in the same array
+	// position in the 'desired' and 'existing' inputs.
+
+	for i, v := range desired {
+		if v != existing[i] {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
-	var name string
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
-	query := "SELECT User FROM mysql.user WHERE User = ? AND Host = ?"
-	err := c.db.Scan(ctx, xsql.Query{
-		String: query,
-		Parameters: []interface{}{
-			username,
-			host,
+	observed := &v1alpha1.UserParameters{
+		ResourceOptions: v1alpha1.ResourceOptions{
+			MaxQueriesPerHour:     new(int),
+			MaxUpdatesPerHour:     new(int),
+			MaxConnectionsPerHour: new(int),
+			MaxUserConnections:    new(int),
 		},
-	}, &name)
+	}
+
+	query := "SELECT " +
+		"max_questions, " +
+		"max_updates, " +
+		"max_connections, " +
+		"max_user_connections " +
+		"FROM mysql.user WHERE User = ? AND Host = ?"
+	err := c.db.Scan(ctx,
+		xsql.Query{
+			String: query,
+			Parameters: []interface{}{
+				username,
+				host,
+			},
+		},
+		&observed.ResourceOptions.MaxQueriesPerHour,
+		&observed.ResourceOptions.MaxUpdatesPerHour,
+		&observed.ResourceOptions.MaxConnectionsPerHour,
+		&observed.ResourceOptions.MaxUserConnections,
+	)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -150,16 +217,19 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	cr.SetConditions(xpv1.Available())
-
 	_, pwdChanged, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
+	cr.SetConditions(xpv1.Available())
+
+	cr.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
+
 	return managed.ExternalObservation{
-		ResourceExists:   true,
-		ResourceUpToDate: !pwdChanged,
+		ResourceExists:          true,
+		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
+		ResourceUpToDate:        !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
 	}, nil
 }
 
@@ -180,7 +250,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalCreation{}, err
 		}
 	}
-	query := fmt.Sprintf("CREATE USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
+
+	var resourceOptions string
+	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
+	if len(ro) != 0 {
+		resourceOptions = fmt.Sprintf("WITH %s", strings.Join(ro, " "))
+	}
+
+	query := fmt.Sprintf(
+		"CREATE USER %s@%s IDENTIFIED BY %s %s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		mysql.QuoteValue(pw),
+		resourceOptions,
+	)
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: query,
 	}); err != nil {
@@ -191,6 +274,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
 	}
+
+	cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(username, pw),
@@ -204,12 +289,41 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	pw, changed, err := c.getPassword(ctx, cr)
+	pw, pwchanged, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	if changed {
+	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
+	rochanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	if err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+	}
+
+	if len(rochanged) > 0 {
+		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
+
+		query := fmt.Sprintf(
+			"ALTER USER %s@%s %s",
+			mysql.QuoteValue(username),
+			mysql.QuoteValue(host),
+			resourceOptions,
+		)
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: query,
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+		}
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "FLUSH PRIVILEGES",
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		}
+	}
+
+	cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+
+	if pwchanged {
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: query,
@@ -247,4 +361,38 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.Wrap(err, errFlushPriv)
 	}
 	return nil
+}
+
+func lateInit(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
+	li := false
+
+	if observed.ResourceOptions.MaxQueriesPerHour == desired.ResourceOptions.MaxQueriesPerHour {
+		li = true
+	}
+	if observed.ResourceOptions.MaxUpdatesPerHour == desired.ResourceOptions.MaxUpdatesPerHour {
+		li = true
+	}
+	if observed.ResourceOptions.MaxConnectionsPerHour == desired.ResourceOptions.MaxConnectionsPerHour {
+		li = true
+	}
+	if observed.ResourceOptions.MaxUserConnections == desired.ResourceOptions.MaxUserConnections {
+		li = true
+	}
+	return li
+}
+
+func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
+	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
+		return false
+	}
+	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
+		return false
+	}
+	if observed.ResourceOptions.MaxConnectionsPerHour != desired.ResourceOptions.MaxConnectionsPerHour {
+		return false
+	}
+	if observed.ResourceOptions.MaxUserConnections != desired.ResourceOptions.MaxUserConnections {
+		return false
+	}
+	return true
 }
