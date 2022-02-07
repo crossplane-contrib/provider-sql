@@ -222,14 +222,13 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	cr.SetConditions(xpv1.Available())
-
 	cr.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
 
+	cr.SetConditions(xpv1.Available())
+
 	return managed.ExternalObservation{
-		ResourceExists:          true,
-		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
-		ResourceUpToDate:        !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
+		ResourceExists:   true,
+		ResourceUpToDate: !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
 	}, nil
 }
 
@@ -238,6 +237,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
+
+	cr.SetConditions(xpv1.Creating())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	pw, _, err := c.getPassword(ctx, cr)
@@ -254,11 +255,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	var resourceOptions string
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 	if len(ro) != 0 {
-		resourceOptions = fmt.Sprintf("WITH %s", strings.Join(ro, " "))
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
 	}
 
 	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s %s",
+		"CREATE USER %s@%s IDENTIFIED BY %s%s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 		mysql.QuoteValue(pw),
@@ -275,7 +276,9 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
 	}
 
-	cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+	if len(ro) != 0 {
+		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+	}
 
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(username, pw),
@@ -319,9 +322,9 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
 		}
-	}
 
-	cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+	}
 
 	if pwchanged {
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
@@ -349,6 +352,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
+	cr.SetConditions(xpv1.Deleting())
+
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host)),
@@ -361,24 +366,6 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.Wrap(err, errFlushPriv)
 	}
 	return nil
-}
-
-func lateInit(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
-	li := false
-
-	if *observed.ResourceOptions.MaxQueriesPerHour == *desired.ResourceOptions.MaxQueriesPerHour {
-		li = true
-	}
-	if *observed.ResourceOptions.MaxUpdatesPerHour == *desired.ResourceOptions.MaxUpdatesPerHour {
-		li = true
-	}
-	if *observed.ResourceOptions.MaxConnectionsPerHour == *desired.ResourceOptions.MaxConnectionsPerHour {
-		li = true
-	}
-	if *observed.ResourceOptions.MaxUserConnections == *desired.ResourceOptions.MaxUserConnections {
-		li = true
-	}
-	return li
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
