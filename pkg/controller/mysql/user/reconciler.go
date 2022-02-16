@@ -138,10 +138,14 @@ func handleClause(clause string, value *int, out *[]string) {
 	*out = append(*out, fmt.Sprintf("%s %d", clause, *value))
 }
 
-func resourceOptionsToClauses(r v1alpha1.ResourceOptions) []string {
+func resourceOptionsToClauses(r *v1alpha1.ResourceOptions) []string {
 	// Never copy user inputted data to this string. These values are
 	// passed directly into the query.
 	ro := []string{}
+
+	if r == nil {
+		return ro
+	}
 
 	handleClause("MAX_QUERIES_PER_HOUR", r.MaxQueriesPerHour, &ro)
 	handleClause("MAX_UPDATES_PER_HOUR", r.MaxUpdatesPerHour, &ro)
@@ -183,7 +187,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
 	observed := &v1alpha1.UserParameters{
-		ResourceOptions: v1alpha1.ResourceOptions{
+		ResourceOptions: &v1alpha1.ResourceOptions{
 			MaxQueriesPerHour:     new(int),
 			MaxUpdatesPerHour:     new(int),
 			MaxConnectionsPerHour: new(int),
