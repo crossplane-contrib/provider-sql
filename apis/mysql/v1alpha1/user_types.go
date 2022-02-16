@@ -44,7 +44,7 @@ type UserParameters struct {
 	// ResourceOptions sets account specific resource limits.
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
 	// +optional
-	ResourceOptions ResourceOptions `json:"resourceOptions,omitempty"`
+	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
 }
 
 // ResourceOptions define the account specific resource limits.

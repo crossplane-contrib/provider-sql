@@ -227,7 +227,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
@@ -266,7 +266,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
@@ -278,9 +278,8 @@ func TestObserve(t *testing.T) {
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:          true,
-					ResourceUpToDate:        true,
-					ResourceLateInitialized: true,
+					ResourceExists:   true,
+					ResourceUpToDate: true,
 				},
 				err: nil,
 			},
@@ -312,7 +311,7 @@ func TestObserve(t *testing.T) {
 								},
 								Key: "password",
 							},
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
@@ -329,9 +328,8 @@ func TestObserve(t *testing.T) {
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:          true,
-					ResourceUpToDate:        false,
-					ResourceLateInitialized: true,
+					ResourceExists:   true,
+					ResourceUpToDate: false,
 				},
 				err: nil,
 			},
@@ -419,7 +417,7 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
@@ -763,7 +761,7 @@ func TestUpdate(t *testing.T) {
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
@@ -868,7 +866,7 @@ func TestDelete(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: v1alpha1.ResourceOptions{
+							ResourceOptions: &v1alpha1.ResourceOptions{
 								MaxQueriesPerHour:     new(int),
 								MaxUpdatesPerHour:     new(int),
 								MaxConnectionsPerHour: new(int),
