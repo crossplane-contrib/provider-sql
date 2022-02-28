@@ -83,6 +83,16 @@ type RoleParameters struct {
 	// for this role. If no reference is given, a password will be auto-generated.
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+
+	// Configs represents configuration parameters for this role
+	// +optional
+	Configs []*RoleConfig `json:"configs,omitempty"`
+}
+
+// RoleConfig represents a role configuration parameter
+type RoleConfig struct {
+	Key   *string `json:"key,omitempty"`
+	Value *string `json:"value,omitempty"`
 }
 
 // A RoleObservation represents the observed state of a PostgreSQL role.
@@ -90,6 +100,8 @@ type RoleObservation struct {
 	// PrivilegesAsClauses represents the applied privileges state, taking into account
 	// any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
+	// Configs represents the applied configuration parameters for the PostgreSQL role.
+	Configs []*RoleConfig `json:"configs,omitempty"`
 }
 
 // +kubebuilder:object:root=true
