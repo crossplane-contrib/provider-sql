@@ -1,3 +1,5 @@
+
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -56,6 +58,17 @@ spec:
               forProvider:
                 description: RoleParameters define the desired state of a PostgreSQL role instance.
                 properties:
+                  configs:
+                    description: Configs represents configuration parameters for this role
+                    items:
+                      description: RoleConfig represents a role configuration parameter
+                      properties:
+                        key:
+                          type: string
+                        value:
+                          type: string
+                      type: object
+                    type: array
                   connectionLimit:
                     description: ConnectionLimit to be applied to the role.
                     format: int32
@@ -143,6 +156,17 @@ spec:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
+                  configs:
+                    description: Configs represents the applied configuration parameters for the PostgreSQL role.
+                    items:
+                      description: RoleConfig represents a role configuration parameter
+                      properties:
+                        key:
+                          type: string
+                        value:
+                          type: string
+                      type: object
+                    type: array
                   privilegesAsClauses:
                     description: PrivilegesAsClauses represents the applied privileges state, taking into account any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
                     items:

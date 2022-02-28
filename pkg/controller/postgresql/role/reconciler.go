@@ -19,6 +19,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -56,6 +57,7 @@ const (
 	errUpdateRole              = "cannot update role"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errComparePrivileges       = "cannot compare desired and observed privileges"
+	errSetRoleConfigs          = "cannot set role configuration parameters"
 
 	maxConcurrency = 5
 )
@@ -196,6 +198,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 			Replication: new(bool),
 			BypassRls:   new(bool),
 		},
+		Configs: []*v1alpha1.RoleConfig{},
 	}
 
 	query := "SELECT " +
@@ -206,9 +209,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"rolcanlogin, " +
 		"rolreplication, " +
 		"rolbypassrls, " +
-		"rolconnlimit " +
+		"rolconnlimit, " +
+		"rolconfig " +
 		"FROM pg_roles WHERE rolname = $1"
 
+	var rolconfigs []string
 	err := c.db.Scan(ctx,
 		xsql.Query{
 			String: query,
@@ -224,7 +229,16 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		&observed.Privileges.Replication,
 		&observed.Privileges.BypassRls,
 		&observed.ConnectionLimit,
+		pq.Array(&rolconfigs),
 	)
+
+	for _, c := range rolconfigs {
+		kv := strings.Split(c, "=")
+		observed.Configs = append(observed.Configs, &v1alpha1.RoleConfig{
+			Key:   &kv[0],
+			Value: &kv[1],
+		})
+	}
 
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -291,6 +305,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	// reconciler loop.
 	cr.Status.AtProvider.PrivilegesAsClauses = privs
 
+	for _, v := range cr.Spec.ForProvider.Configs {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(*v.Key), pq.QuoteIdentifier(*v.Value)),
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errSetRoleConfigs)
+		}
+	}
+	cr.Status.AtProvider.Configs = cr.Spec.ForProvider.Configs
+
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
 	}, nil
@@ -340,6 +363,21 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// Update here so that state is reflected to the user prior to the next
 	// reconciler loop.
 	cr.Status.AtProvider.PrivilegesAsClauses = privs
+
+	// Clears current role configs and sets new ones in a transaction
+	q := make([]xsql.Query, 1)
+	q = append(q,
+		xsql.Query{String: fmt.Sprintf("ALTER ROLE %s RESET ALL", crn)})
+	for _, v := range cr.Spec.ForProvider.Configs {
+		q = append(q, xsql.Query{
+			String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(*v.Key), pq.QuoteIdentifier(*v.Value)),
+		})
+	}
+	if err := c.db.ExecTx(ctx, q); err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
+	}
+	// Update state to reflect the current configuration parameters
+	cr.Status.AtProvider.Configs = cr.Spec.ForProvider.Configs
 
 	cl := cr.Spec.ForProvider.ConnectionLimit
 	if cl != nil {
@@ -394,6 +432,9 @@ func upToDate(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameter
 		return false
 	}
 	if observed.Privileges.BypassRls != desired.Privileges.BypassRls {
+		return false
+	}
+	if !reflect.DeepEqual(&observed.Configs, &desired.Configs) {
 		return false
 	}
 	return true
