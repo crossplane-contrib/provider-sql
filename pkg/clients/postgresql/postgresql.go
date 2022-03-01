@@ -17,8 +17,6 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pq.ErrorCode("3D000")
-
-	sslModeKey = "sslmode"
 )
 
 type postgresDB struct {
@@ -139,7 +137,6 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
-		sslModeKey:                                []byte(c.sslmode),
 	}
 }
 
