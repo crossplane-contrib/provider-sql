@@ -112,10 +112,10 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	// We do not want to create an extension on the default DB
 	// if the user was expecting a database name to be resolved.
 	if cr.Spec.ForProvider.Database != nil {
-		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, pc.Spec.SslMode)}, nil
+		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, pc.Spec.SSLMode)}, nil
 	}
 
-	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.SslMode)}, nil
+	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.SSLMode)}, nil
 }
 
 type external struct{ db xsql.DB }
