@@ -3,6 +3,7 @@ package postgresql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -133,8 +134,9 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 // IsInvalidCatalog returns true if passed a pq error indicating
 // that the database does not exist.
 func IsInvalidCatalog(err error) bool {
-	if pqe, ok := err.(*pq.Error); ok {
-		return pqe.Code == pqInvalidCatalog
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == pqInvalidCatalog
 	}
 	return false
 }
