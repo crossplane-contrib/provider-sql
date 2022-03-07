@@ -320,6 +320,36 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ConfigurationParametersChanged": {
+			reason: "We should return ResourceUpToDate=false if ConfigurationParameter is changed",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  pointer.StringPtr("statement_timeout"),
+									Value: pointer.StringPtr("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
