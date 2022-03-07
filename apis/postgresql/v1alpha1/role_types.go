@@ -84,14 +84,14 @@ type RoleParameters struct {
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 
-	// Configs represents configuration parameters for this role
+	// ConfigurationParameters represents configuration parameters for this role
 	// +optional
-	Configs []*RoleConfig `json:"configs,omitempty"`
+	ConfigurationParameters []RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 }
 
-// RoleConfig represents a role configuration parameter
-type RoleConfig struct {
-	Key   *string `json:"key,omitempty"`
+// RoleConfigurationParameter represents a role configuration parameter
+type RoleConfigurationParameter struct {
+	Name  *string `json:"name,omitempty"`
 	Value *string `json:"value,omitempty"`
 }
 
@@ -100,8 +100,8 @@ type RoleObservation struct {
 	// PrivilegesAsClauses represents the applied privileges state, taking into account
 	// any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
-	// Configs represents the applied configuration parameters for the PostgreSQL role.
-	Configs []*RoleConfig `json:"configs,omitempty"`
+	// ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
+	ConfigurationParameters []RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 }
 
 // +kubebuilder:object:root=true

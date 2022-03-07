@@ -58,12 +58,12 @@ spec:
               forProvider:
                 description: RoleParameters define the desired state of a PostgreSQL role instance.
                 properties:
-                  configs:
-                    description: Configs represents configuration parameters for this role
+                  configurationParameters:
+                    description: ConfigurationParameters represents configuration parameters for this role
                     items:
-                      description: RoleConfig represents a role configuration parameter
+                      description: RoleConfigurationParameter represents a role configuration parameter
                       properties:
-                        key:
+                        name:
                           type: string
                         value:
                           type: string
@@ -156,12 +156,12 @@ spec:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
-                  configs:
-                    description: Configs represents the applied configuration parameters for the PostgreSQL role.
+                  configurationParameters:
+                    description: ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
                     items:
-                      description: RoleConfig represents a role configuration parameter
+                      description: RoleConfigurationParameter represents a role configuration parameter
                       properties:
-                        key:
+                        name:
                           type: string
                         value:
                           type: string

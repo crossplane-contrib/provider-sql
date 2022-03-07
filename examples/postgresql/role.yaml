@@ -11,7 +11,7 @@ spec:
       - key: 'statement_timeout'
         value: '123'
       - key: 'search_path'
-        value: '$user'
+        value: '"$user",public'
 
   writeConnectionSecretToRef:
     name: example-parent-role-secret
