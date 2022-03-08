@@ -7,10 +7,10 @@ spec:
     connectionLimit: 10
     privileges:
       login: true
-    configs:
-      - key: 'statement_timeout'
+    configurationParameters:
+      - name: 'statement_timeout'
         value: '123'
-      - key: 'search_path'
+      - name: 'search_path'
         value: '"$user",public'
 
   writeConnectionSecretToRef:
