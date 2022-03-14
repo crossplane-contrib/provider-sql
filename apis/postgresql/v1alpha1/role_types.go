@@ -91,8 +91,8 @@ type RoleParameters struct {
 
 // RoleConfigurationParameter represents a role configuration parameter
 type RoleConfigurationParameter struct {
-	Name  *string `json:"name,omitempty"`
-	Value *string `json:"value,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 // A RoleObservation represents the observed state of a PostgreSQL role.
