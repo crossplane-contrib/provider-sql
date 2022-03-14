@@ -84,12 +84,15 @@ type RoleParameters struct {
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 
-	// ConfigurationParameters represents configuration parameters for this role
+	// ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
+	// role in the database will be reset.
+	//
+	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
 	ConfigurationParameters []RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 }
 
-// RoleConfigurationParameter represents a role configuration parameter
+// RoleConfigurationParameter is a role configuration parameter.
 type RoleConfigurationParameter struct {
 	Name  string `json:"name,omitempty"`
 	Value string `json:"value,omitempty"`
