@@ -333,8 +333,8 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.RoleParameters{
 							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
 								{
-									Name:  pointer.StringPtr("statement_timeout"),
-									Value: pointer.StringPtr("1"),
+									Name:  "statement_timeout",
+									Value: "1",
 								},
 							},
 						},
