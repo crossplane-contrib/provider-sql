@@ -19,10 +19,11 @@ package role
 import (
 	"context"
 	"fmt"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"strings"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
@@ -368,7 +369,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// If difference, reset all parameters and apply desired parameters in a transaction
 	if !cmp.Equal(cr.Status.AtProvider.ConfigurationParameters, cr.Spec.ForProvider.ConfigurationParameters,
 		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
-		q := make([]xsql.Query, 1)
+		q := make([]xsql.Query, 0)
 		q = append(q, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s RESET ALL", crn),
 		})
