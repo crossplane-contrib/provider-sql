@@ -42,7 +42,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 }
 
 // DSN returns the DSN URL
-func DSN(username string, password string, endpoint string, port string, database string) string {
+func DSN(username, password, endpoint, port, database string) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
