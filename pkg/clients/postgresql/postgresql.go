@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -31,16 +32,26 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
+	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
 	return postgresDB{
-		dsn: "postgres://" +
-			string(creds[xpv1.ResourceCredentialsSecretUserKey]) + ":" +
-			string(creds[xpv1.ResourceCredentialsSecretPasswordKey]) + "@" +
-			endpoint + ":" +
-			port + "/" +
-			database,
+		dsn:      DSN(username, password, endpoint, port, database),
 		endpoint: endpoint,
 		port:     port,
 	}
+}
+
+// DSN returns the DSN URL
+func DSN(username, password, endpoint, port, database string) string {
+	// Use net/url UserPassword to encode the username and password
+	// This will ensure that any special characters in the username or password
+	// are percent-encoded for use in the user info portion of the DSN URL
+	userInfo := url.UserPassword(username, password)
+	return "postgres://" +
+		userInfo.String() + "@" +
+		endpoint + ":" +
+		port + "/" +
+		database
 }
 
 // ExecTx executes an array of queries, committing if all are successful and
