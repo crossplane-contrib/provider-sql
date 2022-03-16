@@ -23,26 +23,31 @@ type postgresDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	sslmode  string
 }
 
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
-func New(creds map[string][]byte, database string) xsql.DB {
+// The sslmode defines the mode used to set up the connection for the provider.
+func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
 	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	dsn := DSN(username, password, endpoint, port, database, sslmode)
+
 	return postgresDB{
-		dsn:      DSN(username, password, endpoint, port, database),
+		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
+		sslmode:  sslmode,
 	}
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, database string) string {
+func DSN(username, password, endpoint, port, database, sslmode string) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
@@ -51,7 +56,8 @@ func DSN(username, password, endpoint, port, database string) string {
 		userInfo.String() + "@" +
 		endpoint + ":" +
 		port + "/" +
-		database
+		database +
+		"?sslmode=" + sslmode
 }
 
 // ExecTx executes an array of queries, committing if all are successful and

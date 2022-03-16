@@ -11,8 +11,9 @@ func TestDSNURLEscaping(t *testing.T) {
 	user := "username"
 	rawPass := "password^"
 	encPass := "password%5E"
-	dsn := DSN(user, rawPass, endpoint, port, db)
-	if dsn != "postgres://"+user+":"+encPass+"@"+endpoint+":"+port+"/"+db {
+	sslmode := "require"
+	dsn := DSN(user, rawPass, endpoint, port, db, sslmode)
+	if dsn != "postgres://"+user+":"+encPass+"@"+endpoint+":"+port+"/"+db+"?sslmode="+sslmode {
 		t.Errorf("DSN string did not match expected output with userinfo URL encoded")
 	}
 }

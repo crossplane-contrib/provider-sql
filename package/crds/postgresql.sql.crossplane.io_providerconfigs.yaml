@@ -70,6 +70,14 @@ spec:
                 default: postgres
                 description: Defines the database name used to set up a connection to the provided PostgreSQL instance. Same as PGDATABASE environment variable.
                 type: string
+              sslMode:
+                description: Defines the SSL mode used to set up a connection to the provided PostgreSQL instance
+                enum:
+                - disable
+                - require
+                - verify-ca
+                - verify-full
+                type: string
             required:
             - credentials
             type: object
