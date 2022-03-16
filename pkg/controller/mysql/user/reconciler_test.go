@@ -266,12 +266,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     new(int),
-								MaxUpdatesPerHour:     new(int),
-								MaxConnectionsPerHour: new(int),
-								MaxUserConnections:    new(int),
-							},
+							ResourceOptions: &v1alpha1.ResourceOptions{},
 						},
 					},
 				},
