@@ -40,10 +40,36 @@ type UserParameters struct {
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+
+	// ResourceOptions sets account specific resource limits.
+	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
+	// +optional
+	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
+}
+
+// ResourceOptions define the account specific resource limits.
+type ResourceOptions struct {
+	// MaxQueriesPerHour sets the number of queries an account can issue per hour
+	// +optional
+	MaxQueriesPerHour *int `json:"maxQueriesPerHour,omitempty"`
+
+	// MaxUpdatesPerHour sets the number of updates an account can issue per hour
+	// +optional
+	MaxUpdatesPerHour *int `json:"maxUpdatesPerHour,omitempty"`
+
+	// MaxConnectionsPerHour sets the number of times an account can connect to the server per hour
+	// +optional
+	MaxConnectionsPerHour *int `json:"maxConnectionsPerHour,omitempty"`
+
+	// MaxUserConnections sets The number of simultaneous connections to the server by an account
+	// +optional
+	MaxUserConnections *int `json:"maxUserConnections,omitempty"`
 }
 
 // A UserObservation represents the observed state of a MySQL user.
 type UserObservation struct {
+	// ResourceOptionsAsClauses represents the applied resource options
+	ResourceOptionsAsClauses []string `json:"resourceOptionsAsClauses,omitempty"`
 }
 
 // +kubebuilder:object:root=true
