@@ -224,7 +224,18 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
+							},
+						},
+					},
+				},
 			},
 			want: want{
 				o: managed.ExternalObservation{ResourceExists: false},
@@ -252,13 +263,23 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
+							},
+						},
+					},
+				},
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:          true,
-					ResourceUpToDate:        true,
-					ResourceLateInitialized: false,
+					ResourceExists:   true,
+					ResourceUpToDate: true,
 				},
 				err: nil,
 			},
@@ -289,6 +310,12 @@ func TestObserve(t *testing.T) {
 									Name: "example",
 								},
 								Key: "password",
+							},
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
 							},
 						},
 						ResourceSpec: xpv1.ResourceSpec{
@@ -386,6 +413,16 @@ func TestCreate(t *testing.T) {
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
+							},
 						},
 					},
 				},
@@ -702,6 +739,62 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 		},
+		"NoUpdateQueryUnchangedResourceOptions": {
+			reason: "We should not execute an SQL query if the resource options are unchanged.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							ResourceOptionsAsClauses: []string{
+								"MAX_QUERIES_PER_HOUR 0",
+								"MAX_UPDATES_PER_HOUR 0",
+								"MAX_CONNECTIONS_PER_HOUR 0",
+								"MAX_USER_CONNECTIONS 0",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -770,7 +863,18 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.User{},
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     new(int),
+								MaxUpdatesPerHour:     new(int),
+								MaxConnectionsPerHour: new(int),
+								MaxUserConnections:    new(int),
+							},
+						},
+					},
+				},
 			},
 		},
 	}
