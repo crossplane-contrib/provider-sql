@@ -331,7 +331,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "statement_timeout",
 									Value: "1",
@@ -438,7 +438,7 @@ func TestCreate(t *testing.T) {
 								Login:      new(bool),
 								CreateRole: new(bool),
 							},
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "search_path",
 									Value: "\"$user\",public",
@@ -944,7 +944,7 @@ func TestUpdate(t *testing.T) {
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "search_path",
 									Value: "\"$user\",public",
@@ -958,7 +958,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.RoleStatus{
 						AtProvider: v1alpha1.RoleObservation{
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "statement_timeout",
 									Value: "123",
@@ -1008,7 +1008,7 @@ func TestUpdate(t *testing.T) {
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "search_path",
 									Value: "\"$user\",public",
@@ -1025,7 +1025,7 @@ func TestUpdate(t *testing.T) {
 							// Observed configuration parameters are the same as requested,
 							// and in the same order. We should not make any
 							// query to update configuration parameters.
-							ConfigurationParameters: []v1alpha1.RoleConfigurationParameter{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
 									Name:  "search_path",
 									Value: "\"$user\",public",

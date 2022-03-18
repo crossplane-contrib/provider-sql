@@ -239,12 +239,16 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectRole)
 	}
-	for _, c := range rolconfigs {
-		kv := strings.Split(c, "=")
-		observed.ConfigurationParameters = append(observed.ConfigurationParameters, v1alpha1.RoleConfigurationParameter{
-			Name:  kv[0],
-			Value: kv[1],
-		})
+	if len(rolconfigs) > 0 {
+		var rc []v1alpha1.RoleConfigurationParameter
+		for _, c := range rolconfigs {
+			kv := strings.Split(c, "=")
+			rc = append(rc, v1alpha1.RoleConfigurationParameter{
+				Name:  kv[0],
+				Value: kv[1],
+			})
+		}
+		observed.ConfigurationParameters = &rc
 	}
 	cr.Status.AtProvider.ConfigurationParameters = observed.ConfigurationParameters
 
@@ -305,15 +309,16 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	// Update here so that state is reflected to the user prior to the next
 	// reconciler loop.
 	cr.Status.AtProvider.PrivilegesAsClauses = privs
-
-	for _, v := range cr.Spec.ForProvider.ConfigurationParameters {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(v.Name), pq.QuoteIdentifier(v.Value)),
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrap(err, errSetRoleConfigs)
+	if cr.Spec.ForProvider.ConfigurationParameters != nil {
+		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
+			if err := c.db.Exec(ctx, xsql.Query{
+				String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(v.Name), pq.QuoteIdentifier(v.Value)),
+			}); err != nil {
+				return managed.ExternalCreation{}, errors.Wrap(err, errSetRoleConfigs)
+			}
 		}
+		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
 	}
-	cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
 
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
@@ -374,7 +379,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			String: fmt.Sprintf("ALTER ROLE %s RESET ALL", crn),
 		})
 		// search_path="$user", public is valid so need to handle that
-		for _, v := range cr.Spec.ForProvider.ConfigurationParameters {
+		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
 			sb := strings.Builder{}
 			values := strings.Split(v.Value, ",")
 			for i, v := range values {

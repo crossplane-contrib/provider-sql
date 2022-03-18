@@ -89,7 +89,7 @@ type RoleParameters struct {
 	//
 	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
-	ConfigurationParameters []RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 }
 
 // RoleConfigurationParameter is a role configuration parameter.
@@ -104,7 +104,7 @@ type RoleObservation struct {
 	// any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
 	// ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
-	ConfigurationParameters []RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 }
 
 // +kubebuilder:object:root=true
