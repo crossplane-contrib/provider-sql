@@ -744,8 +744,12 @@ func (in *RoleObservation) DeepCopyInto(out *RoleObservation) {
 	}
 	if in.ConfigurationParameters != nil {
 		in, out := &in.ConfigurationParameters, &out.ConfigurationParameters
-		*out = make([]RoleConfigurationParameter, len(*in))
-		copy(*out, *in)
+		*out = new([]RoleConfigurationParameter)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]RoleConfigurationParameter, len(*in))
+			copy(*out, *in)
+		}
 	}
 }
 
@@ -775,8 +779,12 @@ func (in *RoleParameters) DeepCopyInto(out *RoleParameters) {
 	}
 	if in.ConfigurationParameters != nil {
 		in, out := &in.ConfigurationParameters, &out.ConfigurationParameters
-		*out = make([]RoleConfigurationParameter, len(*in))
-		copy(*out, *in)
+		*out = new([]RoleConfigurationParameter)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]RoleConfigurationParameter, len(*in))
+			copy(*out, *in)
+		}
 	}
 }
 
