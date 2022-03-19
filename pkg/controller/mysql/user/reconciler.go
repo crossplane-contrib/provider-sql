@@ -187,12 +187,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
 	observed := &v1alpha1.UserParameters{
-		ResourceOptions: &v1alpha1.ResourceOptions{
-			MaxQueriesPerHour:     new(int),
-			MaxUpdatesPerHour:     new(int),
-			MaxConnectionsPerHour: new(int),
-			MaxUserConnections:    new(int),
-		},
+		ResourceOptions: &v1alpha1.ResourceOptions{},
 	}
 
 	query := "SELECT " +
@@ -373,16 +368,18 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
-	if *observed.ResourceOptions.MaxQueriesPerHour != *desired.ResourceOptions.MaxQueriesPerHour {
+	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
+		fmt.Printf("%#v\n", observed.ResourceOptions.MaxQueriesPerHour)
+		fmt.Printf("%#v\n", desired.ResourceOptions.MaxQueriesPerHour)
 		return false
 	}
-	if *observed.ResourceOptions.MaxUpdatesPerHour != *desired.ResourceOptions.MaxUpdatesPerHour {
+	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
 		return false
 	}
-	if *observed.ResourceOptions.MaxConnectionsPerHour != *desired.ResourceOptions.MaxConnectionsPerHour {
+	if observed.ResourceOptions.MaxConnectionsPerHour != desired.ResourceOptions.MaxConnectionsPerHour {
 		return false
 	}
-	if *observed.ResourceOptions.MaxUserConnections != *desired.ResourceOptions.MaxUserConnections {
+	if observed.ResourceOptions.MaxUserConnections != desired.ResourceOptions.MaxUserConnections {
 		return false
 	}
 	return true
