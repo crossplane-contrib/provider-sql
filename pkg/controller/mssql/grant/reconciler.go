@@ -19,6 +19,7 @@ package grant
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -174,6 +175,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	toGrant, toRevoke := diffPermissions(desired, observed)
 
 	if len(toRevoke) > 0 {
+		sort.Strings(toRevoke)
 		query := fmt.Sprintf("REVOKE %s FROM %s",
 			strings.Join(toRevoke, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
@@ -181,6 +183,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 	if len(toGrant) > 0 {
+		sort.Strings(toGrant)
 		query := fmt.Sprintf("GRANT %s TO %s",
 			strings.Join(toGrant, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
