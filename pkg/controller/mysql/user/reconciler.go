@@ -368,9 +368,11 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
+	if desired.ResourceOptions == nil {
+		// Return true if there are no desired ResourceOptions
+		return true
+	}
 	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
-		fmt.Printf("%#v\n", observed.ResourceOptions.MaxQueriesPerHour)
-		fmt.Printf("%#v\n", desired.ResourceOptions.MaxQueriesPerHour)
 		return false
 	}
 	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
