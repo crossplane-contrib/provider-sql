@@ -226,14 +226,7 @@ func TestObserve(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     new(int),
-								MaxUpdatesPerHour:     new(int),
-								MaxConnectionsPerHour: new(int),
-								MaxUserConnections:    new(int),
-							},
-						},
+						ForProvider: v1alpha1.UserParameters{},
 					},
 				},
 			},
@@ -265,9 +258,7 @@ func TestObserve(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: &v1alpha1.ResourceOptions{},
-						},
+						ForProvider: v1alpha1.UserParameters{},
 					},
 				},
 			},
@@ -305,12 +296,6 @@ func TestObserve(t *testing.T) {
 									Name: "example",
 								},
 								Key: "password",
-							},
-							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     new(int),
-								MaxUpdatesPerHour:     new(int),
-								MaxConnectionsPerHour: new(int),
-								MaxUserConnections:    new(int),
 							},
 						},
 						ResourceSpec: xpv1.ResourceSpec{
@@ -411,14 +396,7 @@ func TestCreate(t *testing.T) {
 						},
 					},
 					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     new(int),
-								MaxUpdatesPerHour:     new(int),
-								MaxConnectionsPerHour: new(int),
-								MaxUserConnections:    new(int),
-							},
-						},
+						ForProvider: v1alpha1.UserParameters{},
 					},
 				},
 			},
@@ -860,14 +838,7 @@ func TestDelete(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ForProvider: v1alpha1.UserParameters{
-							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     new(int),
-								MaxUpdatesPerHour:     new(int),
-								MaxConnectionsPerHour: new(int),
-								MaxUserConnections:    new(int),
-							},
-						},
+						ForProvider: v1alpha1.UserParameters{},
 					},
 				},
 			},
