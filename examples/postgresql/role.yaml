@@ -7,6 +7,12 @@ spec:
     connectionLimit: 10
     privileges:
       login: true
+    configurationParameters:
+      - name: 'statement_timeout'
+        value: '123'
+      - name: 'search_path'
+        value: '"$user",public'
+
   writeConnectionSecretToRef:
     name: example-parent-role-secret
     namespace: default
