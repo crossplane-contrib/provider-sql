@@ -56,6 +56,17 @@ spec:
               forProvider:
                 description: RoleParameters define the desired state of a PostgreSQL role instance.
                 properties:
+                  configurationParameters:
+                    description: "ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the role in the database will be reset. \n See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters."
+                    items:
+                      description: RoleConfigurationParameter is a role configuration parameter.
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                      type: object
+                    type: array
                   connectionLimit:
                     description: ConnectionLimit to be applied to the role.
                     format: int32
@@ -143,6 +154,17 @@ spec:
               atProvider:
                 description: A RoleObservation represents the observed state of a PostgreSQL role.
                 properties:
+                  configurationParameters:
+                    description: ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
+                    items:
+                      description: RoleConfigurationParameter is a role configuration parameter.
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                      type: object
+                    type: array
                   privilegesAsClauses:
                     description: PrivilegesAsClauses represents the applied privileges state, taking into account any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
                     items:

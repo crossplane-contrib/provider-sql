@@ -22,6 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -56,6 +59,7 @@ const (
 	errUpdateRole              = "cannot update role"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errComparePrivileges       = "cannot compare desired and observed privileges"
+	errSetRoleConfigs          = "cannot set role configuration parameters"
 
 	maxConcurrency = 5
 )
@@ -206,9 +210,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"rolcanlogin, " +
 		"rolreplication, " +
 		"rolbypassrls, " +
-		"rolconnlimit " +
+		"rolconnlimit, " +
+		"rolconfig " +
 		"FROM pg_roles WHERE rolname = $1"
 
+	var rolconfigs []string
 	err := c.db.Scan(ctx,
 		xsql.Query{
 			String: query,
@@ -224,6 +230,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		&observed.Privileges.Replication,
 		&observed.Privileges.BypassRls,
 		&observed.ConnectionLimit,
+		pq.Array(&rolconfigs),
 	)
 
 	if xsql.IsNoRows(err) {
@@ -232,6 +239,18 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectRole)
 	}
+	if len(rolconfigs) > 0 {
+		var rc []v1alpha1.RoleConfigurationParameter
+		for _, c := range rolconfigs {
+			kv := strings.Split(c, "=")
+			rc = append(rc, v1alpha1.RoleConfigurationParameter{
+				Name:  kv[0],
+				Value: kv[1],
+			})
+		}
+		observed.ConfigurationParameters = &rc
+	}
+	cr.Status.AtProvider.ConfigurationParameters = observed.ConfigurationParameters
 
 	_, pwdChanged, err := c.getPassword(ctx, cr)
 	if err != nil {
@@ -290,6 +309,16 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	// Update here so that state is reflected to the user prior to the next
 	// reconciler loop.
 	cr.Status.AtProvider.PrivilegesAsClauses = privs
+	if cr.Spec.ForProvider.ConfigurationParameters != nil {
+		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
+			if err := c.db.Exec(ctx, xsql.Query{
+				String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(v.Name), pq.QuoteIdentifier(v.Value)),
+			}); err != nil {
+				return managed.ExternalCreation{}, errors.Wrap(err, errSetRoleConfigs)
+			}
+		}
+		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
+	}
 
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
@@ -341,6 +370,34 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// reconciler loop.
 	cr.Status.AtProvider.PrivilegesAsClauses = privs
 
+	// Checks if current role configuration parameters differs from desired state.
+	// If difference, reset all parameters and apply desired parameters in a transaction
+	if !cmp.Equal(cr.Status.AtProvider.ConfigurationParameters, cr.Spec.ForProvider.ConfigurationParameters,
+		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
+		q := make([]xsql.Query, 0)
+		q = append(q, xsql.Query{
+			String: fmt.Sprintf("ALTER ROLE %s RESET ALL", crn),
+		})
+		// search_path="$user", public is valid so need to handle that
+		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
+			sb := strings.Builder{}
+			values := strings.Split(v.Value, ",")
+			for i, v := range values {
+				sb.WriteString(pq.QuoteLiteral(strings.TrimSpace(strings.Trim(v, "'\""))))
+				if i < len(values)-1 {
+					sb.WriteString(",")
+				}
+			}
+			q = append(q, xsql.Query{
+				String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(v.Name), sb.String()),
+			})
+		}
+		if err := c.db.ExecTx(ctx, q); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
+		}
+		// Update state to reflect the current configuration parameters
+		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
+	}
 	cl := cr.Spec.ForProvider.ConnectionLimit
 	if cl != nil {
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -394,6 +451,10 @@ func upToDate(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameter
 		return false
 	}
 	if observed.Privileges.BypassRls != desired.Privileges.BypassRls {
+		return false
+	}
+	if !cmp.Equal(observed.ConfigurationParameters, desired.ConfigurationParameters,
+		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
 		return false
 	}
 	return true

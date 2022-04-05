@@ -320,6 +320,36 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ConfigurationParametersChanged": {
+			reason: "We should return ResourceUpToDate=false if ConfigurationParameter is changed",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "statement_timeout",
+									Value: "1",
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -407,6 +437,16 @@ func TestCreate(t *testing.T) {
 								CreateDb:   new(bool),
 								Login:      new(bool),
 								CreateRole: new(bool),
+							},
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "search_path",
+									Value: "\"$user\",public",
+								},
+								{
+									Name:  "pgaudit.log",
+									Value: "All",
+								},
 							},
 						},
 					},
@@ -865,6 +905,152 @@ func TestUpdate(t *testing.T) {
 			},
 			want: want{
 				err: errors.Wrap(errors.New(errComparePrivileges), errUpdateRole),
+			},
+		},
+		"UpdateConfigurationParameters": {
+			reason: "We should set configuration parameters when diff between desired and observed.",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, q []xsql.Query) error {
+						crn := pq.QuoteIdentifier("example")
+						if len(q) != 3 {
+							return errBoom
+						}
+						if q[0].String != fmt.Sprintf("ALTER ROLE %s RESET ALL", crn) {
+							return errBoom
+						}
+						if q[1].String != fmt.Sprintf("ALTER ROLE %s set %s=%s,%s", crn, pq.QuoteIdentifier("search_path"), pq.QuoteLiteral("$user"), pq.QuoteLiteral("public")) {
+							return errBoom
+						}
+						if q[2].String != fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier("pgaudit.log"), pq.QuoteLiteral("All")) {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "search_path",
+									Value: "\"$user\",public",
+								},
+								{
+									Name:  "pgaudit.log",
+									Value: "All",
+								},
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "statement_timeout",
+									Value: "123",
+								},
+								{
+									Name:  "pgaudit.log",
+									Value: "All",
+								},
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{},
+		},
+		"NoUpdateQueryNoChangedConfigurationParameters": {
+			reason: "We should not execute an SQL query if configuration parameters are unchanged.",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, q []xsql.Query) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "search_path",
+									Value: "\"$user\",public",
+								},
+								{
+									Name:  "pgaudit.log",
+									Value: "All",
+								},
+							},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							// Observed configuration parameters are the same as requested,
+							// and in the same order. We should not make any
+							// query to update configuration parameters.
+							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
+								{
+									Name:  "search_path",
+									Value: "\"$user\",public",
+								},
+								{
+									Name:  "pgaudit.log",
+									Value: "All",
+								},
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: nil,
 			},
 		},
 	}
