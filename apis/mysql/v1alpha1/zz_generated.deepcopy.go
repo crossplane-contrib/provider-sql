@@ -199,6 +199,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = new(v1.Selector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Table != nil {
+		in, out := &in.Table, &out.Table
+		*out = new(string)
+		**out = **in
+	}
 	if in.Database != nil {
 		in, out := &in.Database, &out.Database
 		*out = new(string)
