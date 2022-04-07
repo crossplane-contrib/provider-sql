@@ -21,22 +21,34 @@ type mySQLDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	tls	     string
 }
 
 // New returns a new MySQL database client.
-func New(creds map[string][]byte) xsql.DB {
+func New(creds map[string][]byte, tls string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
+	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	dsn := DSN(username, password, endpoint, port, tls)
+
 	return mySQLDB{
-		dsn: fmt.Sprintf("%s:%s@tcp(%s:%s)/",
-			creds[xpv1.ResourceCredentialsSecretUserKey],
-			creds[xpv1.ResourceCredentialsSecretPasswordKey],
-			endpoint,
-			port),
+		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
+		tls:      tls,
 	}
+}
+
+// DSN returns the DSN URL
+func DSN(username, password, endpoint, port, tls string) string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
+		username,
+		password,
+		endpoint,
+		port,
+		tls)
 }
 
 // ExecTx is unsupported in MySQL.
