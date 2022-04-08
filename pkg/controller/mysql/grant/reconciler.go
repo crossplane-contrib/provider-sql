@@ -287,10 +287,14 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func createGrantQuery(privileges, dbname, username string) string {
+	if dbname != "*" {
+		dbname := mysql.QuoteIdentifier(dbname)
+	}
+
 	username, host := mysql.SplitUserHost(username)
 	return fmt.Sprintf("GRANT %s ON %s.* TO %s@%s",
 		privileges,
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
