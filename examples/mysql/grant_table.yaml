@@ -1,0 +1,15 @@
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-table
+spec:
+  forProvider:
+    privileges:
+      - DROP
+      - INSERT
+      - SELECT
+    table: example-table
+    userRef:
+      name: example-user
+    databaseRef:
+      name: example-db
