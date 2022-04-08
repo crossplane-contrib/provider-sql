@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -21,7 +22,7 @@ type mySQLDB struct {
 	dsn      string
 	endpoint string
 	port     string
-	tls	     string
+	tls      string
 }
 
 // New returns a new MySQL database client.
@@ -43,9 +44,12 @@ func New(creds map[string][]byte, tls string) xsql.DB {
 
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, tls string) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
-		username,
-		password,
+	// Use net/url UserPassword to encode the username and password
+	// This will ensure that any special characters in the username or password
+	// are percent-encoded for use in the user info portion of the DSN URL
+	userInfo := url.UserPassword(username, password)
+	return fmt.Sprintf("%s@tcp(%s:%s)/?tls=%s",
+		userInfo,
 		endpoint,
 		port,
 		tls)
