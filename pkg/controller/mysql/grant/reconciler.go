@@ -307,10 +307,14 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
+	
+	if dbname != "*" {
+		dbname := mysql.QuoteIdentifier(dbname)
+	}
 
 	query := fmt.Sprintf("REVOKE %s ON %s.* FROM %s@%s",
 		privileges,
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
