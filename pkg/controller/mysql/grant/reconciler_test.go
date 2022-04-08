@@ -381,6 +381,70 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessGrantWithTables": {
+			reason: "We should see the grants in sync when using a table",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows([]string{"Grants"}).
+								AddRow("GRANT CREATE, DROP ON `success-db`.`success-table` TO 'success-user'@%"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("success-db"),
+							User:       pointer.StringPtr("success-user"),
+							Table:      pointer.StringPtr("success-table"),
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessDiffGrantWithTables": {
+			reason: "We should see the grants out of sync when using a table",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows([]string{"Grants"}).
+								AddRow("GRANT CREATE, DROP ON `success-db`.`success-table` TO 'success-user'@%"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("success-db"),
+							User:       pointer.StringPtr("success-user"),
+							Table:      pointer.StringPtr("success-table"),
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: false,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
