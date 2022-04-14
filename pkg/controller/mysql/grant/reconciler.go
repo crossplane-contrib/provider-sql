@@ -264,13 +264,17 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
+	if dbname != "*" {
+		dbname = mysql.QuoteIdentifier(dbname)
+	}
+
 	// Remove current grants since it's not possible to update grants.
 	// This might leave applications with no access to the DB for a short time
 	// until the privileges are granted again.
 	// Using a transaction is unfortunately not possible because a GRANT triggers
 	// an implicit commit: https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html
 	query := fmt.Sprintf("REVOKE ALL ON %s.* FROM %s@%s",
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
