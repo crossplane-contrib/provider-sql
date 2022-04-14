@@ -292,7 +292,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func createGrantQuery(privileges, dbname, username string) string {
 	if dbname != "*" {
-		dbname := mysql.QuoteIdentifier(dbname)
+		dbname = mysql.QuoteIdentifier(dbname)
 	}
 
 	username, host := mysql.SplitUserHost(username)
@@ -315,9 +315,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
-	
+
 	if dbname != "*" {
-		dbname := mysql.QuoteIdentifier(dbname)
+		dbname = mysql.QuoteIdentifier(dbname)
 	}
 
 	query := fmt.Sprintf("REVOKE %s ON %s.* FROM %s@%s",
