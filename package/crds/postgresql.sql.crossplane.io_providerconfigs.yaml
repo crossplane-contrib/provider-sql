@@ -83,7 +83,6 @@ spec:
                 type: string
             required:
             - credentials
-            - sslMode
             type: object
           status:
             description: A ProviderConfigStatus reflects the observed state of a ProviderConfig.
