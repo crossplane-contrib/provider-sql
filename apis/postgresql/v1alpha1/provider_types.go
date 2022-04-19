@@ -34,8 +34,8 @@ type ProviderConfigSpec struct {
 	// PostgreSQL instance
 	// +kubebuilder:validation:Enum=disable;require;verify-ca;verify-full
 	// +kubebuilder:default=verify-full
-	// +kubebuilder:validation:Required
-	SSLMode string `json:"sslMode"`
+	// +kubebuilder:validation:Optional
+	SSLMode *string `json:"sslMode,omitempty"`
 }
 
 const (
