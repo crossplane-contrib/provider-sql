@@ -216,23 +216,8 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 		}
 		p := parseGrant(grant, dbname, table)
 
-		/*
-			if p != nil && privileges != nil {
-				// Found more than one grant for this user/DB pair.
-				// This probably shouldn't happen because MySQL groups privileges
-				// for the same user/DB pair in a single grant.
-				// In any case we want to update and ensure the privileges of our grant.
-				return nil, &managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: false,
-				}, nil
-			}
-			privileges = p
-		*/
-
-		// NOTE: this breaks the previous "safety"-switch for the same user/DB pair in a single grant
-		// but when managing tables in grants we need to break as soon as we found something
 		if p != nil {
+			// found the grant we were looking for
 			privileges = p
 			break
 		}
