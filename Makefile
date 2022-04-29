@@ -3,10 +3,6 @@
 PROJECT_NAME := provider-sql
 PROJECT_REPO := github.com/crossplane-contrib/$(PROJECT_NAME)
 
-# kind-related versions
-KIND_VERSION ?= v0.11.1
-KIND_NODE_IMAGE_TAG ?= v1.19.11
-
 PLATFORMS ?= linux_amd64 linux_arm64
 -include build/makelib/common.mk
 
@@ -27,7 +23,7 @@ GO111MODULE = on
 
 # Setup Images
 DOCKER_REGISTRY ?= crossplane
-IMAGES = provider-sql provider-sql-controller
+IMAGES = $(PROJECT_NAME) $(PROJECT_NAME)-controller
 -include build/makelib/image.mk
 
 fallthrough: submodules
@@ -40,21 +36,30 @@ crds.clean:
 	@find package/crds -name *.yaml.sed -delete || $(FAIL)
 	@$(OK) cleaned generated CRDs
 
-generate.done: crds.clean
+generate: crds.clean
 
 # integration tests
 e2e.run: test-integration
 
 # Run integration tests.
-test-integration: $(KIND) $(KUBECTL) $(HELM3)
+test-integration: $(KIND) $(KUBECTL) $(UP) $(HELM3)
 	@$(INFO) running integration tests using kind $(KIND_VERSION)
-	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
+	@$(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
 	@$(OK) integration tests passed
 
 # Update the submodules, such as the common build scripts.
 submodules:
 	@git submodule sync
 	@git submodule update --init --recursive
+
+# NOTE(hasheddan): the build submodule currently overrides XDG_CACHE_HOME in
+# order to force the Helm 3 to use the .work/helm directory. This causes Go on
+# Linux machines to use that directory as the build cache as well. We should
+# adjust this behavior in the build submodule because it is also causing Linux
+# users to duplicate their build cache, but for now we just make it easier to
+# identify its location in CI so that we cache between builds.
+go.cachedir:
+	@go env GOCACHE
 
 # This is for running out-of-cluster locally, and is for convenience. Running
 # this make target will print out the command which was used. For more control,
@@ -66,8 +71,8 @@ run: go.build
 
 dev: $(KIND) $(KUBECTL)
 	@$(INFO) Creating kind cluster
-	@$(KIND) create cluster --name=provider-sql-dev
-	@$(KUBECTL) cluster-info --context kind-provider-sql-dev
+	@$(KIND) create cluster --name=$(PROJECT_NAME)-dev
+	@$(KUBECTL) cluster-info --context kind-$(PROJECT_NAME)-dev
 	@$(INFO) Installing Crossplane CRDs
 	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
 	@$(INFO) Installing Provider SQL CRDs
@@ -77,16 +82,15 @@ dev: $(KIND) $(KUBECTL)
 
 dev-clean: $(KIND) $(KUBECTL)
 	@$(INFO) Deleting kind cluster
-	@$(KIND) delete cluster --name=provider-sql-dev
+	@$(KIND) delete cluster --name=$(PROJECT_NAME)-dev
 
-.PHONY: reviewable submodules fallthrough test-integration run crds.clean dev dev-clean
+.PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean
 
 # ====================================================================================
 # Special Targets
 
 define CROSSPLANE_MAKE_HELP
 Crossplane Targets:
-    reviewable            Ensure a PR is ready for review.
     submodules            Update the submodules, such as the common build scripts.
     run                   Run crossplane locally, out-of-cluster. Useful for development.
 
