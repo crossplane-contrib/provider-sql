@@ -96,6 +96,9 @@ spec:
                       type: string
                     minItems: 1
                     type: array
+                  table:
+                    description: Tables this grant is for.
+                    type: string
                   user:
                     description: User this grant is for.
                     type: string
