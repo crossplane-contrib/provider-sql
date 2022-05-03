@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	grantRegex = regexp.MustCompile("^GRANT (.+) ON `(.+)`\\.\\* TO .+")
+	grantRegex = regexp.MustCompile("^GRANT (.+) ON `(.+)`\\.(.+) TO .+")
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
@@ -141,8 +141,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
+	table := defaultTable(cr.Spec.ForProvider.Table)
 
-	privileges, result, err := c.getPrivileges(ctx, username, dbname)
+	privileges, result, err := c.getPrivileges(ctx, username, dbname, table)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -165,6 +166,13 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
+func defaultTable(table *string) string {
+	if !(table == nil) {
+		return mysql.QuoteIdentifier(*table)
+	}
+	return "*"
+}
+
 func privilegesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -183,15 +191,15 @@ func privilegesEqual(a, b []string) bool {
 	return true
 }
 
-func parseGrant(grant, dbname string) (privileges []string) {
+func parseGrant(grant, dbname string, table string) (privileges []string) {
 	matches := grantRegex.FindStringSubmatch(grant)
-	if len(matches) == 3 && matches[2] == dbname {
+	if len(matches) == 4 && matches[2] == dbname && matches[3] == table {
 		return strings.Split(matches[1], ", ")
 	}
 	return nil
 }
 
-func (c *external) getPrivileges(ctx context.Context, username, dbname string) ([]string, *managed.ExternalObservation, error) {
+func (c *external) getPrivileges(ctx context.Context, username, dbname string, table string) ([]string, *managed.ExternalObservation, error) {
 	username, host := mysql.SplitUserHost(username)
 	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
@@ -206,19 +214,15 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string) (
 		if err := rows.Scan(&grant); err != nil {
 			return nil, nil, errors.Wrap(err, errCurrentGrant)
 		}
-		p := parseGrant(grant, dbname)
-		if p != nil && privileges != nil {
-			// Found more than one grant for this user/DB pair.
-			// This probably shouldn't happen because MySQL groups privileges
-			// for the same user/DB pair in a single grant.
-			// In any case we want to update and ensure the privileges of our grant.
-			return nil, &managed.ExternalObservation{
-				ResourceExists:   true,
-				ResourceUpToDate: false,
-			}, nil
+		p := parseGrant(grant, dbname, table)
+
+		if p != nil {
+			// found the grant we were looking for
+			privileges = p
+			break
 		}
-		privileges = p
 	}
+
 	if err := rows.Err(); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
@@ -241,10 +245,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
+	table := defaultTable(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
-	query := createGrantQuery(privileges, dbname, username)
+	query := createGrantQuery(privileges, dbname, username, table)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
@@ -260,6 +265,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
+	table := defaultTable(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
@@ -269,8 +275,9 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// until the privileges are granted again.
 	// Using a transaction is unfortunately not possible because a GRANT triggers
 	// an implicit commit: https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html
-	query := fmt.Sprintf("REVOKE ALL ON %s.* FROM %s@%s",
+	query := fmt.Sprintf("REVOKE ALL ON %s.%s FROM %s@%s",
 		mysql.QuoteIdentifier(dbname),
+		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
@@ -278,7 +285,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
 	}
 
-	query = createGrantQuery(privileges, dbname, username)
+	query = createGrantQuery(privileges, dbname, username, table)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
@@ -286,14 +293,17 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
 }
 
-func createGrantQuery(privileges, dbname, username string) string {
+func createGrantQuery(privileges, dbname, username string, table string) string {
 	username, host := mysql.SplitUserHost(username)
-	return fmt.Sprintf("GRANT %s ON %s.* TO %s@%s",
+	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
 		mysql.QuoteIdentifier(dbname),
+		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
+
+	return result
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -304,16 +314,19 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	username := *cr.Spec.ForProvider.User
 	dbname := *cr.Spec.ForProvider.Database
+	table := defaultTable(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
-	query := fmt.Sprintf("REVOKE %s ON %s.* FROM %s@%s",
+	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
 		mysql.QuoteIdentifier(dbname),
+		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
+
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return errors.Wrap(err, errRevokeGrant)
 	}
