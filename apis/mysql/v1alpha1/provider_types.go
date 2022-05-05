@@ -33,7 +33,7 @@ type ProviderConfigSpec struct {
 	// not encrypted. Neither skip-verify nor preferred add any reliable security.
 	// +kubebuilder:validation:Enum=true;skip-verify;preferred
 	// +optional
-	TLS string `json:"tls"`
+	TLS *string `json:"tls"`
 }
 
 const (
