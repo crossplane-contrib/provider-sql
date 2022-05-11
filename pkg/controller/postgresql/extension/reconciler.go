@@ -35,6 +35,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -112,10 +113,10 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	// We do not want to create an extension on the default DB
 	// if the user was expecting a database name to be resolved.
 	if cr.Spec.ForProvider.Database != nil {
-		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, pc.Spec.SSLMode)}, nil
+		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
 	}
 
-	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.SSLMode)}, nil
+	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode))}, nil
 }
 
 type external struct{ db xsql.DB }
@@ -179,7 +180,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateExtension)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
+func (c *external) Update(_ context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
 	_, ok := mg.(*v1alpha1.Extension)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotExtension)
