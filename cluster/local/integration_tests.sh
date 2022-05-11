@@ -72,6 +72,7 @@ echo "created cache dir at ${CACHE_PATH}"
 docker tag "${BUILD_IMAGE}" "${PACKAGE_IMAGE}"
 "${UP}" xpkg xp-extract --from-daemon "${PACKAGE_IMAGE}" -o "${CACHE_PATH}/${PACKAGE_NAME}.gz" && chmod 644 "${CACHE_PATH}/${PACKAGE_NAME}.gz"
 
+
 # create kind cluster with extra mounts
 echo_step "creating k8s cluster using kind"
 KIND_CONFIG="$( cat <<EOF
@@ -171,7 +172,8 @@ EOF
 echo "${INSTALL_YAML}" | "${KUBECTL}" apply -f -
 
 echo_step "waiting for provider to be installed"
-kubectl wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
+"${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
+
 
 # printing the cache dir contents can be useful for troubleshooting failures
 echo_step "check kind node cache dir contents"
