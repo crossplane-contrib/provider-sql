@@ -191,6 +191,13 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		return nil
 	case roleDatabase:
 		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		// Resolve privilege ALL shorthand to CTc
+		// https://www.postgresql.org/docs/12/ddl-priv.html#PRIVILEGES-SUMMARY-TABLE
+		if len(gp.Privileges) == 1 && gp.Privileges[0] == "ALL" {
+			gp.Privileges = v1alpha1.GrantPrivileges{"CREATE", "TEMPORARY", "CONNECT"}
+		}
+
 		sp := gp.Privileges.ToStringSlice()
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
