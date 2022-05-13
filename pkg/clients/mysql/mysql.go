@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	errNotSupported = "%s not supported by mysql client"
+	errNotSupported  = "%s not supported by mysql client"
+	defaultMySQLPort = "3306"
 )
 
 type mySQLDB struct {
@@ -28,6 +29,9 @@ func New(creds map[string][]byte) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	if port == "" {
+		port = defaultMySQLPort
+	}
 	return mySQLDB{
 		dsn: fmt.Sprintf("%s:%s@tcp(%s:%s)/",
 			creds[xpv1.ResourceCredentialsSecretUserKey],
