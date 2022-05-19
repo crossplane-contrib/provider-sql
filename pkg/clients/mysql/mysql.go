@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -21,22 +22,41 @@ type mySQLDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	tls      string
 }
 
 // New returns a new MySQL database client.
-func New(creds map[string][]byte) xsql.DB {
+func New(creds map[string][]byte, tls *string) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
+	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	if tls == nil {
+		defaultTLS := "preferred"
+		tls = &defaultTLS
+	}
+	dsn := DSN(username, password, endpoint, port, *tls)
+
 	return mySQLDB{
-		dsn: fmt.Sprintf("%s:%s@tcp(%s:%s)/",
-			creds[xpv1.ResourceCredentialsSecretUserKey],
-			creds[xpv1.ResourceCredentialsSecretPasswordKey],
-			endpoint,
-			port),
+		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
+		tls:      *tls,
 	}
+}
+
+// DSN returns the DSN URL
+func DSN(username, password, endpoint, port, tls string) string {
+	// Use net/url UserPassword to encode the username and password
+	// This will ensure that any special characters in the username or password
+	// are percent-encoded for use in the user info portion of the DSN URL
+	userInfo := url.UserPassword(username, password)
+	return fmt.Sprintf("%s@tcp(%s:%s)/?tls=%s",
+		userInfo,
+		endpoint,
+		port,
+		tls)
 }
 
 // ExecTx is unsupported in MySQL.
