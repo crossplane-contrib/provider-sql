@@ -23,20 +23,29 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
    with a Crossplane provider (e.g. a [CloudSQLInstance] with provider-gcp) or you can
    create for an existing server as follows:
 
-    ```
-    kubectl create secret generic db-conn \
-      --from-literal=username=admin \
-      --from-literal=password='t0ps3cr3t' \
-      --from-literal=endpoint=my.sql-server.com \
-      --from-literal=port=3306
-    ```
+   ```
+   kubectl create secret generic db-conn \
+     --from-literal=username=admin \
+     --from-literal=password='t0ps3cr3t' \
+     --from-literal=endpoint=my.sql-server.com \
+     --from-literal=port=3306
+   ```
 
 2. Create managed resource for your SQL server flavor:
 
-    - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
-    - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
-    - **MSSQL**: `Database`, `Grant`, `User` (See [the examples](examples/mssql))
+   - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
+   - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
+   - **MSSQL**: `Database`, `Grant`, `User` (See [the examples](examples/mssql))
 
-[Crossplane]: https://crossplane.io
-[CloudSQLInstance]: https://doc.crds.dev/github.com/crossplane/provider-gcp/database.gcp.crossplane.io/CloudSQLInstance/v1beta1@v0.18.0
+[crossplane]: https://crossplane.io
+[cloudsqlinstance]: https://doc.crds.dev/github.com/crossplane/provider-gcp/database.gcp.crossplane.io/CloudSQLInstance/v1beta1@v0.18.0
 [created automatically]: https://crossplane.io/docs/v1.5/concepts/managed-resources.html#connection-details
+
+## Contributing
+
+1. Fork the project and clone locally.
+2. Create a branch with the changes.
+3. Install go version 1.17.
+4. Run `make` to initialize the "build". Make submodules used for CI/CD.
+5. Run `make reviewable` to run code generation, linters, and tests.
+6. Commit, push, and PR.

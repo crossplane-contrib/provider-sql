@@ -26,6 +26,14 @@ import (
 type ProviderConfigSpec struct {
 	// Credentials required to authenticate to this provider.
 	Credentials ProviderCredentials `json:"credentials"`
+	// tls=true enables TLS / SSL encrypted connection to the server.
+	// Use skip-verify if you want to use a self-signed or invalid certificate (server side)
+	// or use preferred to use TLS only when advertised by the server. This is similar
+	// to skip-verify, but additionally allows a fallback to a connection which is
+	// not encrypted. Neither skip-verify nor preferred add any reliable security.
+	// +kubebuilder:validation:Enum=true;skip-verify;preferred
+	// +optional
+	TLS *string `json:"tls"`
 }
 
 const (
