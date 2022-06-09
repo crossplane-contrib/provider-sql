@@ -75,13 +75,13 @@ type GrantParameters struct {
 	// +optional
 	UserSelector *xpv1.Selector `json:"userSelector,omitempty"`
 
-	// Tables this grant is for.
+	// Tables this grant is for, default *.
 	// +optional
 	Table *string `json:"table,omitempty" default:"*"`
 
-	// Database this grant is for.
+	// Database this grant is for, default *.
 	// +optional
-	Database *string `json:"database,omitempty"`
+	Database *string `json:"database,omitempty" default:"*"`
 
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
