@@ -65,7 +65,7 @@ spec:
                 description: GrantParameters define the desired state of a MySQL grant instance.
                 properties:
                   database:
-                    description: Database this grant is for.
+                    description: Database this grant is for, default *.
                     type: string
                   databaseRef:
                     description: DatabaseRef references the database object this grant it for.
@@ -97,7 +97,7 @@ spec:
                     minItems: 1
                     type: array
                   table:
-                    description: Tables this grant is for.
+                    description: Tables this grant is for, default *.
                     type: string
                   user:
                     description: User this grant is for.

@@ -75,7 +75,7 @@ type GrantParameters struct {
 	// +optional
 	UserSelector *xpv1.Selector `json:"userSelector,omitempty"`
 
-	// Tables this grant is for, default *..
+	// Tables this grant is for, default *.
 	// +optional
 	Table *string `json:"table,omitempty" default:"*"`
 

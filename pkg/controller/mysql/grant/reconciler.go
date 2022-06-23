@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	grantRegex = regexp.MustCompile("^GRANT (.+) ON `(.+)`\\.(.+) TO .+")
+	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (.+)\.(.+) TO .+`)
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
