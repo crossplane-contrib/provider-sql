@@ -186,7 +186,7 @@ mariadb_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 "${HELM3}" repo add bitnami https://charts.bitnami.com/bitnami
 
 "${HELM3}" install mariadb bitnami/mariadb \
-    --version 9.0.1 \
+    --version 11.3.3 \
     --set auth.rootPassword="${mariadb_root_pw}" \
     --wait
 
