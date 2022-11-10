@@ -718,6 +718,27 @@ func TestDelete(t *testing.T) {
 			},
 			want: nil,
 		},
+		"SuccessGrantGone": {
+			reason: "No error should be returned if the grant is already revoked",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: pointer.StringPtr("test-example"),
+							User:     pointer.StringPtr("test-example"),
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+					},
+				},
+			},
+			want: nil,
+		},
 	}
 
 	for name, tc := range cases {
