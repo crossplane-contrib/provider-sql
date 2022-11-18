@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -51,9 +50,9 @@ func DSN(username, password, endpoint, port, tls string) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
-	userInfo := url.UserPassword(username, password)
-	return fmt.Sprintf("%s@tcp(%s:%s)/?tls=%s",
-		userInfo,
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
+		username,
+		password,
 		endpoint,
 		port,
 		tls)
