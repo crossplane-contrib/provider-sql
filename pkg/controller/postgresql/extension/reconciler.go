@@ -19,6 +19,7 @@ package extension
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
@@ -63,6 +64,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger) error {
 		resource.ManagedKind(v1alpha1.ExtensionGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
 		managed.WithLogger(l.WithValues("controller", name)),
+		managed.WithPollInterval(10*time.Minute),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
