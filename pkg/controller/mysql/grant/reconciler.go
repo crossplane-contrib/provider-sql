@@ -330,7 +330,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
-			//MySQL automatically deletes related grants if the user has been deleted
+			// MySQL automatically deletes related grants if the user has been deleted
 			return nil
 		}
 		return errors.Wrap(err, errRevokeGrant)
