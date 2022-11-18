@@ -373,7 +373,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	// Checks if current role configuration parameters differs from desired state.
 	// If difference, reset all parameters and apply desired parameters in a transaction
-	if !cmp.Equal(cr.Status.AtProvider.ConfigurationParameters, cr.Spec.ForProvider.ConfigurationParameters,
+	if cr.Spec.ForProvider.ConfigurationParameters != nil && !cmp.Equal(cr.Status.AtProvider.ConfigurationParameters, cr.Spec.ForProvider.ConfigurationParameters,
 		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
 		q := make([]xsql.Query, 0)
 		q = append(q, xsql.Query{
