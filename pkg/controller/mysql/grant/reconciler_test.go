@@ -381,6 +381,36 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessGrantNoDatabaseNoTable": {
+			reason: "We should return no error if no database and table were provided",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows([]string{"Grants"}).
+								AddRow("GRANT CREATE, DROP ON *.* TO 'success-user'@%"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							User:       pointer.StringPtr("success-user"),
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 		"SuccessGrantWithTables": {
 			reason: "We should see the grants in sync when using a table",
 			fields: fields{
