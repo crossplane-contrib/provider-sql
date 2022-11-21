@@ -72,7 +72,7 @@ spec:
                   instance.
                 properties:
                   database:
-                    description: Database this grant is for.
+                    description: Database this grant is for, default *.
                     type: string
                   databaseRef:
                     description: DatabaseRef references the database object this grant
@@ -159,7 +159,7 @@ spec:
                     minItems: 1
                     type: array
                   table:
-                    description: Tables this grant is for.
+                    description: Tables this grant is for, default *.
                     type: string
                   user:
                     description: User this grant is for.

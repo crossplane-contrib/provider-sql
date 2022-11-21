@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	grantRegex = regexp.MustCompile("^GRANT (.+) ON `(.+)`\\.(.+) TO .+")
+	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (.+)\.(.+) TO .+`)
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
@@ -140,8 +140,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	username := *cr.Spec.ForProvider.User
-	dbname := *cr.Spec.ForProvider.Database
-	table := defaultTable(cr.Spec.ForProvider.Table)
+	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
+	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges, result, err := c.getPrivileges(ctx, username, dbname, table)
 	if err != nil {
@@ -166,10 +166,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func defaultTable(table *string) string {
-	if !(table == nil) {
-		return mysql.QuoteIdentifier(*table)
+func defaultIdentifier(identifier *string) string {
+	if identifier != nil && *identifier != "*" {
+		return mysql.QuoteIdentifier(*identifier)
 	}
+
 	return "*"
 }
 
@@ -244,8 +245,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username := *cr.Spec.ForProvider.User
-	dbname := *cr.Spec.ForProvider.Database
-	table := defaultTable(cr.Spec.ForProvider.Table)
+	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
+	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
@@ -264,8 +265,8 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username := *cr.Spec.ForProvider.User
-	dbname := *cr.Spec.ForProvider.Database
-	table := defaultTable(cr.Spec.ForProvider.Table)
+	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
+	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
@@ -276,7 +277,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// Using a transaction is unfortunately not possible because a GRANT triggers
 	// an implicit commit: https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html
 	query := fmt.Sprintf("REVOKE ALL ON %s.%s FROM %s@%s",
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
@@ -297,7 +298,7 @@ func createGrantQuery(privileges, dbname, username string, table string) string 
 	username, host := mysql.SplitUserHost(username)
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
@@ -313,15 +314,15 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	username := *cr.Spec.ForProvider.User
-	dbname := *cr.Spec.ForProvider.Database
-	table := defaultTable(cr.Spec.ForProvider.Table)
+	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
+	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
-		mysql.QuoteIdentifier(dbname),
+		dbname,
 		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
