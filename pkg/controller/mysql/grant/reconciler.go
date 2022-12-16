@@ -145,6 +145,15 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	privileges, result, err := c.getPrivileges(ctx, username, dbname, table)
 	if err != nil {
+		var myErr *mysqldriver.MySQLError
+		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
+			// MySQL automatically deletes related grants if the user has been deleted
+			return managed.ExternalObservation{
+				ResourceExists:   false,
+				ResourceUpToDate: false,
+			}, nil
+		}
+		// return errors.Wrap(err, errRevokeGrant)
 		return managed.ExternalObservation{}, err
 	}
 	if result != nil {
