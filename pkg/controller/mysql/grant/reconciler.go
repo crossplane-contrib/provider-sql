@@ -139,11 +139,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges, result, err := c.getPrivileges(ctx, username, dbname, table)
+	privileges, result, err := c.getPrivileges(ctx, user, dbname, table)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -200,8 +200,8 @@ func parseGrant(grant, dbname string, table string) (privileges []string) {
 	return nil
 }
 
-func (c *external) getPrivileges(ctx context.Context, username, dbname string, table string) ([]string, *managed.ExternalObservation, error) {
-	username, host := mysql.SplitUserHost(username)
+func (c *external) getPrivileges(ctx context.Context, user, dbname string, table string) ([]string, *managed.ExternalObservation, error) {
+	username, host := mysql.SplitUserHost(user)
 	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
 	if err != nil {
@@ -244,13 +244,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
-	query := createGrantQuery(privileges, dbname, username, table)
+	query := createGrantQuery(privileges, dbname, user, table)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
@@ -313,12 +313,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	username, host := mysql.SplitUserHost(username)
+	username, host := mysql.SplitUserHost(user)
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
