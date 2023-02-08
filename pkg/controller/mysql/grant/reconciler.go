@@ -294,8 +294,8 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
 }
 
-func createGrantQuery(privileges, dbname, username string, table string) string {
-	username, host := mysql.SplitUserHost(username)
+func createGrantQuery(privileges, dbname, user string, table string) string {
+	username, host := mysql.SplitUserHost(user)
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
 		dbname,
