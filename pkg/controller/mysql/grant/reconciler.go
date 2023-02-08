@@ -264,12 +264,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	username, host := mysql.SplitUserHost(username)
+	username, host := mysql.SplitUserHost(user)
 
 	// Remove current grants since it's not possible to update grants.
 	// This might leave applications with no access to the DB for a short time
@@ -286,7 +286,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
 	}
 
-	query = createGrantQuery(privileges, dbname, username, table)
+	query = createGrantQuery(privileges, dbname, user, table)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
