@@ -53,6 +53,7 @@ const (
 	errCreateUser              = "cannot create user"
 	errDropUser                = "cannot drop user"
 	errUpdateUser              = "cannot update user"
+	errSetSqlLogBin            = "cannot set sql_log_bin = 0"
 	errFlushPriv               = "cannot flush privileges"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errCompareResourceOptions  = "cannot compare desired and observed resource options"
@@ -257,6 +258,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
 	}
 
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "SET sql_log_bin = 0;",
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errSetSqlLogBin)
+	}
+
 	query := fmt.Sprintf(
 		"CREATE USER %s@%s IDENTIFIED BY %s%s",
 		mysql.QuoteValue(username),
@@ -305,6 +312,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(rochanged) > 0 {
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0;",
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+		}
+
 		query := fmt.Sprintf(
 			"ALTER USER %s@%s %s",
 			mysql.QuoteValue(username),
@@ -327,6 +340,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if pwchanged {
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
+
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0;",
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+		}
+
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
@@ -354,6 +374,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "SET sql_log_bin = 0;",
+	}); err != nil {
+		return errors.Wrap(err, errSetSqlLogBin)
+	}
+
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host)),
 	}); err != nil {
