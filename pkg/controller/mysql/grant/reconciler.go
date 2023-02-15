@@ -53,6 +53,7 @@ const (
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
+	errSetSqlLogBin = "cannot set sql_log_bin = 0"
 	errFlushPriv    = "cannot flush privileges"
 
 	allPrivileges      = "ALL PRIVILEGES"
@@ -250,6 +251,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "SET sql_log_bin = 0",
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errSetSqlLogBin)
+	}
+
 	query := createGrantQuery(privileges, dbname, username, table)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
@@ -270,6 +277,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "SET sql_log_bin = 0",
+	}); err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+	}
 
 	// Remove current grants since it's not possible to update grants.
 	// This might leave applications with no access to the DB for a short time
@@ -319,6 +332,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "SET sql_log_bin = 0",
+	}); err != nil {
+		return errors.Wrap(err, errSetSqlLogBin)
+	}
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
