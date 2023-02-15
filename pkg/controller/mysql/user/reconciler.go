@@ -259,7 +259,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0;",
+		String: "SET sql_log_bin = 0",
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errSetSqlLogBin)
 	}
@@ -313,7 +313,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0;",
+			String: "SET sql_log_bin = 0",
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
 		}
@@ -342,7 +342,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0;",
+			String: "SET sql_log_bin = 0",
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
 		}
@@ -376,7 +376,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0;",
+		String: "SET sql_log_bin = 0",
 	}); err != nil {
 		return errors.Wrap(err, errSetSqlLogBin)
 	}
