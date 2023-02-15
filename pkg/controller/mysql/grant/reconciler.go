@@ -261,8 +261,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+
+	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+	}
+
+	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -303,8 +307,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+
+	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+	}
+
+	return managed.ExternalUpdate{}, nil
 }
 
 func createGrantQuery(privileges, dbname, username string, table string) string {
@@ -355,6 +363,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		}
 		return errors.Wrap(err, errRevokeGrant)
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return errors.Wrap(err, errFlushPriv)
+
+	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
+		return errors.Wrap(err, errFlushPriv)
+	}
+
+	return nil
 }
