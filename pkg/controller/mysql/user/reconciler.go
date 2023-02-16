@@ -240,6 +240,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	cr.SetConditions(xpv1.Creating())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
+	plugin := *cr.Spec.ForProvider.ResourceOptions.AuthPlugin
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -257,11 +258,17 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
 	}
 
+	password_section := ""
+	if plugin == "mysql_native_password" || plugin == "caching_sha2_password" {
+		password_section = fmt.Sprintf("AS %s", mysql.QuoteValue(pw))
+	}
+
 	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s%s",
+		"CREATE USER %s@%s IDENTIFIED WITH %s%s%s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
-		mysql.QuoteValue(pw),
+		mysql.QuoteValue(plugin),
+		password_section,
 		resourceOptions,
 	)
 	if err := c.db.Exec(ctx, xsql.Query{
