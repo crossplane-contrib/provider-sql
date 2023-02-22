@@ -298,10 +298,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	pw, pwchanged, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ExternalUpdate{}, err
-	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 	rochanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
@@ -338,31 +334,47 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
-	if pwchanged {
-		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
+	connectionDetails, err := c.UpdatePassword(ctx, cr, username, host)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
 
+	if len(connectionDetails) > 0 {
+		return managed.ExternalUpdate{ConnectionDetails: connectionDetails}, nil
+	}
+
+	return managed.ExternalUpdate{}, nil
+}
+
+func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, username, host string) (managed.ConnectionDetails, error) {
+	pw, pwchanged, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ConnectionDetails{}, err
+	}
+
+	if pwchanged {
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: "SET sql_log_bin = 0",
 		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
+			return managed.ConnectionDetails{}, errors.Wrap(err, errSetSQLLogBin)
 		}
 
+		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+			return managed.ConnectionDetails{}, errors.Wrap(err, errUpdateUser)
 		}
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: "FLUSH PRIVILEGES",
 		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+			return managed.ConnectionDetails{}, errors.Wrap(err, errFlushPriv)
 		}
 
-		return managed.ExternalUpdate{
-			ConnectionDetails: c.db.GetConnectionDetails(username, pw),
-		}, nil
+		return c.db.GetConnectionDetails(username, pw), nil
 	}
-	return managed.ExternalUpdate{}, nil
+
+	return managed.ConnectionDetails{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
