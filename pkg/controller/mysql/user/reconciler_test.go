@@ -729,7 +729,13 @@ func TestUpdate(t *testing.T) {
 			reason: "We should not execute an SQL query if the resource options are unchanged.",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "ALTER") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
