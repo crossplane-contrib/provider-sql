@@ -45,6 +45,15 @@ type UserParameters struct {
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
 	// +optional
 	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
+
+	// AuthPlugin sets the mysql authentication plugin, defaults to mysql_native_password
+	// +optional
+	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
+	AuthPlugin *string `json:"authPlugin,omitempty" default:"mysql_native_password"`
+
+	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true
+	// +optional
+	UsePassword *bool `json:"usePassword,omitempty" default:"true"`
 }
 
 // ResourceOptions define the account specific resource limits.
@@ -64,11 +73,6 @@ type ResourceOptions struct {
 	// MaxUserConnections sets The number of simultaneous connections to the server by an account
 	// +optional
 	MaxUserConnections *int `json:"maxUserConnections,omitempty"`
-
-	// AuthPlugin sets the mysql authentication plugin, defaults to mysql_native_password
-	// +optional
-	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
-	AuthPlugin *string `json:"authPlugin,omitempty" default:"mysql_native_password"`
 }
 
 // A UserObservation represents the observed state of a MySQL user.

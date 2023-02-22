@@ -27,6 +27,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -494,6 +495,34 @@ func TestCreate(t *testing.T) {
 				},
 			},
 		},
+		"UserWithAnAuthPluginThatNotRequiresPassword": {
+			reason:    "A user that uses an authentication plugin that does not require password should not receive connection details and no error should happen",
+			comparePw: true,
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  pointer.StringPtr("authentication_ldap_simple"),
+							UsePassword: pointer.BoolPtr(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalCreation{},
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -766,6 +795,33 @@ func TestUpdate(t *testing.T) {
 			},
 			want: want{
 				err: nil,
+			},
+		},
+		"UserWithAnAuthPluginThatNotRequiresPassword": {
+			reason: "A user that uses an authentication plugin that does not require password should not receive connection details and no error should happen",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  pointer.StringPtr("authentication_ldap_simple"),
+							UsePassword: pointer.BoolPtr(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
 			},
 		},
 	}

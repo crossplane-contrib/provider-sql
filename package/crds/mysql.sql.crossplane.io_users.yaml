@@ -62,6 +62,11 @@ spec:
                 description: UserParameters define the desired state of a MySQL user
                   instance.
                 properties:
+                  authPlugin:
+                    description: AuthPlugin sets the mysql authentication plugin,
+                      defaults to mysql_native_password
+                    pattern: ^([a-z]+_)+[a-z]+$
+                    type: string
                   passwordSecretRef:
                     description: PasswordSecretRef references the secret that contains
                       the password used for this user. If no reference is given, a
@@ -102,6 +107,10 @@ spec:
                           connections to the server by an account
                         type: integer
                     type: object
+                  usePassword:
+                    description: UsePassword indicate whether the provided AuthPlugin
+                      requires setting a password, defaults to true
+                    type: boolean
                 type: object
               providerConfigRef:
                 default:
