@@ -246,6 +246,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 	if len(ro) != 0 {
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
+		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
 	if checkUsePassword(cr.Spec.ForProvider.UsePassword) {
