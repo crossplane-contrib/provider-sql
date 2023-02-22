@@ -53,7 +53,7 @@ const (
 	errCreateUser              = "cannot create user"
 	errDropUser                = "cannot drop user"
 	errUpdateUser              = "cannot update user"
-	errSetSqlLogBin            = "cannot set sql_log_bin = 0"
+	errSetSQLLogBin            = "cannot set sql_log_bin = 0"
 	errFlushPriv               = "cannot flush privileges"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errCompareResourceOptions  = "cannot compare desired and observed resource options"
@@ -261,7 +261,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: "SET sql_log_bin = 0",
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errSetSqlLogBin)
+		return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
 	}
 
 	query := fmt.Sprintf(
@@ -315,7 +315,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: "SET sql_log_bin = 0",
 		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
 		}
 
 		query := fmt.Sprintf(
@@ -344,7 +344,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: "SET sql_log_bin = 0",
 		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
 		}
 
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -378,7 +378,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: "SET sql_log_bin = 0",
 	}); err != nil {
-		return errors.Wrap(err, errSetSqlLogBin)
+		return errors.Wrap(err, errSetSQLLogBin)
 	}
 
 	if err := c.db.Exec(ctx, xsql.Query{

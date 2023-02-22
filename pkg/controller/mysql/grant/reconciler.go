@@ -53,7 +53,7 @@ const (
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
-	errSetSqlLogBin = "cannot set sql_log_bin = 0"
+	errSetSQLLogBin = "cannot set sql_log_bin = 0"
 	errFlushPriv    = "cannot flush privileges"
 
 	allPrivileges      = "ALL PRIVILEGES"
@@ -254,7 +254,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: "SET sql_log_bin = 0",
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errSetSqlLogBin)
+		return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
 	}
 
 	query := createGrantQuery(privileges, dbname, username, table)
@@ -285,7 +285,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: "SET sql_log_bin = 0",
 	}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errSetSqlLogBin)
+		return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
 	}
 
 	// Remove current grants since it's not possible to update grants.
@@ -344,7 +344,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: "SET sql_log_bin = 0",
 	}); err != nil {
-		return errors.Wrap(err, errSetSqlLogBin)
+		return errors.Wrap(err, errSetSQLLogBin)
 	}
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
