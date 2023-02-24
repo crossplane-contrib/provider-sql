@@ -280,7 +280,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptions string, pw *string) error {
 	passwordSection := ""
 	if pw != nil {
-		passwordSection = fmt.Sprintf(" AS %s", mysql.QuoteValue(*pw))
+		passwordSection = fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
 	}
 
 	query := fmt.Sprintf(
@@ -375,7 +375,7 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 
 	if pwchanged {
 		plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
-		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED WITH %s AS %s",
+		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED WITH %s BY %s",
 			mysql.QuoteValue(username),
 			mysql.QuoteValue(host),
 			plugin,
