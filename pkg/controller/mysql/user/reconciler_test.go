@@ -603,6 +603,11 @@ func TestUpdate(t *testing.T) {
 							},
 						},
 					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+						},
+					},
 				},
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
@@ -633,6 +638,11 @@ func TestUpdate(t *testing.T) {
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+						},
+					},
 				},
 			},
 			want: want{
@@ -660,6 +670,11 @@ func TestUpdate(t *testing.T) {
 							WriteConnectionSecretToReference: &xpv1.SecretReference{
 								Name: "connection-secret",
 							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
 						},
 					},
 				},
@@ -705,6 +720,11 @@ func TestUpdate(t *testing.T) {
 							},
 						},
 					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+						},
+					},
 				},
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
@@ -741,6 +761,65 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 		},
+		"UpdatedResourceOptions": {
+			reason: "We should execute an SQL query if the resource options are not synced.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							ResourceOptions: &v1alpha1.ResourceOptions{
+								MaxQueriesPerHour:     pointer.IntPtr(10),
+								MaxUpdatesPerHour:     pointer.IntPtr(10),
+								MaxConnectionsPerHour: pointer.IntPtr(10),
+								MaxUserConnections:    pointer.IntPtr(10),
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							ResourceOptionsAsClauses: []string{
+								"MAX_QUERIES_PER_HOUR 20", // default ResourceOptions values
+								"MAX_UPDATES_PER_HOUR 20",
+								"MAX_CONNECTIONS_PER_HOUR 20",
+								"MAX_USER_CONNECTIONS 20",
+							},
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)), // default AuthPlugin value
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 		"NoUpdateQueryUnchangedResourceOptions": {
 			reason: "We should not execute an SQL query if the resource options are unchanged.",
 			fields: fields{
@@ -774,11 +853,12 @@ func TestUpdate(t *testing.T) {
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
 							ResourceOptionsAsClauses: []string{
-								"MAX_QUERIES_PER_HOUR 0",
+								"MAX_QUERIES_PER_HOUR 0", // default ResourceOptions values
 								"MAX_UPDATES_PER_HOUR 0",
 								"MAX_CONNECTIONS_PER_HOUR 0",
 								"MAX_USER_CONNECTIONS 0",
 							},
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)), // default AuthPlugin value
 						},
 					},
 				},
@@ -816,6 +896,60 @@ func TestUpdate(t *testing.T) {
 							AuthPlugin:  pointer.StringPtr("authentication_ldap_simple"),
 							UsePassword: pointer.BoolPtr(false),
 						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr("authentication_ldap_simple"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"UpdatedAuthPlugin": {
+			reason: "We should execute an SQL query if the auth plugin is not synced.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: pointer.StringPtr("authentication_ldap_simple"),
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
 					},
 				},
 			},

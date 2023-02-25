@@ -187,6 +187,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
 	observed := &v1alpha1.UserParameters{
+		AuthPlugin:      new(string),
 		ResourceOptions: &v1alpha1.ResourceOptions{},
 	}
 
@@ -195,6 +196,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"max_updates, " +
 		"max_connections, " +
 		"max_user_connections " +
+		"plugin" +
 		"FROM mysql.user WHERE User = ? AND Host = ?"
 	err := c.db.Scan(ctx,
 		xsql.Query{
@@ -208,6 +210,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		&observed.ResourceOptions.MaxUpdatesPerHour,
 		&observed.ResourceOptions.MaxConnectionsPerHour,
 		&observed.ResourceOptions.MaxUserConnections,
+		&observed.AuthPlugin,
 	)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -222,6 +225,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	cr.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
+	cr.Status.AtProvider.AuthPlugin = observed.AuthPlugin
 
 	cr.SetConditions(xpv1.Available())
 
@@ -242,14 +246,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
 
-	var resourceOptions string
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 	if len(ro) != 0 {
-		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
 		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
-	if checkUsePassword(cr.Spec.ForProvider.UsePassword) {
+	if checkUsePassword(cr) {
 		pw, _, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalCreation{}, err
@@ -261,7 +263,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			}
 		}
 
-		if err := c.executeCreateUserQuery(ctx, username, host, plugin, resourceOptions, &pw); err != nil {
+		if err := c.executeCreateUserQuery(ctx, username, host, plugin, ro, &pw); err != nil {
 			return managed.ExternalCreation{}, err
 		}
 
@@ -270,17 +272,22 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}, nil
 	}
 
-	if err := c.executeCreateUserQuery(ctx, username, host, plugin, resourceOptions, nil); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, plugin, ro, nil); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
 	return managed.ExternalCreation{}, nil
 }
 
-func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptions string, pw *string) error {
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptionsClauses []string, pw *string) error {
 	passwordSection := ""
 	if pw != nil {
 		passwordSection = fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
+	}
+
+	resourceOptions := ""
+	if len(resourceOptionsClauses) != 0 {
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
 	}
 
 	query := fmt.Sprintf(
@@ -314,90 +321,124 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
+	plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
 
-	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	rochanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	roToAlter, err := getResourceOptionsToAlter(cr)
 	if err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+		return managed.ExternalUpdate{}, err
 	}
 
-	if len(rochanged) > 0 {
-		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
-
-		query := fmt.Sprintf(
-			"ALTER USER %s@%s %s",
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-			resourceOptions,
-		)
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: query,
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
-		}
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
-		}
-
-		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+	password, passwordChanged, err := getPassword(ctx, cr, c)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
 	}
 
-	if checkUsePassword(cr.Spec.ForProvider.UsePassword) {
-		connectionDetails, err := c.UpdatePassword(ctx, cr, username, host)
+	return c.applyAlterUserIfSomeFieldChanged(ctx, cr, passwordChanged, roToAlter, username, host, plugin, password)
+}
 
-		if err != nil {
+func (c *external) applyAlterUserIfSomeFieldChanged(ctx context.Context, cr *v1alpha1.User, passwordChanged bool, roToAlter []string, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
+	if (checkUsePassword(cr) && passwordChanged) || checkAuthPluginChanged(cr) || checkResourceOptionsChanged(roToAlter) {
+		if err := c.executeAlterUserQuery(ctx, username, host, plugin, roToAlter, password); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
+	}
 
-		if len(connectionDetails) > 0 {
-			return managed.ExternalUpdate{ConnectionDetails: connectionDetails}, nil
-		}
+	if checkUsePassword(cr) && passwordChanged {
+		return managed.ExternalUpdate{ConnectionDetails: c.db.GetConnectionDetails(username, password)}, nil
 	}
 
 	return managed.ExternalUpdate{}, nil
 }
 
-func checkUsePassword(usePassword *bool) bool {
-	if usePassword == nil {
+func getPassword(ctx context.Context, cr *v1alpha1.User, c *external) (string, bool, error) {
+	password := ""
+	passwordChanged := false
+	if checkUsePassword(cr) {
+		pw, pwdChanged, err := c.getPassword(ctx, cr)
+		if err != nil {
+			return pw, pwdChanged, err
+		}
+
+		password = pw
+		passwordChanged = pwdChanged
+	}
+
+	return password, passwordChanged, nil
+}
+
+func getResourceOptionsToAlter(cr *v1alpha1.User) ([]string, error) {
+	roToAlter := []string{}
+
+	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
+	roChanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	if err != nil {
+		return roToAlter, errors.Wrap(err, errUpdateUser)
+	}
+
+	if len(roChanged) > 0 {
+		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+		roToAlter = ro
+	}
+
+	return roToAlter, nil
+}
+
+func checkUsePassword(cr *v1alpha1.User) bool {
+	if cr.Spec.ForProvider.UsePassword == nil {
 		return true
 	}
 
-	return *usePassword
+	return *cr.Spec.ForProvider.UsePassword
 }
 
-func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, username, host string) (managed.ConnectionDetails, error) {
-	pw, pwchanged, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ConnectionDetails{}, err
+func checkResourceOptionsChanged(roToAlter []string) bool {
+	return len(roToAlter) > 0
+}
+
+func checkAuthPluginChanged(cr *v1alpha1.User) bool {
+	if cr.Status.AtProvider.AuthPlugin == nil {
+		return true
 	}
 
-	if pwchanged {
-		plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
-		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED WITH %s BY %s",
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-			plugin,
-			mysql.QuoteValue(pw),
-		)
-
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: query,
-		}); err != nil {
-			return managed.ConnectionDetails{}, errors.Wrap(err, errUpdateUser)
-		}
-
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return managed.ConnectionDetails{}, errors.Wrap(err, errFlushPriv)
-		}
-
-		return c.db.GetConnectionDetails(username, pw), nil
+	if *cr.Status.AtProvider.AuthPlugin != defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin) {
+		return true
 	}
 
-	return managed.ConnectionDetails{}, nil
+	return false
+}
+
+func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptionsClauses []string, pw string) error {
+	passwordSection := ""
+	if pw != "" {
+		passwordSection = fmt.Sprintf(" BY %s", mysql.QuoteValue(pw))
+	}
+
+	resourceOptions := ""
+	if len(resourceOptionsClauses) != 0 {
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
+	}
+
+	query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED WITH %s%s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		plugin,
+		passwordSection,
+		resourceOptions,
+	)
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: query,
+	}); err != nil {
+		return errors.Wrap(err, errUpdateUser)
+	}
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "FLUSH PRIVILEGES",
+	}); err != nil {
+		return errors.Wrap(err, errFlushPriv)
+	}
+
+	return nil
 }
 
 func defaultAuthPlugin(authPlugin *string) string {
