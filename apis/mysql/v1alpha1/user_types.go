@@ -79,6 +79,9 @@ type ResourceOptions struct {
 type UserObservation struct {
 	// ResourceOptionsAsClauses represents the applied resource options
 	ResourceOptionsAsClauses []string `json:"resourceOptionsAsClauses,omitempty"`
+
+	// AuthPlugin represents the applied mysql authentication plugin
+	AuthPlugin *string `json:"authPlugin,omitempty"`
 }
 
 // +kubebuilder:object:root=true

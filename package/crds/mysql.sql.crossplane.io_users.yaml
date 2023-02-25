@@ -290,6 +290,10 @@ spec:
                 description: A UserObservation represents the observed state of a
                   MySQL user.
                 properties:
+                  authPlugin:
+                    description: AuthPlugin represents the applied mysql authentication
+                      plugin
+                    type: string
                   resourceOptionsAsClauses:
                     description: ResourceOptionsAsClauses represents the applied resource
                       options
