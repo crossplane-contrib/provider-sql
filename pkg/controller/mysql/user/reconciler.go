@@ -195,7 +195,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"max_questions, " +
 		"max_updates, " +
 		"max_connections, " +
-		"max_user_connections " +
+		"max_user_connections, " +
 		"plugin" +
 		"FROM mysql.user WHERE User = ? AND Host = ?"
 	err := c.db.Scan(ctx,
