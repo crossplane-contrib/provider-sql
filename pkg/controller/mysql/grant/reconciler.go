@@ -205,6 +205,12 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
 	if err != nil {
+		var myErr *mysqldriver.MySQLError
+		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
+			// The user doesn't (yet) exist and therefore no grants either
+			return nil, &managed.ExternalObservation{ResourceExists: false}, nil
+		}
+
 		return nil, nil, errors.Wrap(err, errCurrentGrant)
 	}
 	defer rows.Close() //nolint:errcheck
@@ -230,6 +236,7 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 			// The user doesn't (yet) exist and therefore no grants either
 			return nil, &managed.ExternalObservation{ResourceExists: false}, nil
 		}
+
 		return nil, nil, errors.Wrap(err, errCurrentGrant)
 	}
 	if privileges == nil {
