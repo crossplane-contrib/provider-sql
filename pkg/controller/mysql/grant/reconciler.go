@@ -239,9 +239,14 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 
 		return nil, nil, errors.Wrap(err, errCurrentGrant)
 	}
-	if privileges == nil {
+
+	// In mysql when all grants are revoked from user, it still grants usage (meaning no privileges) on *.*
+	// So the grant can be considered as non existent, just like when privileges slice is nil/empty
+	// https://dev.mysql.com/doc/refman/8.0/en/privileges-provided.html#priv_usage
+	if privileges == nil || privilegesEqual(privileges, []string{"USAGE"}) {
 		return nil, &managed.ExternalObservation{ResourceExists: false}, nil
 	}
+
 	return privileges, nil, nil
 }
 
