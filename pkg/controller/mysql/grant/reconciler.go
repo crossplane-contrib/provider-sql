@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (.+)\.(.+) TO .+`)
+	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (\S+)\.(\S+) TO \S+@\S+?(\sWITH GRANT OPTION)?$`)
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
@@ -194,9 +194,16 @@ func privilegesEqual(a, b []string) bool {
 
 func parseGrant(grant, dbname string, table string) (privileges []string) {
 	matches := grantRegex.FindStringSubmatch(grant)
-	if len(matches) == 4 && matches[2] == dbname && matches[3] == table {
-		return strings.Split(matches[1], ", ")
+	if len(matches) == 5 && matches[2] == dbname && matches[3] == table {
+		privileges := strings.Split(matches[1], ", ")
+
+		if matches[4] != "" {
+			privileges = append(privileges, "GRANT OPTION")
+		}
+
+		return privileges
 	}
+
 	return nil
 }
 
