@@ -202,35 +202,9 @@ func parseGrant(grant, dbname string, table string) (privileges []string) {
 
 func (c *external) getPrivileges(ctx context.Context, username, dbname string, table string) ([]string, *managed.ExternalObservation, error) {
 	username, host := mysql.SplitUserHost(username)
-	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
-	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+
+	privileges, err := c.parseGrantRows(ctx, username, host, dbname, table)
 	if err != nil {
-		var myErr *mysqldriver.MySQLError
-		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
-			// The user doesn't (yet) exist and therefore no grants either
-			return nil, &managed.ExternalObservation{ResourceExists: false}, nil
-		}
-
-		return nil, nil, errors.Wrap(err, errCurrentGrant)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	var privileges []string
-	for rows.Next() {
-		var grant string
-		if err := rows.Scan(&grant); err != nil {
-			return nil, nil, errors.Wrap(err, errCurrentGrant)
-		}
-		p := parseGrant(grant, dbname, table)
-
-		if p != nil {
-			// found the grant we were looking for
-			privileges = p
-			break
-		}
-	}
-
-	if err := rows.Err(); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
 			// The user doesn't (yet) exist and therefore no grants either
@@ -248,6 +222,37 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 	}
 
 	return privileges, nil, nil
+}
+
+func (c *external) parseGrantRows(ctx context.Context, username string, host string, dbname string, table string) ([]string, error) {
+	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
+	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var privileges []string
+	for rows.Next() {
+		var grant string
+		if err := rows.Scan(&grant); err != nil {
+			return nil, err
+		}
+		p := parseGrant(grant, dbname, table)
+
+		if p != nil {
+			// found the grant we were looking for
+			privileges = p
+			break
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return privileges, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
