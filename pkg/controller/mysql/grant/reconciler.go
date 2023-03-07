@@ -251,10 +251,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0",
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
+		}
 	}
 
 	query := createGrantQuery(privileges, dbname, username, table)
@@ -282,10 +285,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0",
-	}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
+		}
 	}
 
 	// Remove current grants since it's not possible to update grants.
@@ -341,10 +347,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0",
-	}); err != nil {
-		return errors.Wrap(err, errSetSQLLogBin)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return errors.Wrap(err, errSetSQLLogBin)
+		}
 	}
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
@@ -369,4 +378,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	return nil
+}
+
+func defaultBinlog(binlog *bool) bool {
+	if binlog == nil {
+		return true
+	}
+
+	return *binlog
 }

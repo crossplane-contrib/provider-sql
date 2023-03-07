@@ -45,10 +45,11 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotDatabase = "managed resource is not a Database custom resource"
-	errSelectDB    = "cannot select database"
-	errCreateDB    = "cannot create database"
-	errDropDB      = "cannot drop database"
+	errNotDatabase  = "managed resource is not a Database custom resource"
+	errSelectDB     = "cannot select database"
+	errCreateDB     = "cannot create database"
+	errDropDB       = "cannot drop database"
+	errSetSQLLogBin = "cannot set sql_log_bin = 0"
 
 	maxConcurrency = 5
 )
@@ -149,8 +150,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))})
-	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
+		}
+	}
+
+	if err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+	}
+
+	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -164,6 +177,26 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(err, errDropDB)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return errors.Wrap(err, errSetSQLLogBin)
+		}
+	}
+
+	if err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))}); err != nil {
+		return errors.Wrap(err, errDropDB)
+	}
+
+	return nil
+}
+
+func defaultBinlog(binlog *bool) bool {
+	if binlog == nil {
+		return true
+	}
+
+	return *binlog
 }

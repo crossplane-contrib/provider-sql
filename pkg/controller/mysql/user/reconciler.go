@@ -245,6 +245,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
+
 	if pw == "" {
 		pw, err = password.Generate()
 		if err != nil {
@@ -252,34 +253,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	var resourceOptions string
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	if len(ro) != 0 {
-		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
-	}
-
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0",
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
-	}
-
-	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s%s",
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-		mysql.QuoteValue(pw),
-		resourceOptions,
-	)
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: query,
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
-	}
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "FLUSH PRIVILEGES",
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw, binlog); err != nil {
+		return managed.ExternalCreation{}, err
 	}
 
 	if len(ro) != 0 {
@@ -289,6 +266,43 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(username, pw),
 	}, nil
+}
+
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string, binlog bool) error {
+	resourceOptions := ""
+	if len(resourceOptionsClauses) != 0 {
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
+	}
+
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return errors.Wrap(err, errSetSQLLogBin)
+		}
+	}
+
+	query := fmt.Sprintf(
+		"CREATE USER %s@%s IDENTIFIED BY %s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		mysql.QuoteValue(pw),
+		resourceOptions,
+	)
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: query,
+	}); err != nil {
+		return errors.Wrap(err, errCreateUser)
+	}
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: "FLUSH PRIVILEGES",
+	}); err != nil {
+		return errors.Wrap(err, errFlushPriv)
+	}
+
+	return nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -308,10 +322,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(rochanged) > 0 {
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
+		binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+		if !binlog {
+			if err := c.db.Exec(ctx, xsql.Query{
+				String: "SET sql_log_bin = 0",
+			}); err != nil {
+				return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
+			}
 		}
 
 		query := fmt.Sprintf(
@@ -353,10 +370,13 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 	}
 
 	if pwchanged {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return managed.ConnectionDetails{}, errors.Wrap(err, errSetSQLLogBin)
+		binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+		if !binlog {
+			if err := c.db.Exec(ctx, xsql.Query{
+				String: "SET sql_log_bin = 0",
+			}); err != nil {
+				return managed.ConnectionDetails{}, errors.Wrap(err, errSetSQLLogBin)
+			}
 		}
 
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
@@ -387,10 +407,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "SET sql_log_bin = 0",
-	}); err != nil {
-		return errors.Wrap(err, errSetSQLLogBin)
+	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
+	if !binlog {
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return errors.Wrap(err, errSetSQLLogBin)
+		}
 	}
 
 	if err := c.db.Exec(ctx, xsql.Query{
@@ -424,4 +447,12 @@ func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameter
 		return false
 	}
 	return true
+}
+
+func defaultBinlog(binlog *bool) bool {
+	if binlog == nil {
+		return true
+	}
+
+	return *binlog
 }
