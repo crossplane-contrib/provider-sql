@@ -25,11 +25,19 @@ import (
 // A DatabaseSpec defines the desired state of a Database.
 type DatabaseSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
+	ForProvider       DatabaseParameters `json:"forProvider"`
 }
 
 // A DatabaseStatus represents the observed state of a Database.
 type DatabaseStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
+}
+
+// DatabaseParameters define the desired state of a MySQL database instance.
+type DatabaseParameters struct {
+	// BinLog defines whether the create, delete, update operations of this database are propagated to replicas. Defaults to true
+	// +optional
+	BinLog *bool `json:"replicate,omitempty" default:"true"`
 }
 
 // +kubebuilder:object:root=true

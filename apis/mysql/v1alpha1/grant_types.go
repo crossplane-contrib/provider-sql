@@ -92,6 +92,10 @@ type GrantParameters struct {
 	// +immutable
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+
+	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas (yes: sql_log_bin = 0)
+	// +optional
+	BinLog *bool `json:"replicate,omitempty" default:"true"`
 }
 
 // A GrantStatus represents the observed state of a Grant.

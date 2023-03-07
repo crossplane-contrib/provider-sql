@@ -58,6 +58,16 @@ spec:
                 - Orphan
                 - Delete
                 type: string
+              forProvider:
+                description: DatabaseParameters define the desired state of a MySQL
+                  database instance.
+                properties:
+                  replicate:
+                    description: BinLog defines whether the create, delete, update
+                      operations of this database are propagated to replicas. Defaults
+                      to true
+                    type: boolean
+                type: object
               providerConfigRef:
                 default:
                   name: default
@@ -226,6 +236,8 @@ spec:
                 - name
                 - namespace
                 type: object
+            required:
+            - forProvider
             type: object
           status:
             description: A DatabaseStatus represents the observed state of a Database.
