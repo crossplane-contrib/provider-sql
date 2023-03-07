@@ -93,7 +93,7 @@ type GrantParameters struct {
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
-	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas (yes: sql_log_bin = 0)
+	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"replicate,omitempty" default:"true"`
 }

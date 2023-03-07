@@ -55,7 +55,7 @@ type UserParameters struct {
 	// +optional
 	UsePassword *bool `json:"usePassword,omitempty" default:"true"`
 
-	// BinLog defines whether the create, delete, update operations of this user are propagated to replicaS. Defaults to true
+	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"replicate,omitempty" default:"true"`
 }
