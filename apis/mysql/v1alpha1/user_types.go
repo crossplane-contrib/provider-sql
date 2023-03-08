@@ -57,7 +57,7 @@ type UserParameters struct {
 
 	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
-	BinLog *bool `json:"replicate,omitempty" default:"true"`
+	BinLog *bool `json:"binlog,omitempty" default:"true"`
 }
 
 // ResourceOptions define the account specific resource limits.

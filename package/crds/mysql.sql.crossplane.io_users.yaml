@@ -67,6 +67,11 @@ spec:
                       defaults to mysql_native_password
                     pattern: ^([a-z]+_)+[a-z]+$
                     type: string
+                  binlog:
+                    description: BinLog defines whether the create, delete, update
+                      operations of this user are propagated to replicas. Defaults
+                      to true
+                    type: boolean
                   passwordSecretRef:
                     description: PasswordSecretRef references the secret that contains
                       the password used for this user. If no reference is given, a
@@ -86,11 +91,6 @@ spec:
                     - name
                     - namespace
                     type: object
-                  replicate:
-                    description: BinLog defines whether the create, delete, update
-                      operations of this user are propagated to replicaS. Defaults
-                      to true
-                    type: boolean
                   resourceOptions:
                     description: ResourceOptions sets account specific resource limits.
                       See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html

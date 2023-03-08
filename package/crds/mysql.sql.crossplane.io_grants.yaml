@@ -71,6 +71,11 @@ spec:
                 description: GrantParameters define the desired state of a MySQL grant
                   instance.
                 properties:
+                  binlog:
+                    description: BinLog defines whether the create, delete, update
+                      operations of this grant are propagated to replicas. Defaults
+                      to true
+                    type: boolean
                   database:
                     description: Database this grant is for, default *.
                     type: string
@@ -158,11 +163,6 @@ spec:
                       type: string
                     minItems: 1
                     type: array
-                  replicate:
-                    description: 'BinLog defines whether the create, delete, update
-                      operations of this grant are propagated to replicas (yes: sql_log_bin
-                      = 0)'
-                    type: boolean
                   table:
                     description: Tables this grant is for, default *.
                     type: string
