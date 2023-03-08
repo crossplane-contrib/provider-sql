@@ -195,8 +195,9 @@ func TestObserve(t *testing.T) {
 	}
 
 	type want struct {
-		o   managed.ExternalObservation
-		err error
+		o                  managed.ExternalObservation
+		err                error
+		observedPrivileges []string
 	}
 
 	cases := map[string]struct {
@@ -315,7 +316,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{allPrivileges},
 			},
 		},
 		"SuccessDiffGrants": {
@@ -347,6 +349,7 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
+				observedPrivileges: []string{"CREATE"},
 			},
 		},
 		"SuccessManyGrants": {
@@ -378,7 +381,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessGrantNoDatabaseNoTable": {
@@ -408,7 +412,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessGrantWithTables": {
@@ -440,7 +445,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessDiffGrantWithTables": {
@@ -472,7 +478,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 	}
@@ -486,6 +493,13 @@ func TestObserve(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.o, got); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+
+			if tc.args.mg != nil {
+				cr, _ := tc.args.mg.(*v1alpha1.Grant)
+				if diff := cmp.Diff(tc.want.observedPrivileges, cr.Status.AtProvider.Privileges, equateSlices()...); diff != "" {
+					t.Errorf("\n%s\ne.Observe(...): -want, +got:\n%s\n", tc.reason, diff)
+				}
 			}
 		})
 	}
@@ -986,18 +1000,26 @@ func Test_diffPermissions(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			gotToGrant, gotToRevoke := diffPermissions(tc.args.desired, tc.args.observed)
-			if diff := cmp.Diff(tc.want.toGrant, gotToGrant, equateSlices()); diff != "" {
+			if diff := cmp.Diff(tc.want.toGrant, gotToGrant, equateSlices()...); diff != "" {
 				t.Errorf("\ndiffPermissions(...): -want toGrant, +got toGrant:\n%s", diff)
 			}
-			if diff := cmp.Diff(tc.want.toRevoke, gotToRevoke, equateSlices()); diff != "" {
+			if diff := cmp.Diff(tc.want.toRevoke, gotToRevoke, equateSlices()...); diff != "" {
 				t.Errorf("\ndiffPermissions(...): -want toRevoke, +got toRevoke:\n%s", diff)
 			}
 		})
 	}
 }
 
-func equateSlices() cmp.Option {
-	return cmpopts.SortSlices(func(x, y string) bool {
-		return x < y
-	})
+func equateSlices() []cmp.Option {
+	return []cmp.Option{
+		cmp.Transformer("mapAllPrivileges", func(s string) string {
+			if s == "ALL PRIVILEGES" {
+				return "ALL"
+			}
+			return s
+		}),
+		cmpopts.SortSlices(func(x, y string) bool {
+			return x < y
+		}),
+	}
 }
