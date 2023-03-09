@@ -46,15 +46,6 @@ type UserParameters struct {
 	// +optional
 	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
 
-	// AuthPlugin sets the mysql authentication plugin, defaults to mysql_native_password
-	// +optional
-	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
-	AuthPlugin *string `json:"authPlugin,omitempty" default:"mysql_native_password"`
-
-	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true
-	// +optional
-	UsePassword *bool `json:"usePassword,omitempty" default:"true"`
-
 	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"binlog,omitempty" default:"true"`

@@ -610,16 +610,6 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 		*out = new(ResourceOptions)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.AuthPlugin != nil {
-		in, out := &in.AuthPlugin, &out.AuthPlugin
-		*out = new(string)
-		**out = **in
-	}
-	if in.UsePassword != nil {
-		in, out := &in.UsePassword, &out.UsePassword
-		*out = new(bool)
-		**out = **in
-	}
 	if in.BinLog != nil {
 		in, out := &in.BinLog, &out.BinLog
 		*out = new(bool)
