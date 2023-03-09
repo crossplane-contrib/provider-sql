@@ -252,15 +252,15 @@ echo_step_completed
 
 echo_step "creating MySQL Grant resource"
 # create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/mysql/grant.yaml
+"${KUBECTL}" apply -f ${projectdir}/examples/mysql/grant-database.yaml
 
 echo_info "check if is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/grant.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/grant-database.yaml
 echo_step_completed
 
 # uninstall
 echo_step "uninstalling ${PROJECT_NAME}"
-"${KUBECTL}" delete -f ${projectdir}/examples/mysql/grant.yaml
+"${KUBECTL}" delete -f ${projectdir}/examples/mysql/grant-database.yaml
 "${KUBECTL}" delete -f ${projectdir}/examples/mysql/database.yaml
 "${KUBECTL}" delete -f ${projectdir}/examples/mysql/user.yaml
 echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" delete -f -
