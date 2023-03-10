@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -53,8 +54,6 @@ const (
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
-	errSetSQLLogBin = "cannot set sql_log_bin = 0"
-	errFlushPriv    = "cannot flush privileges"
 
 	allPrivileges      = "ALL PRIVILEGES"
 	errCodeNoSuchGrant = 1141
@@ -250,23 +249,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-
-	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
-	if !binlog {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
-		}
-	}
-
+	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
-	}
 
-	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		return managed.ExternalCreation{}, err
 	}
 
 	return managed.ExternalCreation{}, nil
@@ -284,38 +271,26 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
-
-	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
-	if !binlog {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errSetSQLLogBin)
-		}
-	}
+	binlog := cr.Spec.ForProvider.BinLog
 
 	// Remove current grants since it's not possible to update grants.
 	// This might leave applications with no access to the DB for a short time
 	// until the privileges are granted again.
 	// Using a transaction is unfortunately not possible because a GRANT triggers
 	// an implicit commit: https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html
-	query := fmt.Sprintf("REVOKE ALL ON %s.%s FROM %s@%s",
+	revokeQuery := fmt.Sprintf("REVOKE ALL ON %s.%s FROM %s@%s",
 		dbname,
 		table,
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
-	}
-
-	query = createGrantQuery(privileges, dbname, username, table)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: revokeQuery, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(false)}); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+	grantQuery := createGrantQuery(privileges, dbname, username, table)
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: grantQuery, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(true)}); err != nil {
+		return managed.ExternalUpdate{}, err
 	}
 
 	return managed.ExternalUpdate{}, nil
@@ -346,15 +321,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
-
-	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
-	if !binlog {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return errors.Wrap(err, errSetSQLLogBin)
-		}
-	}
+	binlog := cr.Spec.ForProvider.BinLog
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
@@ -372,18 +339,15 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		}
 		return errors.Wrap(err, errRevokeGrant)
 	}
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		var myErr *mysqldriver.MySQLError
+		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
+			// MySQL automatically deletes related grants if the user has been deleted
+			return nil
+		}
 
-	if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
-		return errors.Wrap(err, errFlushPriv)
+		return err
 	}
 
 	return nil
-}
-
-func defaultBinlog(binlog *bool) bool {
-	if binlog == nil {
-		return true
-	}
-
-	return *binlog
 }

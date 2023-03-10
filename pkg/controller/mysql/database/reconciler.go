@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -45,11 +46,10 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotDatabase  = "managed resource is not a Database custom resource"
-	errSelectDB     = "cannot select database"
-	errCreateDB     = "cannot create database"
-	errDropDB       = "cannot drop database"
-	errSetSQLLogBin = "cannot set sql_log_bin = 0"
+	errNotDatabase = "managed resource is not a Database custom resource"
+	errSelectDB    = "cannot select database"
+	errCreateDB    = "cannot create database"
+	errDropDB      = "cannot drop database"
 
 	maxConcurrency = 5
 )
@@ -150,17 +150,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)
 	}
 
-	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
-	if !binlog {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrap(err, errSetSQLLogBin)
-		}
-	}
+	binlog := cr.Spec.ForProvider.BinLog
+	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(false)}); err != nil {
+		return managed.ExternalCreation{}, err
 	}
 
 	return managed.ExternalCreation{}, nil
@@ -177,26 +171,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	binlog := defaultBinlog(cr.Spec.ForProvider.BinLog)
-	if !binlog {
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return errors.Wrap(err, errSetSQLLogBin)
-		}
-	}
+	binlog := cr.Spec.ForProvider.BinLog
+	query := "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))}); err != nil {
-		return errors.Wrap(err, errDropDB)
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(false)}); err != nil {
+		return err
 	}
 
 	return nil
-}
-
-func defaultBinlog(binlog *bool) bool {
-	if binlog == nil {
-		return true
-	}
-
-	return *binlog
 }
