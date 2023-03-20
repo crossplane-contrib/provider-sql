@@ -215,7 +215,7 @@ func TestObserve(t *testing.T) {
 			},
 		},
 		"SuccessNoGrant": {
-			reason: "We should return ResourceExists: false when no grant is found",
+			reason: "We should return ResourceExists: false when no grant is found, being privileges result empty",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
@@ -319,7 +319,7 @@ func TestObserve(t *testing.T) {
 			},
 		},
 		"SuccessDiffGrants": {
-			reason: "We should return no error if different grants exist",
+			reason: "We should return no error if different grants exist for the provided database",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
@@ -347,6 +347,65 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
+			},
+		},
+		"SuccessDiffGrantNoDatabaseNoTable": {
+			reason: "We should return no error if different grants exist and no database and table are provided",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows([]string{"Grants"}).
+								AddRow("GRANT INSERT ON *.* TO 'success-user'@%"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							User:       pointer.StringPtr("success-user"),
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: false,
+				},
+				err: nil,
+			},
+		},
+		"SuccessDiffGrantUsage": {
+			reason: "We should return ResourceExists: false when a USAGE grant is found, since it is equivalent to having no grants",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows([]string{"Grants"}).
+								AddRow("GRANT USAGE ON *.* TO 'success-user'@%"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							User:       pointer.StringPtr("success-user"),
+							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists: false,
+				},
+				err: nil,
 			},
 		},
 		"SuccessManyGrants": {
@@ -382,7 +441,7 @@ func TestObserve(t *testing.T) {
 			},
 		},
 		"SuccessGrantNoDatabaseNoTable": {
-			reason: "We should return no error if no database and table were provided",
+			reason: "We should return no error if no database and table were provided and grants were equal to the ones in resource spec",
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
