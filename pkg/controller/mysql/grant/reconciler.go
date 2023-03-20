@@ -143,7 +143,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges, result, err := c.getPrivileges(ctx, username, dbname, table)
+	observedPrivileges, result, err := c.getPrivileges(ctx, username, dbname, table)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -151,18 +151,16 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return *result, nil
 	}
 
-	if !privilegesEqual(cr.Spec.ForProvider.Privileges.ToStringSlice(), privileges) {
-		return managed.ExternalObservation{
-			ResourceExists:   true,
-			ResourceUpToDate: false,
-		}, nil
-	}
+	cr.Status.AtProvider.Privileges = observedPrivileges
+
+	desiredPrivileges := cr.Spec.ForProvider.Privileges.ToStringSlice()
+	toGrant, toRevoke := diffPermissions(desiredPrivileges, observedPrivileges)
 
 	cr.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: true,
+		ResourceUpToDate: len(toGrant) == 0 && len(toRevoke) == 0,
 	}, nil
 }
 
@@ -172,24 +170,6 @@ func defaultIdentifier(identifier *string) string {
 	}
 
 	return "*"
-}
-
-func privilegesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	sort.Strings(a)
-	sort.Strings(b)
-
-	for i := range a {
-		// Special case because ALL is an alias for "ALL PRIVILEGES"
-		strA := strings.ReplaceAll(a[i], allPrivileges, "ALL")
-		strB := strings.ReplaceAll(b[i], allPrivileges, "ALL")
-		if strA != strB {
-			return false
-		}
-	}
-	return true
 }
 
 func parseGrant(grant, dbname string, table string) (privileges []string) {
@@ -285,30 +265,50 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
 
-	// Remove current grants since it's not possible to update grants.
-	// This might leave applications with no access to the DB for a short time
-	// until the privileges are granted again.
-	// Using a transaction is unfortunately not possible because a GRANT triggers
-	// an implicit commit: https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html
-	query := fmt.Sprintf("REVOKE ALL ON %s.%s FROM %s@%s",
-		dbname,
-		table,
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-	)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
+	observed := cr.Status.AtProvider.Privileges
+	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
+	toGrant, toRevoke := diffPermissions(desired, observed)
+
+	if len(toRevoke) > 0 {
+		sort.Strings(toRevoke)
+		query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
+			strings.Join(toRevoke, ", "),
+			dbname,
+			table,
+			mysql.QuoteValue(username),
+			mysql.QuoteValue(host),
+		)
+
+		if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
+		}
+
+		if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		}
+	}
+	if len(toGrant) > 0 {
+		sort.Strings(toGrant)
+		query := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
+			strings.Join(toGrant, ", "),
+			dbname,
+			table,
+			mysql.QuoteValue(username),
+			mysql.QuoteValue(host),
+		)
+
+		if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errCreateGrant)
+		}
+
+		if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
+			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		}
 	}
 
-	query = createGrantQuery(privileges, dbname, username, table)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalUpdate{}, err
-	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+	return managed.ExternalUpdate{}, nil
 }
 
 func createGrantQuery(privileges, dbname, username string, table string) string {
@@ -355,4 +355,37 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
 	return errors.Wrap(err, errFlushPriv)
+}
+
+func diffPermissions(desired, observed []string) ([]string, []string) {
+	desiredMap := make(map[string]struct{}, len(desired))
+	observedMap := make(map[string]struct{}, len(observed))
+
+	for _, desiredPrivilege := range desired {
+		// Special case because ALL is an alias for "ALL PRIVILEGES"
+		desiredPrivilegeMapped := strings.ReplaceAll(desiredPrivilege, allPrivileges, "ALL")
+		desiredMap[desiredPrivilegeMapped] = struct{}{}
+	}
+	for _, observedPrivilege := range observed {
+		// Special case because ALL is an alias for "ALL PRIVILEGES"
+		observedPrivilegeMapped := strings.ReplaceAll(observedPrivilege, allPrivileges, "ALL")
+		observedMap[observedPrivilegeMapped] = struct{}{}
+	}
+
+	var toGrant []string
+	var toRevoke []string
+
+	for desiredPrivilege := range desiredMap {
+		if _, ok := observedMap[desiredPrivilege]; !ok {
+			toGrant = append(toGrant, desiredPrivilege)
+		}
+	}
+
+	for observedPrivilege := range observedMap {
+		if _, ok := desiredMap[observedPrivilege]; !ok {
+			toRevoke = append(toRevoke, observedPrivilege)
+		}
+	}
+
+	return toGrant, toRevoke
 }
