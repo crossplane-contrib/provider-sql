@@ -195,8 +195,9 @@ func TestObserve(t *testing.T) {
 	}
 
 	type want struct {
-		o   managed.ExternalObservation
-		err error
+		o                  managed.ExternalObservation
+		err                error
+		observedPrivileges []string
 	}
 
 	cases := map[string]struct {
@@ -315,7 +316,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{allPrivileges},
 			},
 		},
 		"SuccessDiffGrants": {
@@ -347,6 +349,7 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
+				observedPrivileges: []string{"CREATE"},
 			},
 		},
 		"SuccessDiffGrantNoDatabaseNoTable": {
@@ -437,7 +440,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessGrantNoDatabaseNoTable": {
@@ -467,7 +471,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessGrantWithTables": {
@@ -499,7 +504,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 		"SuccessDiffGrantWithTables": {
@@ -531,7 +537,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
-				err: nil,
+				err:                nil,
+				observedPrivileges: []string{"CREATE", "DROP"},
 			},
 		},
 	}
@@ -545,6 +552,13 @@ func TestObserve(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.o, got); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+
+			if tc.args.mg != nil {
+				cr, _ := tc.args.mg.(*v1alpha1.Grant)
+				if diff := cmp.Diff(tc.want.observedPrivileges, cr.Status.AtProvider.Privileges, equateSlices()...); diff != "" {
+					t.Errorf("\n%s\ne.Observe(...): -want, +got:\n%s\n", tc.reason, diff)
+				}
 			}
 		})
 	}
@@ -672,19 +686,31 @@ func TestUpdate(t *testing.T) {
 				err: errors.New(errNotGrant),
 			},
 		},
-		"ErrExec": {
-			reason: "Any errors encountered while updating the grant should be returned",
+		"ErrExecRevokeNotRequired": {
+			reason: "Any errors encountered while revoking a not required privilege from the desired ones should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"CREATE"},
+						},
+					},
+					Status: v1alpha1.GrantStatus{
+						AtProvider: v1alpha1.GrantObservation{
+							Privileges: []string{"INSERT", "CREATE"},
 						},
 					},
 				},
@@ -693,17 +719,44 @@ func TestUpdate(t *testing.T) {
 				err: errors.Wrap(errBoom, errRevokeGrant),
 			},
 		},
-		"Success": {
-			reason: "No error should be returned when we update a grant",
+		"ErrExecGrantMissing": {
+			reason: "Any errors encountered while granting a missing privilege from the desired ones should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						if strings.HasPrefix(q.String, "REVOKE") || strings.HasPrefix(q.String, "FLUSH") {
-							return nil
+						if strings.HasPrefix(q.String, "GRANT") {
+							return errBoom
 						}
-						if strings.Contains(q.String, "CREATE, DROP") {
-							return nil
-						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"CREATE", "SELECT"},
+						},
+					},
+					Status: v1alpha1.GrantStatus{
+						AtProvider: v1alpha1.GrantObservation{
+							Privileges: []string{"CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errCreateGrant),
+			},
+		},
+		"SuccessEqualObservedDesired": {
+			reason: "No query should be executed and no error should be returned when there is no diff between desired and observed privileges",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return errBoom
 					},
 				},
@@ -715,6 +768,79 @@ func TestUpdate(t *testing.T) {
 							Database:   pointer.StringPtr("test-example"),
 							User:       pointer.StringPtr("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
+						},
+					},
+					Status: v1alpha1.GrantStatus{
+						AtProvider: v1alpha1.GrantObservation{
+							Privileges: []string{"DROP", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SuccessDiffObservedDesiredGrantMissing": {
+			reason: "No error should be returned when granting a missing privilege from the desired ones",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
+						},
+					},
+					Status: v1alpha1.GrantStatus{
+						AtProvider: v1alpha1.GrantObservation{
+							Privileges: []string{"DROP"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SuccessDiffObservedDesiredRevokeNotRequired": {
+			reason: "No error should be returned when revoking a not required privilege from the desired ones",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"DROP"},
+						},
+					},
+					Status: v1alpha1.GrantStatus{
+						AtProvider: v1alpha1.GrantObservation{
+							Privileges: []string{"DROP", "SELECT"},
 						},
 					},
 				},
@@ -850,4 +976,109 @@ func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
 		return nil
 	}
 	return rows
+}
+
+func Test_diffPermissions(t *testing.T) {
+	type args struct {
+		desired  []string
+		observed []string
+	}
+	type want struct {
+		toGrant  []string
+		toRevoke []string
+	}
+	cases := map[string]struct {
+		args
+		want
+	}{
+		"AsDesired": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"CREATE TABLE", "DELETE"},
+			},
+			want: want{
+				toGrant:  nil,
+				toRevoke: nil,
+			},
+		},
+		"AsDesiredOrderNotMatter": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"DELETE", "CREATE TABLE"},
+			},
+			want: want{
+				toGrant:  nil,
+				toRevoke: nil,
+			},
+		},
+		"NeedsGrant": {
+			args: args{
+				desired:  []string{"CREATE TABLE", "DELETE"},
+				observed: []string{"CREATE TABLE"},
+			},
+			want: want{
+				toGrant: []string{"DELETE"},
+			},
+		},
+		"NeedsRevoke": {
+			args: args{
+				desired:  []string{"CREATE TABLE"},
+				observed: []string{"CREATE TABLE", "DELETE"},
+			},
+			want: want{
+				toRevoke: []string{"DELETE"},
+			},
+		},
+		"NeedsBoth": {
+			args: args{
+				desired:  []string{"CREATE TABLE"},
+				observed: []string{"DELETE"},
+			},
+			want: want{
+				toGrant:  []string{"CREATE TABLE"},
+				toRevoke: []string{"DELETE"},
+			},
+		},
+		"GrantAll": {
+			args: args{
+				desired: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+			want: want{
+				toGrant: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+		},
+		"RevokeAll": {
+			args: args{
+				observed: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+			want: want{
+				toRevoke: []string{"CREATE TABLE", "DELETE", "INSERT"},
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			gotToGrant, gotToRevoke := diffPermissions(tc.args.desired, tc.args.observed)
+			if diff := cmp.Diff(tc.want.toGrant, gotToGrant, equateSlices()...); diff != "" {
+				t.Errorf("\ndiffPermissions(...): -want toGrant, +got toGrant:\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.want.toRevoke, gotToRevoke, equateSlices()...); diff != "" {
+				t.Errorf("\ndiffPermissions(...): -want toRevoke, +got toRevoke:\n%s", diff)
+			}
+		})
+	}
+}
+
+func equateSlices() []cmp.Option {
+	return []cmp.Option{
+		cmp.Transformer("mapAllPrivileges", func(s string) string {
+			if s == "ALL PRIVILEGES" {
+				return "ALL"
+			}
+			return s
+		}),
+		cmpopts.SortSlices(func(x, y string) bool {
+			return x < y
+		}),
+	}
 }
