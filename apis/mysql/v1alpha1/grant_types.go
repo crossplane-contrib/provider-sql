@@ -101,6 +101,13 @@ type GrantParameters struct {
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
+	AtProvider          GrantObservation `json:"atProvider,omitempty"`
+}
+
+// A GrantObservation represents the observed state of a MySQL grant.
+type GrantObservation struct {
+	// Privileges represents the applied privileges
+	Privileges []string `json:"privileges,omitempty"`
 }
 
 // +kubebuilder:object:root=true

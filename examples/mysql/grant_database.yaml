@@ -1,0 +1,14 @@
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-database
+spec:
+  forProvider:
+    privileges:
+      - DROP
+      - CREATE ROUTINE
+      - EVENT
+    userRef:
+      name: example-user
+    databaseRef:
+      name: example-db

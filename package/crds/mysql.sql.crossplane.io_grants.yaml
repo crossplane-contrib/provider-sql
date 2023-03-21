@@ -421,6 +421,16 @@ spec:
           status:
             description: A GrantStatus represents the observed state of a Grant.
             properties:
+              atProvider:
+                description: A GrantObservation represents the observed state of a
+                  MySQL grant.
+                properties:
+                  privileges:
+                    description: Privileges represents the applied privileges
+                    items:
+                      type: string
+                    type: array
+                type: object
               conditions:
                 description: Conditions of the resource.
                 items:
