@@ -379,7 +379,8 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: false,
 				},
-				err: nil,
+				observedPrivileges: []string{"INSERT"},
+				err:                nil,
 			},
 		},
 		"SuccessDiffGrantUsage": {
