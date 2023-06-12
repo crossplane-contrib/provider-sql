@@ -86,6 +86,33 @@ dev-clean: $(KIND) $(KUBECTL)
 
 .PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean
 
+# Install gomplate
+GOMPLATE_VERSION := 3.10.0
+GOMPLATE := $(TOOLS_HOST_DIR)/gomplate-$(GOMPLATE_VERSION)
+
+$(GOMPLATE):
+	@$(INFO) installing gomplate $(SAFEHOSTPLATFORM)
+	@mkdir -p $(TOOLS_HOST_DIR)
+	@curl -fsSLo $(GOMPLATE) https://github.com/hairyhenderson/gomplate/releases/download/v$(GOMPLATE_VERSION)/gomplate_$(SAFEHOSTPLATFORM) || $(FAIL)
+	@chmod +x $(GOMPLATE)
+	@$(OK) installing gomplate $(SAFEHOSTPLATFORM)
+
+export GOMPLATE
+
+# This target adds a new api type and its controller.
+# You would still need to register new api in "apis/<provider>.go" and
+# controller in "internal/controller/<provider>.go".
+# Arguments:
+#   provider: Camel case name of your provider, e.g. GitHub, PlanetScale
+#   group: API group for the type you want to add.
+#   kind: Kind of the type you want to add
+#	apiversion: API version of the type you want to add. Optional and defaults to "v1alpha1"
+provider.addtype: $(GOMPLATE)
+	@[ "${provider}" ] || ( echo "argument \"provider\" is not set"; exit 1 )
+	@[ "${group}" ] || ( echo "argument \"group\" is not set"; exit 1 )
+	@[ "${kind}" ] || ( echo "argument \"kind\" is not set"; exit 1 )
+	@PROVIDER=$(provider) GROUP=$(group) KIND=$(kind) APIVERSION=$(apiversion) ./hack/helpers/addtype.sh
+
 # ====================================================================================
 # Special Targets
 
