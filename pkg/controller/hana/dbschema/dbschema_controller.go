@@ -19,6 +19,10 @@ package dbschema
 import (
 	"context"
 	"fmt"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	corev1 "k8s.io/api/core/v1"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,7 +31,6 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
-	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
@@ -39,49 +42,41 @@ const (
 	errNotDbSchema  = "managed resource is not a DbSchema custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
-	errGetCreds     = "cannot get credentials"
+	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
+
+	errGetSecret    = "cannot get credentials Secret"
+	errSelectSchema = "cannot select schema"
+	errCreateSchema = "cannot create schema"
+	errDropSchema   = "cannot drop schema"
 
 	errNewClient = "cannot create new Service"
-)
-
-// A NoOpService does nothing.
-type NoOpService struct{}
-
-var (
-	newNoOpService = func(_ []byte) (interface{}, error) { return &NoOpService{}, nil }
 )
 
 // Setup adds a controller that reconciles DbSchema managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	name := managed.ControllerName(v1alpha1.DbSchemaGroupKind)
 
-	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
-
+	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.DbSchemaGroupVersionKind),
-		managed.WithExternalConnecter(&connector{
-			kube:         mgr.GetClient(),
-			usage:        resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			newServiceFn: newNoOpService}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: hana.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-		managed.WithConnectionPublishers(cps...))
+		//managed.WithPollInterval(o.PollInterval),
+		managed.WithPollInterval(10*time.Second),
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		WithOptions(o.ForControllerRuntime()).
-		//WithEventFilter(resource.DesiredStateChanged()).
 		For(&v1alpha1.DbSchema{}).
-		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
+		Complete(r)
 }
 
 // A connector is expected to produce an ExternalClient when its Connect method
 // is called.
 type connector struct {
-	kube         client.Client
-	usage        resource.Tracker
-	newServiceFn func(creds []byte) (interface{}, error)
+	kube  client.Client
+	usage resource.Tracker
+	newDB func(creds map[string][]byte) xsql.DB
 }
 
 // Connect typically produces an ExternalClient by:
@@ -104,26 +99,27 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	cd := pc.Spec.Credentials
-	data, err := resource.CommonCredentialExtractor(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetCreds)
+	ref := pc.Spec.Credentials.ConnectionSecretRef
+	if ref == nil {
+		return nil, errors.New(errNoSecretRef)
 	}
 
-	svc, err := c.newServiceFn(data)
-	if err != nil {
-		return nil, errors.Wrap(err, errNewClient)
+	s := &corev1.Secret{}
+	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
+		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{service: svc}, nil
+	return &external{
+		db:   c.newDB(s.Data),
+		kube: c.kube,
+	}, nil
 }
 
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	// A 'client' used to connect to the external resource API. In practice this
-	// would be something like an AWS SDK client.
-	service interface{}
+	db   xsql.DB
+	kube client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -132,8 +128,21 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotDbSchema)
 	}
 
-	// These fmt statements should be removed in the real implementation.
-	fmt.Printf("Observing: %+v", cr)
+	observed := &v1alpha1.DbSchemaParameters{
+		Name:          "",
+		Owner:         "",
+		HasPrivileges: false,
+	}
+
+	query := "SELECT SCHEMA_NAME, SCHEMA_OWNER, HAS_PRIVILEGES FROM SYS.SCHEMAS WHERE SCHEMA_NAME = ?"
+
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}}, &observed.Name, &observed.Owner, &observed.HasPrivileges)
+	if xsql.IsNoRows(err) {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
+	}
 
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
@@ -160,6 +169,14 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	fmt.Printf("Creating: %+v", cr)
 
+	query := "CREATE SCHEMA ?"
+
+	err := c.db.Exec(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}})
+
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
+	}
+
 	return managed.ExternalCreation{
 		// Optionally return any details that may be required to connect to the
 		// external resource. These will be stored as the connection secret.
@@ -168,18 +185,19 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotDbSchema)
-	}
-
-	fmt.Printf("Updating: %+v", cr)
-
-	return managed.ExternalUpdate{
-		// Optionally return any details that may be required to connect to the
-		// external resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	//cr, ok := mg.(*v1alpha1.DbSchema)
+	//if !ok {
+	//	return managed.ExternalUpdate{}, errors.New(errNotDbSchema)
+	//}
+	//
+	//fmt.Printf("Updating: %+v", cr)
+	//
+	//return managed.ExternalUpdate{
+	//	// Optionally return any details that may be required to connect to the
+	//	// external resource. These will be stored as the connection secret.
+	//	ConnectionDetails: managed.ConnectionDetails{},
+	//}, nil
+	return managed.ExternalUpdate{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -189,6 +207,14 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	fmt.Printf("Deleting: %+v", cr)
+
+	query := "DROP SCHEMA ?"
+
+	err := c.db.Exec(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}})
+
+	if err != nil {
+		return errors.Wrap(err, errDropSchema)
+	}
 
 	return nil
 }
