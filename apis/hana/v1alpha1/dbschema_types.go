@@ -27,12 +27,16 @@ import (
 
 // DbSchemaParameters are the configurable fields of a DbSchema.
 type DbSchemaParameters struct {
-	ConfigurableField string `json:"configurableField"`
+	Name          string `json:"name"`
+	Owner         string `json:"owner,omitempty"`
+	HasPrivileges bool   `json:"has_privileges,omitempty"`
 }
 
 // DbSchemaObservation are the observable fields of a DbSchema.
 type DbSchemaObservation struct {
-	ObservableField string `json:"observableField,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Owner         string `json:"owner,omitempty"`
+	HasPrivileges bool   `json:"has_privileges,omitempty"`
 }
 
 // A DbSchemaSpec defines the desired state of a DbSchema.

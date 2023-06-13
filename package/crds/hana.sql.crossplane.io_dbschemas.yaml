@@ -64,10 +64,14 @@ spec:
               forProvider:
                 description: DbSchemaParameters are the configurable fields of a DbSchema.
                 properties:
-                  configurableField:
+                  has_privileges:
+                    type: boolean
+                  name:
+                    type: string
+                  owner:
                     type: string
                 required:
-                - configurableField
+                - name
                 type: object
               providerConfigRef:
                 default:
@@ -246,7 +250,11 @@ spec:
               atProvider:
                 description: DbSchemaObservation are the observable fields of a DbSchema.
                 properties:
-                  observableField:
+                  has_privileges:
+                    type: boolean
+                  name:
+                    type: string
+                  owner:
                     type: string
                 type: object
               conditions:
