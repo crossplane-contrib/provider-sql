@@ -31,13 +31,17 @@ type ProviderConfigSpec struct {
 	Credentials ProviderCredentials `json:"credentials"`
 }
 
+const (
+	CredentialsSourceHanaConnectionSecret xpv1.CredentialsSource = "HanaConnectionSecret"
+)
+
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=None;Secret;InjectedIdentity;Environment;Filesystem
+	// +kubebuilder:validation:Enum=HanaConnectionSecret
 	Source xpv1.CredentialsSource `json:"source"`
 
-	xpv1.CommonCredentialSelectors `json:",inline"`
+	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
