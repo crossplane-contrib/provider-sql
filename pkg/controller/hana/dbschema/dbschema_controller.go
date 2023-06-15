@@ -22,6 +22,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -129,14 +130,15 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	observed := &v1alpha1.DbSchemaParameters{
-		Name:          "",
-		Owner:         "",
-		HasPrivileges: false,
+		Name:  "",
+		Owner: "",
 	}
 
-	query := "SELECT SCHEMA_NAME, SCHEMA_OWNER, HAS_PRIVILEGES FROM SYS.SCHEMAS WHERE SCHEMA_NAME = ?"
+	schemaName := strings.ToUpper(cr.Spec.ForProvider.Name)
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}}, &observed.Name, &observed.Owner, &observed.HasPrivileges)
+	query := "SELECT SCHEMA_NAME, SCHEMA_OWNER FROM SYS.SCHEMAS WHERE SCHEMA_NAME = ?"
+
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{schemaName}}, &observed.Name, &observed.Owner)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -169,9 +171,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	fmt.Printf("Creating: %+v", cr)
 
-	query := "CREATE SCHEMA ?"
+	parameters := &v1alpha1.DbSchemaParameters{
+		Name:  cr.Spec.ForProvider.Name,
+		Owner: cr.Spec.ForProvider.Owner,
+	}
 
-	err := c.db.Exec(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}})
+	var query string
+
+	if parameters.Owner == "" {
+		query = "CREATE SCHEMA " + parameters.Name
+	} else {
+		query = "CREATE SCHEMA " + parameters.Name + " OWNED BY " + parameters.Owner
+	}
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
@@ -208,9 +221,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	fmt.Printf("Deleting: %+v", cr)
 
-	query := "DROP SCHEMA ?"
+	query := "DROP SCHEMA " + cr.Spec.ForProvider.Name
 
-	err := c.db.Exec(ctx, xsql.Query{String: query, Parameters: []interface{}{cr.Spec.ForProvider.Name}})
+	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
 		return errors.Wrap(err, errDropSchema)

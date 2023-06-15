@@ -4,5 +4,5 @@ metadata:
   name: exampleschema
 spec:
   forProvider:
-    name: EXAMPLESCHEMA
-
+    name: example_schema
+    owner: dbadmin

@@ -64,8 +64,6 @@ spec:
               forProvider:
                 description: DbSchemaParameters are the configurable fields of a DbSchema.
                 properties:
-                  has_privileges:
-                    type: boolean
                   name:
                     type: string
                   owner:
@@ -250,8 +248,6 @@ spec:
               atProvider:
                 description: DbSchemaObservation are the observable fields of a DbSchema.
                 properties:
-                  has_privileges:
-                    type: boolean
                   name:
                     type: string
                   owner:
