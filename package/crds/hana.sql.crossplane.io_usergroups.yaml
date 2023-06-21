@@ -65,10 +65,20 @@ spec:
                 description: UsergroupParameters are the configurable fields of a
                   Usergroup.
                 properties:
-                  configurableField:
+                  disableUserAdmin:
+                    type: boolean
+                  enableParameterSet:
+                    type: string
+                  noGrantToCreator:
+                    type: boolean
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  usergroupName:
                     type: string
                 required:
-                - configurableField
+                - usergroupName
                 type: object
               providerConfigRef:
                 default:
@@ -247,8 +257,16 @@ spec:
               atProvider:
                 description: UsergroupObservation are the observable fields of a Usergroup.
                 properties:
-                  observableField:
+                  disableUserAdmin:
+                    type: boolean
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  usergroupName:
                     type: string
+                required:
+                - usergroupName
                 type: object
               conditions:
                 description: Conditions of the resource.

@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -134,6 +136,38 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	// These fmt statements should be removed in the real implementation.
 	fmt.Printf("Observing: %+v", cr)
 
+	observed := &v1alpha1.UsergroupObservation{
+		UsergroupName:    "",
+		DisableUserAdmin: false,
+		Parameters:       make(map[string]string),
+	}
+
+	usergroupName := strings.ToUpper(cr.Spec.ForProvider.UsergroupName)
+
+	query := "SELECT USERGROUP_NAME, IS_USER_ADMIN_ENABLED FROM SYS.USERGROUPS WHERE USERGROUP_NAME = ?"
+
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{usergroupName}}, &observed.UsergroupName, &observed.DisableUserAdmin)
+	if xsql.IsNoRows(err) {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUsergroup)
+	}
+
+	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
+
+	rows, err := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{usergroupName}})
+
+	for rows.Next() {
+		var name, parameter, value string
+		rowErr := rows.Scan(&name, &parameter, &value)
+		if rowErr == nil {
+			observed.Parameters[parameter] = value
+		}
+	}
+
+	cr.SetConditions(xpv1.Available())
+
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
 		// the managed resource reconciler know that it needs to call Create to
@@ -158,6 +192,43 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	fmt.Printf("Creating: %+v", cr)
+	cr.SetConditions(xpv1.Creating())
+
+	parameters := &v1alpha1.UsergroupParameters{
+		UsergroupName:      cr.Spec.ForProvider.UsergroupName,
+		DisableUserAdmin:   cr.Spec.ForProvider.DisableUserAdmin,
+		NoGrantToCreator:   cr.Spec.ForProvider.NoGrantToCreator,
+		Parameters:         cr.Spec.ForProvider.Parameters,
+		EnableParameterSet: cr.Spec.ForProvider.EnableParameterSet,
+	}
+
+	query := fmt.Sprintf("CREATE USERGROUP %s", parameters.UsergroupName)
+
+	if parameters.DisableUserAdmin {
+		query += " DISABLE USER ADMIN"
+	}
+
+	if parameters.NoGrantToCreator {
+		query += " NO GRANT TO CREATOR"
+	}
+
+	if len(parameters.Parameters) > 0 {
+		query += " SET PARAMETER"
+		for key, value := range parameters.Parameters {
+			query += fmt.Sprintf(" '%s' = '%s',", key, value)
+		}
+		query = strings.TrimSuffix(query, ",")
+	}
+
+	if parameters.EnableParameterSet != "" {
+		query += fmt.Sprintf(" ENABLE PARAMETER SET '%s'", parameters.EnableParameterSet)
+	}
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUsergroup)
+	}
 
 	return managed.ExternalCreation{
 		// Optionally return any details that may be required to connect to the
@@ -188,6 +259,15 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	fmt.Printf("Deleting: %+v", cr)
+	cr.SetConditions(xpv1.Deleting())
+
+	query := fmt.Sprintf("DROP USERGROUP %s", cr.Spec.ForProvider.UsergroupName)
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, errDropUsergroup)
+	}
 
 	return nil
 }

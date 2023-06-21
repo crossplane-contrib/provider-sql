@@ -27,12 +27,18 @@ import (
 
 // UsergroupParameters are the configurable fields of a Usergroup.
 type UsergroupParameters struct {
-	ConfigurableField string `json:"configurableField"`
+	UsergroupName      string            `json:"usergroupName"`
+	DisableUserAdmin   bool              `json:"disableUserAdmin,omitempty"`
+	NoGrantToCreator   bool              `json:"noGrantToCreator,omitempty"`
+	Parameters         map[string]string `json:"parameters,omitempty"`
+	EnableParameterSet string            `json:"enableParameterSet,omitempty"`
 }
 
 // UsergroupObservation are the observable fields of a Usergroup.
 type UsergroupObservation struct {
-	ObservableField string `json:"observableField,omitempty"`
+	UsergroupName    string            `json:"usergroupName"`
+	DisableUserAdmin bool              `json:"disableUserAdmin,omitempty"`
+	Parameters       map[string]string `json:"parameters,omitempty"`
 }
 
 // A UsergroupSpec defines the desired state of a Usergroup.
