@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"time"
@@ -169,6 +170,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	//	err = rows.Scan(&username, &parameter, &value)
 	//}
 
+	cr.SetConditions(xpv1.Available())
+
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
 		// the managed resource reconciler know that it needs to call Create to
@@ -193,6 +196,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	fmt.Printf("Creating: %+v", cr)
+	cr.SetConditions(xpv1.Creating())
 
 	parameters := &v1alpha1.UserParameters{
 		Username:       cr.Spec.ForProvider.Username,
@@ -206,19 +210,14 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		},
 	}
 
-	query := "CREATE"
-	if parameters.RestrictedUser {
-		query += " RESTRICTED"
-	}
-	query += " USER " + parameters.Username
+	query := fmt.Sprintf("CREATE %s USER %s", ternary(parameters.RestrictedUser, "RESTRICTED", ""), parameters.Username)
+
 	if parameters.Authentication.Password.Password != "" {
-		query += " PASSWORD \"" + parameters.Authentication.Password.Password + "\""
-		if !parameters.Authentication.Password.ForceFirstPasswordChange {
-			query += " NO FORCE_FIRST_PASSWORD_CHANGE"
-		}
+		query += fmt.Sprintf(" PASSWORD \"%s\" %s", parameters.Authentication.Password.Password, ternary(parameters.Authentication.Password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	}
+
 	if parameters.Usergroup != "" {
-		query += " SET USERGROUP " + parameters.Usergroup
+		query += fmt.Sprintf(" SET USERGROUP %s", parameters.Usergroup)
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: query})
@@ -255,6 +254,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
+	cr.SetConditions(xpv1.Deleting())
+
 	query := "DROP USER " + cr.Spec.ForProvider.Username
 
 	err := c.db.Exec(ctx, xsql.Query{String: query})
@@ -266,4 +267,11 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	fmt.Printf("Deleting: %+v", cr)
 
 	return nil
+}
+
+func ternary(condition bool, trueValue interface{}, falseValue interface{}) interface{} {
+	if condition {
+		return trueValue
+	}
+	return falseValue
 }
