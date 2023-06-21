@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"time"
@@ -146,6 +147,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
 	}
 
+	cr.SetConditions(xpv1.Available())
+
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
 		// the managed resource reconciler know that it needs to call Create to
@@ -175,6 +178,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		Name:  cr.Spec.ForProvider.Name,
 		Owner: cr.Spec.ForProvider.Owner,
 	}
+
+	cr.SetConditions(xpv1.Creating())
 
 	var query string
 
@@ -220,6 +225,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	fmt.Printf("Deleting: %+v", cr)
+	cr.SetConditions(xpv1.Deleting())
 
 	query := "DROP SCHEMA " + cr.Spec.ForProvider.Name
 
