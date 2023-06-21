@@ -64,10 +64,27 @@ spec:
               forProvider:
                 description: UserParameters are the configurable fields of a User.
                 properties:
-                  configurableField:
+                  authentication:
+                    description: Parameters     Parameters     `json:"parameters,omitempty"`
+                    properties:
+                      password:
+                        properties:
+                          forceFirstPasswordChange:
+                            type: boolean
+                          password:
+                            type: string
+                        required:
+                        - password
+                        type: object
+                    type: object
+                  restrictedUser:
+                    type: boolean
+                  usergroup:
+                    type: string
+                  username:
                     type: string
                 required:
-                - configurableField
+                - username
                 type: object
               providerConfigRef:
                 default:

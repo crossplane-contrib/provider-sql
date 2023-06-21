@@ -25,9 +25,31 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
+type Parameters struct {
+	Client               string `json:"client,omitempty"`
+	Locale               string `json:"locale,omitempty"`
+	TimeZone             string `json:"timeZone,omitempty"`
+	EmailAddress         string `json:"emailAddress,omitempty"`
+	StatementMemoryLimit int    `json:"statementMemoryLimit,omitempty"`
+	StatementThreadLimit int    `json:"statementMThreadLimit,omitempty"`
+}
+
+type Authentication struct {
+	Password Password `json:"password,omitempty"`
+}
+
+type Password struct {
+	Password                 string `json:"password"`
+	ForceFirstPasswordChange bool   `json:"forceFirstPasswordChange,omitempty" default:"false"`
+}
+
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
-	ConfigurableField string `json:"configurableField"`
+	Username       string `json:"username"`
+	RestrictedUser bool   `json:"restrictedUser,omitempty" default:"false"`
+	Usergroup      string `json:"usergroup,omitempty"`
+	//Parameters     Parameters     `json:"parameters,omitempty"`
+	Authentication Authentication `json:"authentication,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.

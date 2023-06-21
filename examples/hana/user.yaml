@@ -1,0 +1,12 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: exampleuser
+spec:
+  forProvider:
+    username: example_user
+    usergroup: default
+    authentication:
+      password:
+        password: MySecurePas123!
+        forceFirstPasswordChange: false

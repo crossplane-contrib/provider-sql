@@ -22,6 +22,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -44,9 +45,11 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 
-	errGetSecret = "cannot get credentials Secret"
-
-	errNewClient = "cannot create new Service"
+	errGetSecret  = "cannot get credentials Secret"
+	errSelectUser = "cannot get user"
+	errCreateUser = "cannot create user"
+	errDropUser   = "cannot drop user"
+	errNewClient  = "cannot create new Service"
 )
 
 // A NoOpService does nothing.
@@ -62,7 +65,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DbSchemaGroupVersionKind),
+		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: hana.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		//managed.WithPollInterval(o.PollInterval),
@@ -71,7 +74,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&v1alpha1.DbSchema{}).
+		For(&v1alpha1.User{}).
 		Complete(r)
 }
 
@@ -89,7 +92,7 @@ type connector struct {
 // 3. Getting the credentials specified by the ProviderConfig.
 // 4. Using the credentials to form a client.
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return nil, errors.New(errNotUser)
 	}
@@ -132,8 +135,39 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
-	// These fmt statements should be removed in the real implementation.
-	fmt.Printf("Observing: %+v", cr)
+	observed := &v1alpha1.UserParameters{
+		Username:       "",
+		RestrictedUser: false,
+		Usergroup:      "",
+		Authentication: apisv1alpha1.Authentication{},
+	}
+
+	//query := `
+	//	SELECT USER_NAME,
+	//	USERGROUP_NAME,
+	//	IS_RESTRICTED,
+	//	PARAMETER,
+	//	VALUE FROM SYS.USERS JOIN SYS.USER_PARAMETERS ON USER_NAME
+	//	    WHERE USER_NAME = ?
+	//`
+
+	userName := strings.ToUpper(cr.Spec.ForProvider.Username)
+
+	query := "SELECT USER_NAME, USERGROUP_NAME, IS_RESTRICTED FROM SYS.USERS WHERE USER_NAME = ?"
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{userName}}, &observed.Username, &observed.Usergroup, &observed.RestrictedUser)
+	if xsql.IsNoRows(err) {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
+	}
+
+	//queryUserParameters := "SELECT USER_NAME, PARAMETER, VALUE FROM SYS.USER_PARMETERS WHERE USER_NAME = ?"
+	//rows, err := c.db.Query(ctx, xsql.Query{String: queryUserParameters, Parameters: []interface{}{cr.Spec.ForProvider.Username}})
+	//for rows.Next() {
+	//	var username, parameter, value string
+	//	err = rows.Scan(&username, &parameter, &value)
+	//}
 
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
@@ -159,6 +193,39 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	fmt.Printf("Creating: %+v", cr)
+
+	parameters := &v1alpha1.UserParameters{
+		Username:       cr.Spec.ForProvider.Username,
+		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
+		Usergroup:      cr.Spec.ForProvider.Usergroup,
+		Authentication: apisv1alpha1.Authentication{
+			Password: apisv1alpha1.Password{
+				Password:                 cr.Spec.ForProvider.Authentication.Password.Password,
+				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
+			},
+		},
+	}
+
+	query := "CREATE"
+	if parameters.RestrictedUser {
+		query += " RESTRICTED"
+	}
+	query += " USER " + parameters.Username
+	if parameters.Authentication.Password.Password != "" {
+		query += " PASSWORD \"" + parameters.Authentication.Password.Password + "\""
+		if !parameters.Authentication.Password.ForceFirstPasswordChange {
+			query += " NO FORCE_FIRST_PASSWORD_CHANGE"
+		}
+	}
+	if parameters.Usergroup != "" {
+		query += " SET USERGROUP " + parameters.Usergroup
+	}
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
+	}
 
 	return managed.ExternalCreation{
 		// Optionally return any details that may be required to connect to the
@@ -186,6 +253,14 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return errors.New(errNotUser)
+	}
+
+	query := "DROP USER " + cr.Spec.ForProvider.Username
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, errDropUser)
 	}
 
 	fmt.Printf("Deleting: %+v", cr)

@@ -18,6 +18,7 @@ package hana
 
 import (
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/dbschema"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/user"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -28,6 +29,7 @@ import (
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	for _, setup := range []func(ctrl.Manager, controller.Options) error{
 		dbschema.Setup,
+		user.Setup,
 	} {
 		if err := setup(mgr, o); err != nil {
 			return err
