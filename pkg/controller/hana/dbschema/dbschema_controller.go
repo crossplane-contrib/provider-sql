@@ -179,14 +179,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		Owner: cr.Spec.ForProvider.Owner,
 	}
 
-	cr.SetConditions(xpv1.Creating())
+	query := fmt.Sprintf("CREATE SCHEMA %s", parameters.Name)
 
-	var query string
-
-	if parameters.Owner == "" {
-		query = "CREATE SCHEMA " + parameters.Name
-	} else {
-		query = "CREATE SCHEMA " + parameters.Name + " OWNED BY " + parameters.Owner
+	if parameters.Owner != "" {
+		query += fmt.Sprintf(" OWNED BY %s", parameters.Owner)
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: query})
