@@ -47,7 +47,7 @@ func (h hanaDB) Exec(ctx context.Context, q xsql.Query) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	_, err = db.ExecContext(ctx, q.String)
+	_, err = db.ExecContext(ctx, q.String, q.Parameters...)
 	return err
 }
 
