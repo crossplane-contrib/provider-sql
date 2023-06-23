@@ -110,3 +110,10 @@ func (h hanaDB) GetConnectionDetails(username, password string) managed.Connecti
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(h.port),
 	}
 }
+
+type QueryClient[P any] interface {
+	Observe(ctx context.Context, parameters *P) (managed.ExternalObservation, error)
+	Create(ctx context.Context, parameters *P) (managed.ExternalCreation, error)
+	Update(ctx context.Context, parameters *P) (managed.ExternalUpdate, error)
+	Delete(ctx context.Context, parameters *P) error
+}
