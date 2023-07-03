@@ -19,11 +19,10 @@ package role
 import (
 	"context"
 	"fmt"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/role"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
-	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,18 +43,7 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-
-	errGetSecret  = "cannot get credentials Secret"
-	errSelectRole = "cannot select Role"
-	errCreateRole = "cannot create Role"
-	errDropRole   = "cannot drop Role"
-)
-
-// A NoOpService does nothing.
-type NoOpService struct{}
-
-var (
-	newNoOpService = func(_ []byte) (interface{}, error) { return &NoOpService{}, nil }
+	errGetSecret    = "cannot get credentials Secret"
 )
 
 // Setup adds a controller that reconciles Role managed resources.
@@ -65,9 +53,10 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.RoleGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: hana.New}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: role.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
+		//managed.WithPollInterval(o.PollInterval),
+		managed.WithPollInterval(10*time.Second),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -79,9 +68,9 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 // A connector is expected to produce an ExternalClient when its Connect method
 // is called.
 type connector struct {
-	kube  client.Client
-	usage resource.Tracker
-	newDB func(creds map[string][]byte) xsql.DB
+	kube      client.Client
+	usage     resource.Tracker
+	newClient func(creds map[string][]byte) role.Client
 }
 
 // Connect typically produces an ExternalClient by:
@@ -115,16 +104,16 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data),
-		kube: c.kube,
+		client: c.newClient(s.Data),
+		kube:   c.kube,
 	}, nil
 }
 
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	client role.Client
+	kube   client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -133,55 +122,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotRole)
 	}
 
-	// These fmt statements should be removed in the real implementation.
-	fmt.Printf("Observing: %+v", cr)
-
-	observed := &v1alpha1.RoleObservation{
-		RoleName:   "",
-		LdapGroups: nil,
+	parameters := &v1alpha1.RoleParameters{
+		RoleName: cr.Spec.ForProvider.RoleName,
 	}
 
-	roleName := strings.ToUpper(cr.Spec.ForProvider.RoleName)
+	extObservation, err := c.client.Observe(ctx, parameters)
 
-	query := "SELECT ROLE_NAME FROM SYS.ROLES WHERE ROLE_NAME = ?"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{roleName}}, &observed.RoleName)
-
-	if xsql.IsNoRows(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
-	}
-	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectRole)
+	if err == nil {
+		cr.SetConditions(xpv1.Available())
 	}
 
-	queryLdapGroups := "SELECT ROLE_NAME, LDAP_GROUP_NAME FROM SYS.ROLE_LDAP_GROUPS WHERE ROLE_NAME = ?"
-
-	rows, err := c.db.Query(ctx, xsql.Query{String: queryLdapGroups, Parameters: []interface{}{roleName}})
-
-	for rows.Next() {
-		var role, ldapGroup string
-		rowErr := rows.Scan(&role, &ldapGroup)
-		if rowErr == nil {
-			observed.LdapGroups = append(observed.LdapGroups, ldapGroup)
-		}
-	}
-
-	cr.SetConditions(xpv1.Available())
-
-	return managed.ExternalObservation{
-		// Return false when the external resource does not exist. This lets
-		// the managed resource reconciler know that it needs to call Create to
-		// (re)create the resource, or that it has successfully been deleted.
-		ResourceExists: true,
-
-		// Return false when the external resource exists, but it not up to date
-		// with the desired managed resource state. This lets the managed
-		// resource reconciler know that it needs to call Update.
-		ResourceUpToDate: true,
-
-		// Return any details that may be required to connect to the external
-		// resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return extObservation, err
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -199,46 +150,18 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		NoGrantToCreator: cr.Spec.ForProvider.NoGrantToCreator,
 	}
 
-	query := fmt.Sprintf("CREATE ROLE %s", parameters.RoleName)
+	cr.SetConditions(xpv1.Creating())
 
-	if len(parameters.LdapGroups) > 0 {
-		query += " LDAP GROUP"
-		for ldapGroup := range parameters.LdapGroups {
-			query += fmt.Sprintf(" '%s',", ldapGroup)
-		}
-		query = strings.TrimSuffix(query, ",")
-	}
+	extCreation, err := c.client.Create(ctx, parameters)
 
-	if parameters.NoGrantToCreator {
-		query += " NO GRANT TO CREATOR"
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: query})
-
-	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
-	}
-
-	return managed.ExternalCreation{
-		// Optionally return any details that may be required to connect to the
-		// external resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return extCreation, err
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotRole)
-	}
 
-	fmt.Printf("Updating: %+v", cr)
+	//TODO
 
-	return managed.ExternalUpdate{
-		// Optionally return any details that may be required to connect to the
-		// external resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return managed.ExternalUpdate{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -247,16 +170,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotRole)
 	}
 
-	fmt.Printf("Deleting: %+v", cr)
-	cr.SetConditions(xpv1.Deleting())
-
-	query := fmt.Sprintf("DROP ROLE %s", cr.Spec.ForProvider.RoleName)
-
-	err := c.db.Exec(ctx, xsql.Query{String: query})
-
-	if err != nil {
-		return errors.Wrap(err, errDropRole)
+	parameters := &v1alpha1.RoleParameters{
+		RoleName: cr.Spec.ForProvider.RoleName,
 	}
 
-	return nil
+	cr.SetConditions(xpv1.Deleting())
+
+	err := c.client.Delete(ctx, parameters)
+
+	return err
 }
