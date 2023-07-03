@@ -19,7 +19,7 @@ package usergroup
 import (
 	"context"
 	"fmt"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/usergroup"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/usergroup"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -167,7 +169,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 
-	//TODO
+	// TODO
 
 	return managed.ExternalUpdate{}, nil
 }

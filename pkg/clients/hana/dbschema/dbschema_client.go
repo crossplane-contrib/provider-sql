@@ -3,12 +3,14 @@ package dbschema
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+	"github.com/pkg/errors"
+
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
-	"github.com/pkg/errors"
-	"strings"
 )
 
 const (
@@ -74,7 +76,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 
 func (c Client) Update(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (managed.ExternalUpdate, error) {
 
-	//TODO
+	// TODO
 
 	return managed.ExternalUpdate{
 		ConnectionDetails: managed.ConnectionDetails{},

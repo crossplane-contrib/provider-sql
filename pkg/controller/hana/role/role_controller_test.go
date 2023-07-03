@@ -24,7 +24,7 @@ package role
 // https://github.com/golang/go/wiki/TestComments
 // https://github.com/crossplane/crossplane/blob/master/CONTRIBUTING.md#contributing-code
 
-//func TestObserve(t *testing.T) {
+// func TestObserve(t *testing.T) {
 //	type fields struct {
 //		service interface{}
 //	}

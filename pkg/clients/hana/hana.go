@@ -3,11 +3,13 @@ package hana
 import (
 	"context"
 	"database/sql"
+	"log"
+
 	_ "github.com/SAP/go-hdb/driver"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
-	"log"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 type hanaDB struct {

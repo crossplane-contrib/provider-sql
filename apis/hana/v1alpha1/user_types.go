@@ -48,7 +48,7 @@ type UserParameters struct {
 	Username       string `json:"username"`
 	RestrictedUser bool   `json:"restrictedUser,omitempty" default:"false"`
 	Usergroup      string `json:"usergroup,omitempty"`
-	//Parameters     Parameters     `json:"parameters,omitempty"`
+	// Parameters     Parameters     `json:"parameters,omitempty"`
 	Authentication Authentication `json:"authentication,omitempty"`
 }
 

@@ -3,10 +3,12 @@ package hana
 import (
 	"context"
 	"errors"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"testing"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/google/go-cmp/cmp"
-	"testing"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 var hanaDb = hanaDB{
@@ -47,7 +49,7 @@ func TestNew(t *testing.T) {
 				},
 			},
 		},
-		//TODO Add more test cases
+		// TODO Add more test cases
 	}
 
 	for name, tc := range cases {

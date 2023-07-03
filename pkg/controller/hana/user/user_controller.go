@@ -18,10 +18,12 @@ package user
 
 import (
 	"context"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/user"
+	"time"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
-	"time"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/user"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -55,7 +57,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: user.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		//managed.WithPollInterval(o.PollInterval),
+		// managed.WithPollInterval(o.PollInterval),
 		managed.WithPollInterval(10*time.Second),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -162,7 +164,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 
-	//TODO
+	// TODO
 
 	return managed.ExternalUpdate{}, nil
 }

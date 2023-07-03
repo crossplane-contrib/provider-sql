@@ -17,11 +17,12 @@ limitations under the License.
 package hana
 
 import (
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/dbschema"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/role"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/user"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/hana/usergroup"
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 )
