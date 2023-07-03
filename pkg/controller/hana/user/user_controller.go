@@ -18,12 +18,9 @@ package user
 
 import (
 	"context"
-	"fmt"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/user"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -46,18 +43,7 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 
-	errGetSecret  = "cannot get credentials Secret"
-	errSelectUser = "cannot get user"
-	errCreateUser = "cannot create user"
-	errDropUser   = "cannot drop user"
-	errNewClient  = "cannot create new Service"
-)
-
-// A NoOpService does nothing.
-type NoOpService struct{}
-
-var (
-	newNoOpService = func(_ []byte) (interface{}, error) { return &NoOpService{}, nil }
+	errGetSecret = "cannot get credentials Secret"
 )
 
 // Setup adds a controller that reconciles User managed resources.
@@ -67,7 +53,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: hana.New}),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: user.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		//managed.WithPollInterval(o.PollInterval),
 		managed.WithPollInterval(10*time.Second),
@@ -82,9 +68,9 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 // A connector is expected to produce an ExternalClient when its Connect method
 // is called.
 type connector struct {
-	kube  client.Client
-	usage resource.Tracker
-	newDB func(creds map[string][]byte) xsql.DB
+	kube      client.Client
+	usage     resource.Tracker
+	newClient func(creds map[string][]byte) user.Client
 }
 
 // Connect typically produces an ExternalClient by:
@@ -118,16 +104,16 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data),
-		kube: c.kube,
+		client: c.newClient(s.Data),
+		kube:   c.kube,
 	}, nil
 }
 
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	client user.Client
+	kube   client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -136,57 +122,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
-	observed := &v1alpha1.UserParameters{
-		Username:       "",
-		RestrictedUser: false,
-		Usergroup:      "",
-		Authentication: apisv1alpha1.Authentication{},
+	parameters := &v1alpha1.UserParameters{
+		Username: cr.Spec.ForProvider.Username,
 	}
 
-	//query := `
-	//	SELECT USER_NAME,
-	//	USERGROUP_NAME,
-	//	IS_RESTRICTED,
-	//	PARAMETER,
-	//	VALUE FROM SYS.USERS JOIN SYS.USER_PARAMETERS ON USER_NAME
-	//	    WHERE USER_NAME = ?
-	//`
+	extObservation, err := c.client.Observe(ctx, parameters)
 
-	userName := strings.ToUpper(cr.Spec.ForProvider.Username)
-
-	query := "SELECT USER_NAME, USERGROUP_NAME, IS_RESTRICTED FROM SYS.USERS WHERE USER_NAME = ?"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{userName}}, &observed.Username, &observed.Usergroup, &observed.RestrictedUser)
-	if xsql.IsNoRows(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
-	}
-	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
+	if err == nil {
+		cr.SetConditions(xpv1.Available())
 	}
 
-	//queryUserParameters := "SELECT USER_NAME, PARAMETER, VALUE FROM SYS.USER_PARMETERS WHERE USER_NAME = ?"
-	//rows, err := c.db.Query(ctx, xsql.Query{String: queryUserParameters, Parameters: []interface{}{cr.Spec.ForProvider.Username}})
-	//for rows.Next() {
-	//	var username, parameter, value string
-	//	err = rows.Scan(&username, &parameter, &value)
-	//}
-
-	cr.SetConditions(xpv1.Available())
-
-	return managed.ExternalObservation{
-		// Return false when the external resource does not exist. This lets
-		// the managed resource reconciler know that it needs to call Create to
-		// (re)create the resource, or that it has successfully been deleted.
-		ResourceExists: true,
-
-		// Return false when the external resource exists, but it not up to date
-		// with the desired managed resource state. This lets the managed
-		// resource reconciler know that it needs to call Update.
-		ResourceUpToDate: true,
-
-		// Return any details that may be required to connect to the external
-		// resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return extObservation, err
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -194,9 +140,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
-
-	fmt.Printf("Creating: %+v", cr)
-	cr.SetConditions(xpv1.Creating())
 
 	parameters := &v1alpha1.UserParameters{
 		Username:       cr.Spec.ForProvider.Username,
@@ -210,42 +153,18 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		},
 	}
 
-	query := fmt.Sprintf("CREATE %s USER %s", ternary(parameters.RestrictedUser, "RESTRICTED", ""), parameters.Username)
+	cr.SetConditions(xpv1.Creating())
 
-	if parameters.Authentication.Password.Password != "" {
-		query += fmt.Sprintf(" PASSWORD \"%s\" %s", parameters.Authentication.Password.Password, ternary(parameters.Authentication.Password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
-	}
+	extCreation, err := c.client.Create(ctx, parameters)
 
-	if parameters.Usergroup != "" {
-		query += fmt.Sprintf(" SET USERGROUP %s", parameters.Usergroup)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: query})
-
-	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
-	}
-
-	return managed.ExternalCreation{
-		// Optionally return any details that may be required to connect to the
-		// external resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return extCreation, err
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha1.User)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotUser)
-	}
 
-	fmt.Printf("Updating: %+v", cr)
+	//TODO
 
-	return managed.ExternalUpdate{
-		// Optionally return any details that may be required to connect to the
-		// external resource. These will be stored as the connection secret.
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return managed.ExternalUpdate{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -254,24 +173,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
+	parameters := &v1alpha1.UserParameters{
+		Username: cr.Spec.ForProvider.Username,
+	}
+
 	cr.SetConditions(xpv1.Deleting())
 
-	query := "DROP USER " + cr.Spec.ForProvider.Username
+	err := c.client.Delete(ctx, parameters)
 
-	err := c.db.Exec(ctx, xsql.Query{String: query})
-
-	if err != nil {
-		return errors.Wrap(err, errDropUser)
-	}
-
-	fmt.Printf("Deleting: %+v", cr)
-
-	return nil
-}
-
-func ternary(condition bool, trueValue interface{}, falseValue interface{}) interface{} {
-	if condition {
-		return trueValue
-	}
-	return falseValue
+	return err
 }
