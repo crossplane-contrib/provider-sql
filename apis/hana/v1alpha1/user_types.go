@@ -45,11 +45,11 @@ type Password struct {
 
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
-	Username       string `json:"username"`
-	RestrictedUser bool   `json:"restrictedUser,omitempty" default:"false"`
-	Usergroup      string `json:"usergroup,omitempty"`
-	// Parameters     Parameters     `json:"parameters,omitempty"`
-	Authentication Authentication `json:"authentication,omitempty"`
+	Username       string            `json:"username"`
+	RestrictedUser bool              `json:"restrictedUser,omitempty" default:"false"`
+	Usergroup      string            `json:"usergroup,omitempty"`
+	Parameters     map[string]string `json:"parameters,omitempty"`
+	Authentication Authentication    `json:"authentication,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.

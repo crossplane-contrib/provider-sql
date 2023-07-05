@@ -65,7 +65,6 @@ spec:
                 description: UserParameters are the configurable fields of a User.
                 properties:
                   authentication:
-                    description: Parameters     Parameters     `json:"parameters,omitempty"`
                     properties:
                       password:
                         properties:
@@ -76,6 +75,10 @@ spec:
                         required:
                         - password
                         type: object
+                    type: object
+                  parameters:
+                    additionalProperties:
+                      type: string
                     type: object
                   restrictedUser:
                     type: boolean

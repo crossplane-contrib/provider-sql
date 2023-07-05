@@ -10,3 +10,10 @@ spec:
       password:
         password: MySecurePas123!
         forceFirstPasswordChange: false
+    parameters:
+      'CLIENT': 'Client'
+      'LOCALE': 'DE'
+      'TIME ZONE': 'Europe/Berlin'
+      'EMAIL ADDRESS': 'exampleuser@example.com'
+      'STATEMENT MEMORY LIMIT': '0'
+      'STATEMENT THREAD LIMIT': '0'

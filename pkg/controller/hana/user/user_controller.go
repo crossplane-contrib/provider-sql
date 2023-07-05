@@ -153,6 +153,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
 		},
+		Parameters: cr.Spec.ForProvider.Parameters,
 	}
 
 	cr.SetConditions(xpv1.Creating())

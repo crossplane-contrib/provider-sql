@@ -65,6 +65,18 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters)
 		query += fmt.Sprintf(" PASSWORD \"%s\" %s", parameters.Authentication.Password.Password, ternary(parameters.Authentication.Password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	}
 
+	validParams := []string{"CLIENT", "LOCALE", "TIME ZONE", "EMAIL ADDRESS", "STATEMENT MEMORY LIMIT", "STATEMENT THREAD LIMIT"}
+
+	if len(parameters.Parameters) > 0 {
+		query += " SET PARAMETER"
+		for key, value := range parameters.Parameters {
+			if contains(validParams, key) {
+				query += fmt.Sprintf(" %s = '%s',", key, value)
+			}
+		}
+		query = strings.TrimSuffix(query, ",")
+	}
+
 	if parameters.Usergroup != "" {
 		query += fmt.Sprintf(" SET USERGROUP %s", parameters.Usergroup)
 	}
@@ -107,4 +119,13 @@ func ternary(condition bool, trueValue interface{}, falseValue interface{}) inte
 		return trueValue
 	}
 	return falseValue
+}
+
+func contains(arr []string, str string) bool {
+	for _, a := range arr {
+		if a == str {
+			return true
+		}
+	}
+	return false
 }
