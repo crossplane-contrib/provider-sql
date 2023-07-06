@@ -35,12 +35,39 @@ type Parameters struct {
 }
 
 type Authentication struct {
-	Password Password `json:"password,omitempty"`
+	Password         Password       `json:"password,omitempty"`
+	RemoteIdentity   RemoteIdentity `json:"remoteIdentity,omitempty"`
+	ExternalIdentity string         `json:"externalIdentity,omitempty"`
+	WithIdentity     WithIdentity   `json:"withIdentity,omitempty"`
 }
 
 type Password struct {
 	Password                 string `json:"password"`
 	ForceFirstPasswordChange bool   `json:"forceFirstPasswordChange,omitempty" default:"false"`
+}
+
+type RemoteIdentity struct {
+	RemoteUserName string `json:"remoteUserName"`
+	DatabaseName   string `json:"databaseName"`
+}
+
+type WithIdentity struct {
+	X509Provider     X509Provider `json:"x509Provider,omitempty"`
+	KerberosProvider string       `json:"keberosProvider,omitempty"`
+	LogonTicket      bool         `json:"logonTicket,omitempty"`
+	AssertionTicket  bool         `json:"assertionTicket,omitempty"`
+	JwtProvider      JwtProvider  `json:"jwtProvider,omitempty"`
+	LdapProvider     bool         `json:"ldapProvider,omitempty"`
+}
+
+type X509Provider struct {
+	SubjectDistinguishedName string `json:"subjectDistinguishedName"`
+	IssuerDistinguishedName  string `json:"issuerDistinguishedName"`
+}
+
+type JwtProvider struct {
+	MappedUserName  string `json:"mappedUserName"`
+	JwtProviderName string `json:"jwtProviderName"`
 }
 
 // UserParameters are the configurable fields of a User.

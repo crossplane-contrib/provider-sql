@@ -152,6 +152,25 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 				Password:                 cr.Spec.ForProvider.Authentication.Password.Password,
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
+			RemoteIdentity: apisv1alpha1.RemoteIdentity{
+				RemoteUserName: cr.Spec.ForProvider.Authentication.RemoteIdentity.RemoteUserName,
+				DatabaseName:   cr.Spec.ForProvider.Authentication.RemoteIdentity.DatabaseName,
+			},
+			ExternalIdentity: cr.Spec.ForProvider.Authentication.ExternalIdentity,
+			WithIdentity: apisv1alpha1.WithIdentity{
+				X509Provider: apisv1alpha1.X509Provider{
+					SubjectDistinguishedName: cr.Spec.ForProvider.Authentication.WithIdentity.X509Provider.SubjectDistinguishedName,
+					IssuerDistinguishedName:  cr.Spec.ForProvider.Authentication.WithIdentity.X509Provider.IssuerDistinguishedName,
+				},
+				KerberosProvider: cr.Spec.ForProvider.Authentication.WithIdentity.KerberosProvider,
+				LogonTicket:      cr.Spec.ForProvider.Authentication.WithIdentity.LogonTicket,
+				AssertionTicket:  cr.Spec.ForProvider.Authentication.WithIdentity.AssertionTicket,
+				JwtProvider: apisv1alpha1.JwtProvider{
+					MappedUserName:  cr.Spec.ForProvider.Authentication.WithIdentity.JwtProvider.MappedUserName,
+					JwtProviderName: cr.Spec.ForProvider.Authentication.WithIdentity.JwtProvider.JwtProviderName,
+				},
+				LdapProvider: cr.Spec.ForProvider.Authentication.WithIdentity.LdapProvider,
+			},
 		},
 		Parameters: cr.Spec.ForProvider.Parameters,
 	}

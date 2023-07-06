@@ -66,6 +66,8 @@ spec:
                 properties:
                   authentication:
                     properties:
+                      externalIdentity:
+                        type: string
                       password:
                         properties:
                           forceFirstPasswordChange:
@@ -74,6 +76,47 @@ spec:
                             type: string
                         required:
                         - password
+                        type: object
+                      remoteIdentity:
+                        properties:
+                          databaseName:
+                            type: string
+                          remoteUserName:
+                            type: string
+                        required:
+                        - databaseName
+                        - remoteUserName
+                        type: object
+                      withIdentity:
+                        properties:
+                          assertionTicket:
+                            type: boolean
+                          jwtProvider:
+                            properties:
+                              jwtProviderName:
+                                type: string
+                              mappedUserName:
+                                type: string
+                            required:
+                            - jwtProviderName
+                            - mappedUserName
+                            type: object
+                          keberosProvider:
+                            type: string
+                          ldapProvider:
+                            type: boolean
+                          logonTicket:
+                            type: boolean
+                          x509Provider:
+                            properties:
+                              issuer-distinguished-name:
+                                type: string
+                              subjectDistinguishedName:
+                                type: string
+                            required:
+                            - issuer-distinguished-name
+                            - subjectDistinguishedName
+                            type: object
                         type: object
                     type: object
                   parameters:
