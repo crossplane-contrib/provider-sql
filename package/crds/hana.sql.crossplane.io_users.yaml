@@ -64,59 +64,37 @@ spec:
               forProvider:
                 description: UserParameters are the configurable fields of a User.
                 properties:
+                  LdapGroupAuthorization:
+                    enum:
+                    - LOCAL
+                    - LDAP
+                    type: string
                   authentication:
                     properties:
-                      externalIdentity:
-                        type: string
                       password:
                         properties:
                           forceFirstPasswordChange:
                             type: boolean
-                          password:
-                            type: string
-                        required:
-                        - password
-                        type: object
-                      remoteIdentity:
-                        properties:
-                          databaseName:
-                            type: string
-                          remoteUserName:
-                            type: string
-                        required:
-                        - databaseName
-                        - remoteUserName
-                        type: object
-                      withIdentity:
-                        properties:
-                          assertionTicket:
-                            type: boolean
-                          jwtProvider:
+                          passwordSecretRef:
+                            description: A SecretKeySelector is a reference to a secret
+                              key in an arbitrary namespace.
                             properties:
-                              jwtProviderName:
+                              key:
+                                description: The key to select.
                                 type: string
-                              mappedUserName:
+                              name:
+                                description: Name of the secret.
+                                type: string
+                              namespace:
+                                description: Namespace of the secret.
                                 type: string
                             required:
-                            - jwtProviderName
-                            - mappedUserName
+                            - key
+                            - name
+                            - namespace
                             type: object
-                          keberosProvider:
-                            type: string
-                          ldapProvider:
-                            type: boolean
-                          logonTicket:
-                            type: boolean
-                          x509Provider:
-                            properties:
-                              issuer-distinguished-name:
-                                type: string
-                              subjectDistinguishedName:
-                                type: string
-                            required:
-                            - issuer-distinguished-name
-                            - subjectDistinguishedName
-                            type: object
+                        required:
+                        - passwordSecretRef
                         type: object
                     type: object
                   parameters:
@@ -129,6 +107,15 @@ spec:
                     type: string
                   username:
                     type: string
+                  validity:
+                    properties:
+                      from:
+                        type: string
+                      until:
+                        type: string
+                    required:
+                    - until
+                    type: object
                 required:
                 - username
                 type: object

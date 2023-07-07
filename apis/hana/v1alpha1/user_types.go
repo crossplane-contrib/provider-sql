@@ -25,58 +25,30 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
-type Parameters struct {
-	Client               string `json:"client,omitempty"`
-	Locale               string `json:"locale,omitempty"`
-	TimeZone             string `json:"timeZone,omitempty"`
-	EmailAddress         string `json:"emailAddress,omitempty"`
-	StatementMemoryLimit int    `json:"statementMemoryLimit,omitempty"`
-	StatementThreadLimit int    `json:"statementMThreadLimit,omitempty"`
-}
-
 type Authentication struct {
-	Password         Password       `json:"password,omitempty"`
-	RemoteIdentity   RemoteIdentity `json:"remoteIdentity,omitempty"`
-	ExternalIdentity string         `json:"externalIdentity,omitempty"`
-	WithIdentity     WithIdentity   `json:"withIdentity,omitempty"`
+	Password Password `json:"password,omitempty"`
 }
 
 type Password struct {
-	Password                 string `json:"password"`
-	ForceFirstPasswordChange bool   `json:"forceFirstPasswordChange,omitempty" default:"false"`
+	PasswordSecretRef        *xpv1.SecretKeySelector `json:"passwordSecretRef"`
+	ForceFirstPasswordChange bool                    `json:"forceFirstPasswordChange,omitempty" default:"false"`
 }
 
-type RemoteIdentity struct {
-	RemoteUserName string `json:"remoteUserName"`
-	DatabaseName   string `json:"databaseName"`
-}
-
-type WithIdentity struct {
-	X509Provider     X509Provider `json:"x509Provider,omitempty"`
-	KerberosProvider string       `json:"keberosProvider,omitempty"`
-	LogonTicket      bool         `json:"logonTicket,omitempty"`
-	AssertionTicket  bool         `json:"assertionTicket,omitempty"`
-	JwtProvider      JwtProvider  `json:"jwtProvider,omitempty"`
-	LdapProvider     bool         `json:"ldapProvider,omitempty"`
-}
-
-type X509Provider struct {
-	SubjectDistinguishedName string `json:"subjectDistinguishedName"`
-	IssuerDistinguishedName  string `json:"issuerDistinguishedName"`
-}
-
-type JwtProvider struct {
-	MappedUserName  string `json:"mappedUserName"`
-	JwtProviderName string `json:"jwtProviderName"`
+type Validity struct {
+	From  string `json:"from,omitempty"`
+	Until string `json:"until"`
 }
 
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
 	Username       string            `json:"username"`
 	RestrictedUser bool              `json:"restrictedUser,omitempty" default:"false"`
-	Usergroup      string            `json:"usergroup,omitempty"`
-	Parameters     map[string]string `json:"parameters,omitempty"`
 	Authentication Authentication    `json:"authentication,omitempty"`
+	Validity       Validity          `json:"validity,omitempty"`
+	Parameters     map[string]string `json:"parameters,omitempty"`
+	Usergroup      string            `json:"usergroup,omitempty"`
+	// +kubebuilder:validation:Enum=LOCAL;LDAP
+	LdapGroupAuthorization string `json:"LdapGroupAuthorization,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.

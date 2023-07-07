@@ -40,12 +40,12 @@ import (
 )
 
 const (
-	errNotUser      = "managed resource is not a User custom resource"
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-
-	errGetSecret = "cannot get credentials Secret"
+	errNotUser                 = "managed resource is not a User custom resource"
+	errTrackPCUsage            = "cannot track ProviderConfig usage"
+	errGetPC                   = "cannot get ProviderConfig"
+	errNoSecretRef             = "ProviderConfig does not reference a credentials Secret"
+	errGetPasswordSecretFailed = "cannot get password secret"
+	errGetSecret               = "cannot get credentials Secret"
 )
 
 // Setup adds a controller that reconciles User managed resources.
@@ -146,38 +146,30 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	parameters := &v1alpha1.UserParameters{
 		Username:       cr.Spec.ForProvider.Username,
 		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
-		Usergroup:      cr.Spec.ForProvider.Usergroup,
 		Authentication: apisv1alpha1.Authentication{
 			Password: apisv1alpha1.Password{
-				Password:                 cr.Spec.ForProvider.Authentication.Password.Password,
+				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
-			RemoteIdentity: apisv1alpha1.RemoteIdentity{
-				RemoteUserName: cr.Spec.ForProvider.Authentication.RemoteIdentity.RemoteUserName,
-				DatabaseName:   cr.Spec.ForProvider.Authentication.RemoteIdentity.DatabaseName,
-			},
-			ExternalIdentity: cr.Spec.ForProvider.Authentication.ExternalIdentity,
-			WithIdentity: apisv1alpha1.WithIdentity{
-				X509Provider: apisv1alpha1.X509Provider{
-					SubjectDistinguishedName: cr.Spec.ForProvider.Authentication.WithIdentity.X509Provider.SubjectDistinguishedName,
-					IssuerDistinguishedName:  cr.Spec.ForProvider.Authentication.WithIdentity.X509Provider.IssuerDistinguishedName,
-				},
-				KerberosProvider: cr.Spec.ForProvider.Authentication.WithIdentity.KerberosProvider,
-				LogonTicket:      cr.Spec.ForProvider.Authentication.WithIdentity.LogonTicket,
-				AssertionTicket:  cr.Spec.ForProvider.Authentication.WithIdentity.AssertionTicket,
-				JwtProvider: apisv1alpha1.JwtProvider{
-					MappedUserName:  cr.Spec.ForProvider.Authentication.WithIdentity.JwtProvider.MappedUserName,
-					JwtProviderName: cr.Spec.ForProvider.Authentication.WithIdentity.JwtProvider.JwtProviderName,
-				},
-				LdapProvider: cr.Spec.ForProvider.Authentication.WithIdentity.LdapProvider,
-			},
 		},
-		Parameters: cr.Spec.ForProvider.Parameters,
+		Validity: apisv1alpha1.Validity{
+			From:  cr.Spec.ForProvider.Validity.From,
+			Until: cr.Spec.ForProvider.Validity.Until,
+		},
+		Parameters:             cr.Spec.ForProvider.Parameters,
+		Usergroup:              cr.Spec.ForProvider.Usergroup,
+		LdapGroupAuthorization: cr.Spec.ForProvider.LdapGroupAuthorization,
 	}
 
 	cr.SetConditions(xpv1.Creating())
 
-	extCreation, err := c.client.Create(ctx, parameters)
+	passwrd, pasErr := c.getPassword(ctx, parameters.Authentication.Password.PasswordSecretRef)
+
+	if pasErr != nil {
+		return managed.ExternalCreation{}, pasErr
+	}
+
+	extCreation, err := c.client.Create(ctx, parameters, passwrd)
 
 	return extCreation, err
 }
@@ -204,4 +196,21 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	err := c.client.Delete(ctx, parameters)
 
 	return err
+}
+
+func (c *external) getPassword(ctx context.Context, secretRef *xpv1.SecretKeySelector) (newPwd string, err error) {
+	if secretRef == nil {
+		return "", nil
+	}
+	nn := types.NamespacedName{
+		Name:      secretRef.Name,
+		Namespace: secretRef.Namespace,
+	}
+	s := &corev1.Secret{}
+	if err := c.kube.Get(ctx, nn, s); err != nil {
+		return "", errors.Wrap(err, errGetPasswordSecretFailed)
+	}
+	newPwd = string(s.Data[secretRef.Key])
+
+	return newPwd, nil
 }
