@@ -8,12 +8,16 @@ spec:
     usergroup: default
     authentication:
       password:
-        password: MySecurePas123!
+        passwordSecretRef:
+          key: password
+          name: example-user-password
+          namespace: default
         forceFirstPasswordChange: false
     parameters:
-      'CLIENT': 'Client'
-      'LOCALE': 'DE'
-      'TIME ZONE': 'Europe/Berlin'
-      'EMAIL ADDRESS': 'exampleuser@example.com'
-      'STATEMENT MEMORY LIMIT': '0'
-      'STATEMENT THREAD LIMIT': '0'
+      CLIENT: "Client"
+      LOCALE: 'DE'
+      TIME ZONE: 'Europe/Berlin'
+      EMAIL ADDRESS: 'exampleuser@example.com'
+      STATEMENT MEMORY LIMIT: '0'
+      STATEMENT THREAD LIMIT: '0'
+    LdapGroupAuthorization: LDAP

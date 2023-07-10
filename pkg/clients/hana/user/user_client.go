@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	errSelectUser = "cannot select user"
-	errCreateUser = "cannot create user"
-	errDropUser   = "cannot drop user"
+	errSelectUser  = "cannot select user"
+	errCreateUser  = "cannot create user"
+	errDropUser    = "cannot drop user"
+	errGetPassword = "cannot get user password"
 )
 
 type Client struct {
@@ -57,44 +58,17 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 	}, nil
 }
 
-func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters) (managed.ExternalCreation, error) {
+func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters, args ...any) (managed.ExternalCreation, error) {
 
 	query := fmt.Sprintf("CREATE %s USER %s", ternary(parameters.RestrictedUser, "RESTRICTED", ""), parameters.Username)
 
-	remoteIdentity := parameters.Authentication.RemoteIdentity
 	password := parameters.Authentication.Password
-	externalIdentity := parameters.Authentication.ExternalIdentity
-	if remoteIdentity.RemoteUserName != "" && remoteIdentity.DatabaseName != "" {
-		query += fmt.Sprintf(" '%s' AT DATABASE '%s'", remoteIdentity.RemoteUserName, remoteIdentity.DatabaseName)
-	} else if password.Password != "" {
-		query += fmt.Sprintf(" PASSWORD \"%s\" %s", password.Password, ternary(password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
-	} else if externalIdentity != "" {
-		query += fmt.Sprintf(" IDENTIFIED EXTERNALLY AS '%s'", externalIdentity)
-	} else {
-		x509Provider := parameters.Authentication.WithIdentity.X509Provider
-		if x509Provider.IssuerDistinguishedName != "" && x509Provider.SubjectDistinguishedName != "" {
-			query += fmt.Sprintf(" '%s' FOR X509 '%s'", x509Provider.IssuerDistinguishedName, x509Provider.SubjectDistinguishedName)
+	if password.PasswordSecretRef != nil {
+		passwrd := args[0].(string)
+		if passwrd == "" {
+			return managed.ExternalCreation{}, errors.New(errGetPassword)
 		}
-		kerberosProvider := parameters.Authentication.WithIdentity.KerberosProvider
-		if kerberosProvider != "" {
-			query += fmt.Sprintf(" '%s' FOR KERBEROS", kerberosProvider)
-		}
-		logonTicket := parameters.Authentication.WithIdentity.LogonTicket
-		if logonTicket {
-			query += " FOR SAP LOGON TICKET"
-		}
-		assertionTicket := parameters.Authentication.WithIdentity.AssertionTicket
-		if assertionTicket {
-			query += " FOR SAP ASSERTION TICKET"
-		}
-		jwtProvider := parameters.Authentication.WithIdentity.JwtProvider
-		if jwtProvider.JwtProviderName != "" && jwtProvider.MappedUserName != "" {
-			query += fmt.Sprintf(" '%s' FOR JWT PROVIDER '%s'", jwtProvider.MappedUserName, jwtProvider.JwtProviderName)
-		}
-		ldapProvider := parameters.Authentication.WithIdentity.LdapProvider
-		if ldapProvider {
-			query += " FOR LDAP PROVIDER"
-		}
+		query += fmt.Sprintf(" PASSWORD \"%s\" %s", passwrd, ternary(password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	}
 
 	validParams := []string{"CLIENT", "LOCALE", "TIME ZONE", "EMAIL ADDRESS", "STATEMENT MEMORY LIMIT", "STATEMENT THREAD LIMIT"}
@@ -102,6 +76,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters)
 	if len(parameters.Parameters) > 0 {
 		query += " SET PARAMETER"
 		for key, value := range parameters.Parameters {
+			key = strings.ToUpper(key)
 			if contains(validParams, key) {
 				query += fmt.Sprintf(" %s = '%s',", key, value)
 			}
