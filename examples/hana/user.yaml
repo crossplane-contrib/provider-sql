@@ -1,0 +1,23 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: exampleuser
+spec:
+  forProvider:
+    username: example_user
+    usergroup: default
+    authentication:
+      password:
+        passwordSecretRef:
+          key: password
+          name: example-user-password
+          namespace: default
+        forceFirstPasswordChange: false
+    parameters:
+      CLIENT: "Client"
+      LOCALE: 'DE'
+      TIME ZONE: 'Europe/Berlin'
+      EMAIL ADDRESS: 'exampleuser@example.com'
+      STATEMENT MEMORY LIMIT: '0'
+      STATEMENT THREAD LIMIT: '0'
+    ldapGroupAuthorization: LDAP

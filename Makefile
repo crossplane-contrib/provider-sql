@@ -80,11 +80,31 @@ dev: $(KIND) $(KUBECTL)
 	@$(INFO) Starting Provider SQL controllers
 	@$(GO) run cmd/provider/main.go --debug
 
+dev-debug: $(KIND) $(KUBECTL)
+	@$(INFO) Creating kind cluster
+	@$(KIND) create cluster --name=$(PROJECT_NAME)-dev
+	@$(KUBECTL) cluster-info --context kind-$(PROJECT_NAME)-dev
+	@$(INFO) Installing Crossplane CRDs
+	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
+	@$(INFO) Installing Provider SQL CRDs
+	@$(KUBECTL) apply -R -f package/crds
+	@$(INFO) Start the controllers from IDE now ...
+
 dev-clean: $(KIND) $(KUBECTL)
 	@$(INFO) Deleting kind cluster
 	@$(KIND) delete cluster --name=$(PROJECT_NAME)-dev
 
-.PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean
+dev-init: $(KIND) $(KUBECTL)
+	@$(INFO) Applying hana examples
+	@$(KUBECTL) apply -f examples/hana/secret.yaml
+	@$(KUBECTL) apply -f examples/hana/config.yaml
+	@$(KUBECTL) apply -f examples/hana/dbschema.yaml
+	@$(KUBECTL) apply -f examples/hana/user_secret.yaml
+	@$(KUBECTL) apply -f examples/hana/user.yaml
+	@$(KUBECTL) apply -f examples/hana/usergroup.yaml
+	@$(KUBECTL) apply -f examples/hana/role.yaml
+
+.PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean dev-debug
 
 # Install gomplate
 GOMPLATE_VERSION := 3.10.0

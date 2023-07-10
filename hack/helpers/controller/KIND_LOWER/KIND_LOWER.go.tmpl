@@ -25,25 +25,25 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/pkg/connection"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
-	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
-	"github.com/crossplane/provider-{{ .Env.PROVIDER | strings.ToLower }}/apis/{{ .Env.GROUP | strings.ToLower }}/{{ .Env.APIVERSION | strings.ToLower }}"
-	apisv1alpha1 "github.com/crossplane/provider-{{ .Env.PROVIDER | strings.ToLower }}/apis/v1alpha1"
-	"github.com/crossplane/provider-{{ .Env.PROVIDER | strings.ToLower }}/internal/controller/features"
+	"github.com/crossplane-contrib/provider-{{ .Env.PROVIDER | strings.ToLower }}/apis/{{ .Env.GROUP | strings.ToLower }}/{{ .Env.APIVERSION | strings.ToLower }}"
+	apisv1alpha1 "github.com/crossplane-contrib/provider-{{ .Env.PROVIDER | strings.ToLower }}/apis/{{ .Env.GROUP }}/v1alpha1"
 )
 
 const (
 	errNot{{ .Env.KIND }}    = "managed resource is not a {{ .Env.KIND }} custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
-	errGetCreds     = "cannot get credentials"
+	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 
-	errNewClient = "cannot create new Service"
+    errGetSecret    = "cannot get credentials Secret"
+    errSelect{{ .Env.KIND }} = "cannot select {{ .Env.KIND }}"
+    errCreate{{ .Env.KIND }} = "cannot create {{ .Env.KIND }}"
+    errDrop{{ .Env.KIND }}   = "cannot drop {{ .Env.KIND }}"
 )
 
 // A NoOpService does nothing.
@@ -57,28 +57,18 @@ var (
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	name := managed.ControllerName(v1alpha1.{{ .Env.KIND }}GroupKind)
 
-	cps := []managed.ConnectionPublisher{managed.NewAPISecretPublisher(mgr.GetClient(), mgr.GetScheme())}
-	if o.Features.Enabled(features.EnableAlphaExternalSecretStores) {
-		cps = append(cps, connection.NewDetailsManager(mgr.GetClient(), apisv1alpha1.StoreConfigGroupVersionKind))
-	}
+	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+    r := managed.NewReconciler(mgr,
+        resource.ManagedKind(v1alpha1.{{ .Env.KIND }}GroupVersionKind),
+        managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newServiceFn: newNoOpService}),
+        managed.WithLogger(o.Logger.WithValues("controller", name)),
+        managed.WithPollInterval(o.PollInterval),
+        managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.{{ .Env.KIND }}GroupVersionKind),
-		managed.WithExternalConnecter(&connector{
-			kube:         mgr.GetClient(),
-			usage:        resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
-			newServiceFn: newNoOpService}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-		managed.WithConnectionPublishers(cps...))
-
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		WithOptions(o.ForControllerRuntime()).
-		WithEventFilter(resource.DesiredStateChanged()).
-		For(&v1alpha1.{{ .Env.KIND }}{}).
-		Complete(ratelimiter.NewReconciler(name, r, o.GlobalRateLimiter))
+    return ctrl.NewControllerManagedBy(mgr).
+        Named(name).
+        For(&v1alpha1.{{ .Env.KIND }}{}).
+        Complete(r)
 }
 
 // A connector is expected to produce an ExternalClient when its Connect method
@@ -109,16 +99,15 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	cd := pc.Spec.Credentials
-	data, err := resource.CommonCredentialExtractor(ctx, cd.Source, c.kube, cd.CommonCredentialSelectors)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetCreds)
-	}
+	ref := pc.Spec.Credentials.ConnectionSecretRef
+    if ref == nil {
+        return nil, errors.New(errNoSecretRef)
+    }
 
-	svc, err := c.newServiceFn(data)
-	if err != nil {
-		return nil, errors.Wrap(err, errNewClient)
-	}
+    s := &corev1.Secret{}
+    if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
+        return nil, errors.Wrap(err, errGetSecret)
+    }
 
 	return &external{service: svc}, nil
 }

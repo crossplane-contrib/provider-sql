@@ -1,0 +1,11 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: examplerole
+spec:
+  forProvider:
+    rolename: example_role
+    ldapGroups:
+      - ldapGroup1
+      - ldapGroup2
+      - ldapGroup3

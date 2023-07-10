@@ -3,11 +3,13 @@ package hana
 import (
 	"context"
 	"database/sql"
+	"log"
+
 	_ "github.com/SAP/go-hdb/driver"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
-	"log"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 type hanaDB struct {
@@ -47,7 +49,7 @@ func (h hanaDB) Exec(ctx context.Context, q xsql.Query) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	_, err = db.ExecContext(ctx, q.String)
+	_, err = db.ExecContext(ctx, q.String, q.Parameters...)
 	return err
 }
 
@@ -109,4 +111,11 @@ func (h hanaDB) GetConnectionDetails(username, password string) managed.Connecti
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(h.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(h.port),
 	}
+}
+
+type QueryClient[P any, O any] interface {
+	Observe(ctx context.Context, parameters *P) (observed *O, err error)
+	Create(ctx context.Context, parameters *P, args ...any) error
+	Update(ctx context.Context, parameters *P, args ...any) error
+	Delete(ctx context.Context, parameters *P) error
 }

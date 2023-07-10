@@ -14,56 +14,60 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dbschema
+package usergroup
 
 import (
 	"context"
 	"strings"
-	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/dbschema"
-
-	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/usergroup"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 	apisv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 )
 
 const (
-	errNotDbSchema  = "managed resource is not a DbSchema custom resource"
+	errNotUsergroup = "managed resource is not a Usergroup custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
+
+	errGetSecret = "cannot get credentials Secret"
 )
 
-// Setup adds a controller that reconciles DbSchema managed resources.
+// A NoOpService does nothing.
+type NoOpService struct{}
+
+var (
+	newNoOpService = func(_ []byte) (interface{}, error) { return &NoOpService{}, nil }
+)
+
+// Setup adds a controller that reconciles Usergroup managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
-	name := managed.ControllerName(v1alpha1.DbSchemaGroupKind)
+	name := managed.ControllerName(v1alpha1.UsergroupGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DbSchemaGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: dbschema.New}),
+		resource.ManagedKind(v1alpha1.UsergroupGroupVersionKind),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: usergroup.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		// managed.WithPollInterval(o.PollInterval),
-		managed.WithPollInterval(10*time.Second),
+		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&v1alpha1.DbSchema{}).
+		For(&v1alpha1.Usergroup{}).
 		Complete(r)
 }
 
@@ -72,7 +76,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 type connector struct {
 	kube      client.Client
 	usage     resource.Tracker
-	newClient func(creds map[string][]byte) dbschema.Client
+	newClient func(creds map[string][]byte) usergroup.Client
 }
 
 // Connect typically produces an ExternalClient by:
@@ -81,9 +85,9 @@ type connector struct {
 // 3. Getting the credentials specified by the ProviderConfig.
 // 4. Using the credentials to form a client.
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Usergroup)
 	if !ok {
-		return nil, errors.New(errNotDbSchema)
+		return nil, errors.New(errNotUsergroup)
 	}
 
 	if err := c.usage.Track(ctx, mg); err != nil {
@@ -114,18 +118,18 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client dbschema.Client
+	client usergroup.Client
 	kube   client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Usergroup)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDbSchema)
+		return managed.ExternalObservation{}, errors.New(errNotUsergroup)
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name: strings.ToUpper(cr.Spec.ForProvider.Name),
+	parameters := &v1alpha1.UsergroupParameters{
+		UsergroupName: strings.ToUpper(cr.Spec.ForProvider.UsergroupName),
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -134,7 +138,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	if observed.Name != parameters.Name {
+	if observed.UsergroupName != parameters.UsergroupName {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -144,17 +148,23 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		ResourceExists:   true,
 		ResourceUpToDate: true,
 	}, nil
+
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Usergroup)
 	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDbSchema)
+		return managed.ExternalCreation{}, errors.New(errNotUsergroup)
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name:  cr.Spec.ForProvider.Name,
-		Owner: cr.Spec.ForProvider.Owner,
+	cr.SetConditions(xpv1.Creating())
+
+	parameters := &v1alpha1.UsergroupParameters{
+		UsergroupName:      cr.Spec.ForProvider.UsergroupName,
+		DisableUserAdmin:   cr.Spec.ForProvider.DisableUserAdmin,
+		NoGrantToCreator:   cr.Spec.ForProvider.NoGrantToCreator,
+		Parameters:         cr.Spec.ForProvider.Parameters,
+		EnableParameterSet: cr.Spec.ForProvider.EnableParameterSet,
 	}
 
 	cr.SetConditions(xpv1.Creating())
@@ -178,13 +188,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Usergroup)
 	if !ok {
-		return errors.New(errNotDbSchema)
+		return errors.New(errNotUsergroup)
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name: cr.Spec.ForProvider.Name,
+	parameters := &v1alpha1.UsergroupParameters{
+		UsergroupName: cr.Spec.ForProvider.UsergroupName,
 	}
 
 	cr.SetConditions(xpv1.Deleting())

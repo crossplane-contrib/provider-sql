@@ -14,17 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dbschema
+package role
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/dbschema"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/role"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,21 +42,21 @@ import (
 )
 
 const (
-	errNotDbSchema  = "managed resource is not a DbSchema custom resource"
+	errNotRole      = "managed resource is not a Role custom resource"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 )
 
-// Setup adds a controller that reconciles DbSchema managed resources.
+// Setup adds a controller that reconciles Role managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
-	name := managed.ControllerName(v1alpha1.DbSchemaGroupKind)
+	name := managed.ControllerName(v1alpha1.RoleGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DbSchemaGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: dbschema.New}),
+		resource.ManagedKind(v1alpha1.RoleGroupVersionKind),
+		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: role.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		// managed.WithPollInterval(o.PollInterval),
 		managed.WithPollInterval(10*time.Second),
@@ -63,7 +64,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&v1alpha1.DbSchema{}).
+		For(&v1alpha1.Role{}).
 		Complete(r)
 }
 
@@ -72,7 +73,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 type connector struct {
 	kube      client.Client
 	usage     resource.Tracker
-	newClient func(creds map[string][]byte) dbschema.Client
+	newClient func(creds map[string][]byte) role.Client
 }
 
 // Connect typically produces an ExternalClient by:
@@ -81,9 +82,9 @@ type connector struct {
 // 3. Getting the credentials specified by the ProviderConfig.
 // 4. Using the credentials to form a client.
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Role)
 	if !ok {
-		return nil, errors.New(errNotDbSchema)
+		return nil, errors.New(errNotRole)
 	}
 
 	if err := c.usage.Track(ctx, mg); err != nil {
@@ -114,18 +115,19 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client dbschema.Client
+	client role.Client
 	kube   client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
+	cr, ok := mg.(*v1alpha1.Role)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDbSchema)
+		return managed.ExternalObservation{}, errors.New(errNotRole)
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name: strings.ToUpper(cr.Spec.ForProvider.Name),
+	parameters := &v1alpha1.RoleParameters{
+		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -134,30 +136,71 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	if observed.Name != parameters.Name {
+	if observed.RoleName != parameters.RoleName {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
+
+	cr.Status.AtProvider.RoleName = observed.RoleName
+	cr.Status.AtProvider.LdapGroups = observed.LdapGroups
 
 	cr.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: true,
+		ResourceUpToDate: upToDate(observed, parameters),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.DbSchema)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDbSchema)
+func upToDate(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
+	if observed.RoleName != desired.RoleName {
+		return false
+	}
+	if !equalArrays(observed.LdapGroups, desired.LdapGroups) {
+		return false
+	}
+	return true
+}
+
+func equalArrays(arr1, arr2 []string) bool {
+	if len(arr1) != len(arr2) {
+		return false
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name:  cr.Spec.ForProvider.Name,
-		Owner: cr.Spec.ForProvider.Owner,
+	set1 := arrayToSet(arr1)
+	set2 := arrayToSet(arr2)
+
+	return reflect.DeepEqual(set1, set2)
+}
+
+func arrayToSet(arr []string) map[string]bool {
+	set := make(map[string]bool)
+	for _, item := range arr {
+		set[item] = true
+	}
+	return set
+}
+
+func arrayToUpper(arr []string) []string {
+	upperArr := make([]string, len(arr))
+	for i, item := range arr {
+		upperArr[i] = strings.ToUpper(item)
+	}
+	return upperArr
+}
+
+func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+	cr, ok := mg.(*v1alpha1.Role)
+	if !ok {
+		return managed.ExternalCreation{}, errors.New(errNotRole)
 	}
 
 	cr.SetConditions(xpv1.Creating())
+
+	parameters := &v1alpha1.RoleParameters{
+		RoleName:         cr.Spec.ForProvider.RoleName,
+		LdapGroups:       cr.Spec.ForProvider.LdapGroups,
+		NoGrantToCreator: cr.Spec.ForProvider.NoGrantToCreator,
+	}
 
 	err := c.client.Create(ctx, parameters)
 
@@ -165,26 +208,71 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
+	cr.Status.AtProvider.RoleName = parameters.RoleName
+	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
+
 	return managed.ExternalCreation{
 		ConnectionDetails: managed.ConnectionDetails{},
 	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*v1alpha1.Role)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotRole)
+	}
 
-	// TODO
+	parameters := &v1alpha1.RoleParameters{
+		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
+	}
+
+	observedLdapGroups := cr.Status.AtProvider.LdapGroups
+	desiredLdapGroups := parameters.LdapGroups
+
+	if equalArrays(observedLdapGroups, desiredLdapGroups) {
+		return managed.ExternalUpdate{}, nil
+	}
+
+	groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
+	groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
+	err := c.client.Update(ctx, parameters, groupsToAdd, groupsToRemove)
+
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.DbSchema)
-	if !ok {
-		return errors.New(errNotDbSchema)
+func stringArrayDifference(arr1, arr2 []string) []string {
+	set := make(map[string]bool)
+
+	for _, item := range arr2 {
+		set[item] = true
 	}
 
-	parameters := &v1alpha1.DbSchemaParameters{
-		Name: cr.Spec.ForProvider.Name,
+	var difference []string
+
+	for _, item := range arr1 {
+		if _, found := set[item]; !found {
+			difference = append(difference, item)
+		}
+	}
+
+	return difference
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+	cr, ok := mg.(*v1alpha1.Role)
+	if !ok {
+		return errors.New(errNotRole)
+	}
+
+	parameters := &v1alpha1.RoleParameters{
+		RoleName: cr.Spec.ForProvider.RoleName,
 	}
 
 	cr.SetConditions(xpv1.Deleting())
