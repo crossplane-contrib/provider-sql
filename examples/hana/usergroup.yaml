@@ -4,7 +4,7 @@ metadata:
   name: exampleusergroup
 spec:
   forProvider:
-    usergroupName: example_usergroup
+    usergroupName: EXAMPLE_USERGROUP
     parameters:
       password_layout: 'A1a!'
       minimal_password_length: '16'

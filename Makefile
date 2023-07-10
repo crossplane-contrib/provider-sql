@@ -94,6 +94,10 @@ dev-clean: $(KIND) $(KUBECTL)
 	@$(INFO) Deleting kind cluster
 	@$(KIND) delete cluster --name=$(PROJECT_NAME)-dev
 
+dev-install: $(KIND) $(KUBECTL)
+	@$(INFO) Installing Provider SQL CRDs
+	@$(KUBECTL) apply -R -f package/crds
+
 dev-init: $(KIND) $(KUBECTL)
 	@$(INFO) Applying hana examples
 	@$(KUBECTL) apply -f examples/hana/secret.yaml

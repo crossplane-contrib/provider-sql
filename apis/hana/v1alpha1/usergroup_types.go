@@ -27,6 +27,7 @@ import (
 
 // UsergroupParameters are the configurable fields of a Usergroup.
 type UsergroupParameters struct {
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	UsergroupName      string            `json:"usergroupName"`
 	DisableUserAdmin   bool              `json:"disableUserAdmin,omitempty"`
 	NoGrantToCreator   bool              `json:"noGrantToCreator,omitempty"`

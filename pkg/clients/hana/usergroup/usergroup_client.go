@@ -36,11 +36,9 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 		Parameters:       make(map[string]string),
 	}
 
-	usergroupName := strings.ToUpper(parameters.UsergroupName)
-
 	query := "SELECT USERGROUP_NAME, IS_USER_ADMIN_ENABLED FROM SYS.USERGROUPS WHERE USERGROUP_NAME = ?"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{usergroupName}}, &observed.UsergroupName, &observed.DisableUserAdmin)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{parameters.UsergroupName}}, &observed.UsergroupName, &observed.DisableUserAdmin)
 	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
@@ -50,7 +48,7 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
 
-	rows, err := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{usergroupName}})
+	rows, err := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.UsergroupName}})
 
 	for rows.Next() {
 		var name, parameter, value string
