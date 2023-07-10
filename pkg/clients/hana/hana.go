@@ -113,9 +113,9 @@ func (h hanaDB) GetConnectionDetails(username, password string) managed.Connecti
 	}
 }
 
-type QueryClient[P any] interface {
-	Observe(ctx context.Context, parameters *P) (managed.ExternalObservation, error)
-	Create(ctx context.Context, parameters *P) (managed.ExternalCreation, error)
-	Update(ctx context.Context, parameters *P) (managed.ExternalUpdate, error)
+type QueryClient[P any, O any] interface {
+	Observe(ctx context.Context, parameters *P) (observed *O, err error)
+	Create(ctx context.Context, parameters *P) error
+	Update(ctx context.Context, parameters *P, args ...any) error
 	Delete(ctx context.Context, parameters *P) error
 }

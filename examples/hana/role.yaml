@@ -5,3 +5,7 @@ metadata:
 spec:
   forProvider:
     rolename: example_role
+    ldapGroups:
+      - ldapGroup1
+      - ldapGroup2
+      - ldapGroup3

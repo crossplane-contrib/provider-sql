@@ -18,7 +18,8 @@ package role
 
 import (
 	"context"
-	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -125,16 +126,66 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.RoleParameters{
-		RoleName: cr.Spec.ForProvider.RoleName,
+		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
 	}
 
-	extObservation, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Observe(ctx, parameters)
 
-	if err == nil {
-		cr.SetConditions(xpv1.Available())
+	if err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
-	return extObservation, err
+	if observed.RoleName != parameters.RoleName {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
+	cr.Status.AtProvider.RoleName = observed.RoleName
+	cr.Status.AtProvider.LdapGroups = observed.LdapGroups
+
+	cr.SetConditions(xpv1.Available())
+
+	return managed.ExternalObservation{
+		ResourceExists:   true,
+		ResourceUpToDate: upToDate(observed, parameters),
+	}, nil
+}
+
+func upToDate(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
+	if observed.RoleName != desired.RoleName {
+		return false
+	}
+	if !equalArrays(observed.LdapGroups, desired.LdapGroups) {
+		return false
+	}
+	return true
+}
+
+func equalArrays(arr1, arr2 []string) bool {
+	if len(arr1) != len(arr2) {
+		return false
+	}
+
+	set1 := arrayToSet(arr1)
+	set2 := arrayToSet(arr2)
+
+	return reflect.DeepEqual(set1, set2)
+}
+
+func arrayToSet(arr []string) map[string]bool {
+	set := make(map[string]bool)
+	for _, item := range arr {
+		set[item] = true
+	}
+	return set
+}
+
+func arrayToUpper(arr []string) []string {
+	upperArr := make([]string, len(arr))
+	for i, item := range arr {
+		upperArr[i] = strings.ToUpper(item)
+	}
+	return upperArr
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -143,7 +194,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotRole)
 	}
 
-	fmt.Printf("Creating: %+v", cr)
 	cr.SetConditions(xpv1.Creating())
 
 	parameters := &v1alpha1.RoleParameters{
@@ -152,18 +202,67 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		NoGrantToCreator: cr.Spec.ForProvider.NoGrantToCreator,
 	}
 
-	cr.SetConditions(xpv1.Creating())
+	err := c.client.Create(ctx, parameters)
 
-	extCreation, err := c.client.Create(ctx, parameters)
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
 
-	return extCreation, err
+	cr.Status.AtProvider.RoleName = parameters.RoleName
+	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
+
+	return managed.ExternalCreation{
+		ConnectionDetails: managed.ConnectionDetails{},
+	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*v1alpha1.Role)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotRole)
+	}
 
-	// TODO
+	parameters := &v1alpha1.RoleParameters{
+		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
+	}
+
+	observedLdapGroups := cr.Status.AtProvider.LdapGroups
+	desiredLdapGroups := parameters.LdapGroups
+
+	if equalArrays(observedLdapGroups, desiredLdapGroups) {
+		return managed.ExternalUpdate{}, nil
+	}
+
+	groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
+	groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
+	err := c.client.Update(ctx, parameters, groupsToAdd, groupsToRemove)
+
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 
 	return managed.ExternalUpdate{}, nil
+}
+
+func stringArrayDifference(arr1, arr2 []string) []string {
+	set := make(map[string]bool)
+
+	for _, item := range arr2 {
+		set[item] = true
+	}
+
+	var difference []string
+
+	for _, item := range arr1 {
+		if _, found := set[item]; !found {
+			difference = append(difference, item)
+		}
+	}
+
+	return difference
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {

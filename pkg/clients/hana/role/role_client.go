@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -29,7 +28,7 @@ func New(creds map[string][]byte) Client {
 	}
 }
 
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters) (managed.ExternalObservation, error) {
+func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters) (*v1alpha1.RoleObservation, error) {
 
 	observed := &v1alpha1.RoleObservation{
 		RoleName:   "",
@@ -42,10 +41,10 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters
 	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{roleName}}, &observed.RoleName)
 
 	if xsql.IsNoRows(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
+		return observed, nil
 	}
 	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectRole)
+		return observed, errors.Wrap(err, errSelectRole)
 	}
 
 	queryLdapGroups := "SELECT ROLE_NAME, LDAP_GROUP_NAME FROM SYS.ROLE_LDAP_GROUPS WHERE ROLE_NAME = ?"
@@ -60,20 +59,16 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters
 		}
 	}
 
-	return managed.ExternalObservation{
-		ResourceExists:    true,
-		ResourceUpToDate:  true,
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return observed, nil
 }
 
-func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters) (managed.ExternalCreation, error) {
+func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters) error {
 
 	query := fmt.Sprintf("CREATE ROLE %s", parameters.RoleName)
 
 	if len(parameters.LdapGroups) > 0 {
 		query += " LDAP GROUP"
-		for ldapGroup := range parameters.LdapGroups {
+		for _, ldapGroup := range parameters.LdapGroups {
 			query += fmt.Sprintf(" '%s',", ldapGroup)
 		}
 		query = strings.TrimSuffix(query, ",")
@@ -86,21 +81,45 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters)
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
+		errors.Wrap(err, errCreateRole)
 	}
 
-	return managed.ExternalCreation{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return nil
 }
 
-func (c Client) Update(ctx context.Context, parameters *v1alpha1.RoleParameters) (managed.ExternalUpdate, error) {
+func (c Client) Update(ctx context.Context, parameters *v1alpha1.RoleParameters, args ...any) error {
 
-	// TODO
+	groupsToAdd, ok1 := args[0].([]string)
+	groupsToRemove, ok2 := args[1].([]string)
+	if !ok1 || !ok2 {
+		return errors.New("incorrect argument types for Update")
+	}
 
-	return managed.ExternalUpdate{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	if len(groupsToAdd) > 0 {
+		query := fmt.Sprintf("ALTER ROLE %s ADD LDAP GROUP", parameters.RoleName)
+		for _, ldapGroup := range groupsToAdd {
+			query += fmt.Sprintf(" '%s',", ldapGroup)
+		}
+		query = strings.TrimSuffix(query, ",")
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.New("failed to add ldap groups")
+		}
+	}
+
+	if len(groupsToRemove) > 0 {
+		query := fmt.Sprintf("ALTER ROLE %s DROP LDAP GROUP", parameters.RoleName)
+		for _, ldapGroup := range groupsToRemove {
+			query += fmt.Sprintf(" '%s',", ldapGroup)
+		}
+		query = strings.TrimSuffix(query, ",")
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.New("failed to remove ldap groups")
+		}
+	}
+
+	return nil
 }
 
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.RoleParameters) error {
