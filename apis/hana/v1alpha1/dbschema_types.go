@@ -27,14 +27,16 @@ import (
 
 // DbSchemaParameters are the configurable fields of a DbSchema.
 type DbSchemaParameters struct {
-	Name  string `json:"name"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	SchemaName string `json:"schemaName"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Owner string `json:"owner,omitempty"`
 }
 
 // DbSchemaObservation are the observable fields of a DbSchema.
 type DbSchemaObservation struct {
-	Name  string `json:"name,omitempty"`
-	Owner string `json:"owner,omitempty"`
+	SchemaName string `json:"schemaName,omitempty"`
+	Owner      string `json:"owner,omitempty"`
 }
 
 // A DbSchemaSpec defines the desired state of a DbSchema.

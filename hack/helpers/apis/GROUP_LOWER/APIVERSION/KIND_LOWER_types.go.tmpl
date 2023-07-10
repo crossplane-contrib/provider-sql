@@ -75,7 +75,7 @@ type {{ .Env.KIND }}List struct {
 
 // {{ .Env.KIND }} type metadata.
 var (
-	{{ .Env.KIND }}Kind             = reflect.TypeOf({{ .Env.KIND }}{}).Name()
+	{{ .Env.KIND }}Kind             = reflect.TypeOf({{ .Env.KIND }}{}).SchemaName()
 	{{ .Env.KIND }}GroupKind        = schema.GroupKind{Group: Group, Kind: {{ .Env.KIND }}Kind}.String()
 	{{ .Env.KIND }}KindAPIVersion   = {{ .Env.KIND }}Kind + "." + SchemeGroupVersion.String()
 	{{ .Env.KIND }}GroupVersionKind = SchemeGroupVersion.WithKind({{ .Env.KIND }}Kind)

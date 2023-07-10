@@ -64,12 +64,14 @@ spec:
               forProvider:
                 description: DbSchemaParameters are the configurable fields of a DbSchema.
                 properties:
-                  name:
-                    type: string
                   owner:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
+                    type: string
+                  schemaName:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                 required:
-                - name
+                - schemaName
                 type: object
               providerConfigRef:
                 default:
@@ -248,9 +250,9 @@ spec:
               atProvider:
                 description: DbSchemaObservation are the observable fields of a DbSchema.
                 properties:
-                  name:
-                    type: string
                   owner:
+                    type: string
+                  schemaName:
                     type: string
                 type: object
               conditions:

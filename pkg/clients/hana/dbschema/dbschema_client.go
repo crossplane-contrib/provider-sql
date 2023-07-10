@@ -3,8 +3,6 @@ package dbschema
 import (
 	"context"
 	"fmt"
-	"strings"
-
 	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -31,15 +29,13 @@ func New(creds map[string][]byte) Client {
 func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (*v1alpha1.DbSchemaObservation, error) {
 
 	observed := &v1alpha1.DbSchemaObservation{
-		Name:  "",
-		Owner: "",
+		SchemaName: "",
+		Owner:      "",
 	}
-
-	schemaName := strings.ToUpper(parameters.Name)
 
 	query := "SELECT SCHEMA_NAME, SCHEMA_OWNER FROM SYS.SCHEMAS WHERE SCHEMA_NAME = ?"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{schemaName}}, &observed.Name, &observed.Owner)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{parameters.SchemaName}}, &observed.SchemaName, &observed.Owner)
 	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
@@ -52,7 +48,7 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParame
 
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 
-	query := fmt.Sprintf("CREATE SCHEMA %s", parameters.Name)
+	query := fmt.Sprintf("CREATE SCHEMA %s", parameters.SchemaName)
 
 	if parameters.Owner != "" {
 		query += fmt.Sprintf(" OWNED BY %s", parameters.Owner)
@@ -76,7 +72,7 @@ func (c Client) Update(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error {
 
-	query := fmt.Sprintf("DROP SCHEMA %s", parameters.Name)
+	query := fmt.Sprintf("DROP SCHEMA %s", parameters.SchemaName)
 
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
