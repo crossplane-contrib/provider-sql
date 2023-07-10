@@ -18,6 +18,7 @@ package dbschema
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -124,16 +125,25 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.DbSchemaParameters{
-		Name: cr.Spec.ForProvider.Name,
+		Name: strings.ToUpper(cr.Spec.ForProvider.Name),
 	}
 
-	extObservation, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Observe(ctx, parameters)
 
-	if err == nil {
-		cr.SetConditions(xpv1.Available())
+	if err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
-	return extObservation, err
+	if observed.Name != parameters.Name {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
+	cr.SetConditions(xpv1.Available())
+
+	return managed.ExternalObservation{
+		ResourceExists:   true,
+		ResourceUpToDate: true,
+	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -149,9 +159,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	cr.SetConditions(xpv1.Creating())
 
-	extCreation, err := c.client.Create(ctx, parameters)
+	err := c.client.Create(ctx, parameters)
 
-	return extCreation, err
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+
+	return managed.ExternalCreation{
+		ConnectionDetails: managed.ConnectionDetails{},
+	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {

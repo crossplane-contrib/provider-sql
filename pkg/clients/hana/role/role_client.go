@@ -62,7 +62,7 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters
 	return observed, nil
 }
 
-func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters) error {
+func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE ROLE %s", parameters.RoleName)
 

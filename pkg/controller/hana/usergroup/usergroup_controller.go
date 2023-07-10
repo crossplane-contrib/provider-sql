@@ -18,7 +18,7 @@ package usergroup
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
@@ -129,17 +129,25 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.UsergroupParameters{
-		UsergroupName: cr.Spec.ForProvider.UsergroupName,
-		Parameters:    make(map[string]string),
+		UsergroupName: strings.ToUpper(cr.Spec.ForProvider.UsergroupName),
 	}
 
-	extObservation, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Observe(ctx, parameters)
 
-	if err == nil {
-		cr.SetConditions(xpv1.Available())
+	if err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
-	return extObservation, err
+	if observed.UsergroupName != parameters.UsergroupName {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
+	cr.SetConditions(xpv1.Available())
+
+	return managed.ExternalObservation{
+		ResourceExists:   true,
+		ResourceUpToDate: true,
+	}, nil
 
 }
 
@@ -149,7 +157,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotUsergroup)
 	}
 
-	fmt.Printf("Creating: %+v", cr)
 	cr.SetConditions(xpv1.Creating())
 
 	parameters := &v1alpha1.UsergroupParameters{
@@ -162,9 +169,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	cr.SetConditions(xpv1.Creating())
 
-	extCreation, err := c.client.Create(ctx, parameters)
+	err := c.client.Create(ctx, parameters)
 
-	return extCreation, err
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+
+	return managed.ExternalCreation{
+		ConnectionDetails: managed.ConnectionDetails{},
+	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {

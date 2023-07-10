@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -29,7 +28,7 @@ func New(creds map[string][]byte) Client {
 	}
 }
 
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (managed.ExternalObservation, error) {
+func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (*v1alpha1.DbSchemaObservation, error) {
 
 	observed := &v1alpha1.DbSchemaObservation{
 		Name:  "",
@@ -42,20 +41,16 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParame
 
 	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{schemaName}}, &observed.Name, &observed.Owner)
 	if xsql.IsNoRows(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
+		return observed, nil
 	}
 	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
+		return observed, errors.Wrap(err, errSelectSchema)
 	}
 
-	return managed.ExternalObservation{
-		ResourceExists:    true,
-		ResourceUpToDate:  true,
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return observed, nil
 }
 
-func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (managed.ExternalCreation, error) {
+func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE SCHEMA %s", parameters.Name)
 
@@ -66,21 +61,17 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
+		return errors.Wrap(err, errCreateSchema)
 	}
 
-	return managed.ExternalCreation{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return nil
 }
 
-func (c Client) Update(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (managed.ExternalUpdate, error) {
+func (c Client) Update(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 
 	// TODO
 
-	return managed.ExternalUpdate{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return nil
 }
 
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error {

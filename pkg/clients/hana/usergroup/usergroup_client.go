@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -29,18 +28,24 @@ func New(creds map[string][]byte) Client {
 	}
 }
 
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (managed.ExternalObservation, error) {
+func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (*v1alpha1.UsergroupObservation, error) {
+
+	observed := &v1alpha1.UsergroupObservation{
+		UsergroupName:    "",
+		DisableUserAdmin: false,
+		Parameters:       make(map[string]string),
+	}
 
 	usergroupName := strings.ToUpper(parameters.UsergroupName)
 
 	query := "SELECT USERGROUP_NAME, IS_USER_ADMIN_ENABLED FROM SYS.USERGROUPS WHERE USERGROUP_NAME = ?"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{usergroupName}}, &parameters.UsergroupName, &parameters.DisableUserAdmin)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{usergroupName}}, &observed.UsergroupName, &observed.DisableUserAdmin)
 	if xsql.IsNoRows(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
+		return observed, nil
 	}
 	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUsergroup)
+		return observed, errors.Wrap(err, errSelectUsergroup)
 	}
 
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
@@ -51,18 +56,14 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 		var name, parameter, value string
 		rowErr := rows.Scan(&name, &parameter, &value)
 		if rowErr == nil {
-			parameters.Parameters[parameter] = value
+			observed.Parameters[parameter] = value
 		}
 	}
 
-	return managed.ExternalObservation{
-		ResourceExists:    true,
-		ResourceUpToDate:  true,
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return observed, nil
 }
 
-func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (managed.ExternalCreation, error) {
+func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE USERGROUP %s", parameters.UsergroupName)
 
@@ -89,21 +90,17 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParame
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUsergroup)
+		return errors.Wrap(err, errCreateUsergroup)
 	}
 
-	return managed.ExternalCreation{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return nil
 }
 
-func (c Client) Update(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (managed.ExternalUpdate, error) {
+func (c Client) Update(ctx context.Context, parameters *v1alpha1.UsergroupParameters, args ...any) error {
 
 	// TODO
 
-	return managed.ExternalUpdate{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return nil
 }
 
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.UsergroupParameters) error {

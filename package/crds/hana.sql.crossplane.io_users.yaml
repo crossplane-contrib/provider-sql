@@ -64,11 +64,6 @@ spec:
               forProvider:
                 description: UserParameters are the configurable fields of a User.
                 properties:
-                  LdapGroupAuthorization:
-                    enum:
-                    - LOCAL
-                    - LDAP
-                    type: string
                   authentication:
                     properties:
                       password:
@@ -93,10 +88,13 @@ spec:
                             - name
                             - namespace
                             type: object
-                        required:
-                        - passwordSecretRef
                         type: object
                     type: object
+                  ldapGroupAuthorization:
+                    enum:
+                    - LOCAL
+                    - LDAP
+                    type: string
                   parameters:
                     additionalProperties:
                       type: string
@@ -296,8 +294,55 @@ spec:
               atProvider:
                 description: UserObservation are the observable fields of a User.
                 properties:
-                  observableField:
+                  authentication:
+                    properties:
+                      password:
+                        properties:
+                          forceFirstPasswordChange:
+                            type: boolean
+                          passwordSecretRef:
+                            description: A SecretKeySelector is a reference to a secret
+                              key in an arbitrary namespace.
+                            properties:
+                              key:
+                                description: The key to select.
+                                type: string
+                              name:
+                                description: Name of the secret.
+                                type: string
+                              namespace:
+                                description: Namespace of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            - namespace
+                            type: object
+                        type: object
+                    type: object
+                  ldapGroupAuthorization:
                     type: string
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  restrictedUser:
+                    type: boolean
+                  usergroup:
+                    type: string
+                  username:
+                    type: string
+                  validity:
+                    properties:
+                      from:
+                        type: string
+                      until:
+                        type: string
+                    required:
+                    - until
+                    type: object
+                required:
+                - username
                 type: object
               conditions:
                 description: Conditions of the resource.

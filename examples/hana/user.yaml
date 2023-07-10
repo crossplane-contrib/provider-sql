@@ -20,4 +20,4 @@ spec:
       EMAIL ADDRESS: 'exampleuser@example.com'
       STATEMENT MEMORY LIMIT: '0'
       STATEMENT THREAD LIMIT: '0'
-    LdapGroupAuthorization: LDAP
+    ldapGroupAuthorization: LDAP

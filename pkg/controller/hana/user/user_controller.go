@@ -18,6 +18,7 @@ package user
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -125,16 +126,25 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.UserParameters{
-		Username: cr.Spec.ForProvider.Username,
+		Username: strings.ToUpper(cr.Spec.ForProvider.Username),
 	}
 
-	extObservation, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Observe(ctx, parameters)
 
-	if err == nil {
-		cr.SetConditions(xpv1.Available())
+	if err != nil {
+		return managed.ExternalObservation{}, err
 	}
 
-	return extObservation, err
+	if observed.Username != parameters.Username {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
+	cr.SetConditions(xpv1.Available())
+
+	return managed.ExternalObservation{
+		ResourceExists:   true,
+		ResourceUpToDate: true,
+	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -142,6 +152,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
+
+	cr.SetConditions(xpv1.Creating())
 
 	parameters := &v1alpha1.UserParameters{
 		Username:       cr.Spec.ForProvider.Username,
@@ -161,17 +173,21 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		LdapGroupAuthorization: cr.Spec.ForProvider.LdapGroupAuthorization,
 	}
 
-	cr.SetConditions(xpv1.Creating())
-
 	passwrd, pasErr := c.getPassword(ctx, parameters.Authentication.Password.PasswordSecretRef)
 
 	if pasErr != nil {
 		return managed.ExternalCreation{}, pasErr
 	}
 
-	extCreation, err := c.client.Create(ctx, parameters, passwrd)
+	err := c.client.Create(ctx, parameters, passwrd)
 
-	return extCreation, err
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+
+	return managed.ExternalCreation{
+		ConnectionDetails: managed.ConnectionDetails{},
+	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {

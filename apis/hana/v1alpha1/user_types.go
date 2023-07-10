@@ -30,8 +30,8 @@ type Authentication struct {
 }
 
 type Password struct {
-	PasswordSecretRef        *xpv1.SecretKeySelector `json:"passwordSecretRef"`
-	ForceFirstPasswordChange bool                    `json:"forceFirstPasswordChange,omitempty" default:"false"`
+	PasswordSecretRef        *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	ForceFirstPasswordChange bool                    `json:"forceFirstPasswordChange,omitempty"`
 }
 
 type Validity struct {
@@ -42,18 +42,24 @@ type Validity struct {
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
 	Username       string            `json:"username"`
-	RestrictedUser bool              `json:"restrictedUser,omitempty" default:"false"`
+	RestrictedUser bool              `json:"restrictedUser,omitempty"`
 	Authentication Authentication    `json:"authentication,omitempty"`
 	Validity       Validity          `json:"validity,omitempty"`
 	Parameters     map[string]string `json:"parameters,omitempty"`
 	Usergroup      string            `json:"usergroup,omitempty"`
 	// +kubebuilder:validation:Enum=LOCAL;LDAP
-	LdapGroupAuthorization string `json:"LdapGroupAuthorization,omitempty"`
+	LdapGroupAuthorization string `json:"ldapGroupAuthorization,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.
 type UserObservation struct {
-	ObservableField string `json:"observableField,omitempty"`
+	Username               string            `json:"username"`
+	RestrictedUser         bool              `json:"restrictedUser,omitempty"`
+	Authentication         Authentication    `json:"authentication,omitempty"`
+	Validity               Validity          `json:"validity,omitempty"`
+	Parameters             map[string]string `json:"parameters,omitempty"`
+	Usergroup              string            `json:"usergroup,omitempty"`
+	LdapGroupAuthorization string            `json:"ldapGroupAuthorization,omitempty"`
 }
 
 // A UserSpec defines the desired state of a User.

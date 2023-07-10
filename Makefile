@@ -94,6 +94,16 @@ dev-clean: $(KIND) $(KUBECTL)
 	@$(INFO) Deleting kind cluster
 	@$(KIND) delete cluster --name=$(PROJECT_NAME)-dev
 
+dev-init: $(KIND) $(KUBECTL)
+	@$(INFO) Applying hana examples
+	@$(KUBECTL) apply -f examples/hana/secret.yaml
+	@$(KUBECTL) apply -f examples/hana/config.yaml
+	@$(KUBECTL) apply -f examples/hana/dbschema.yaml
+	@$(KUBECTL) apply -f examples/hana/user_secret.yaml
+	@$(KUBECTL) apply -f examples/hana/user.yaml
+	@$(KUBECTL) apply -f examples/hana/usergroup.yaml
+	@$(KUBECTL) apply -f examples/hana/role.yaml
+
 .PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean dev-debug
 
 # Install gomplate
