@@ -129,7 +129,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.UsergroupParameters{
-		UsergroupName: cr.Spec.ForProvider.UsergroupName,
+		UsergroupName:    cr.Spec.ForProvider.UsergroupName,
+		DisableUserAdmin: cr.Spec.ForProvider.DisableUserAdmin,
+		Parameters:       cr.Spec.ForProvider.Parameters,
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -142,13 +144,39 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
+	cr.Status.AtProvider.UsergroupName = observed.UsergroupName
+	cr.Status.AtProvider.DisableUserAdmin = observed.DisableUserAdmin
+	cr.Status.AtProvider.Parameters = observed.Parameters
+
 	cr.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: true,
+		ResourceUpToDate: upToDate(observed, parameters),
 	}, nil
 
+}
+
+func upToDate(observed *v1alpha1.UsergroupObservation, desired *v1alpha1.UsergroupParameters) bool {
+	if observed.UsergroupName != desired.UsergroupName {
+		return false
+	}
+	if observed.DisableUserAdmin != desired.DisableUserAdmin {
+		return false
+	}
+	if !parametersConfigured(observed.Parameters, desired.Parameters) {
+		return false
+	}
+	return true
+}
+
+func parametersConfigured(observed map[string]string, desired map[string]string) bool {
+	for key, value := range desired {
+		if observed[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -167,13 +195,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		EnableParameterSet: cr.Spec.ForProvider.EnableParameterSet,
 	}
 
-	cr.SetConditions(xpv1.Creating())
-
 	err := c.client.Create(ctx, parameters)
 
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
+
+	cr.Status.AtProvider.UsergroupName = parameters.UsergroupName
+	cr.Status.AtProvider.DisableUserAdmin = true //This is a weird behavior
+	cr.Status.AtProvider.Parameters = parameters.Parameters
 
 	return managed.ExternalCreation{
 		ConnectionDetails: managed.ConnectionDetails{},
@@ -181,10 +211,46 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*v1alpha1.Usergroup)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotUsergroup)
+	}
 
-	// TODO
+	parameters := &v1alpha1.UsergroupParameters{
+		UsergroupName:    cr.Spec.ForProvider.UsergroupName,
+		DisableUserAdmin: cr.Spec.ForProvider.DisableUserAdmin,
+		Parameters:       cr.Spec.ForProvider.Parameters,
+	}
+
+	observedParameters := cr.Status.AtProvider.Parameters
+	observedDisableUserAdmin := cr.Status.AtProvider.DisableUserAdmin
+	parametersToUpdate := changedParameters(observedParameters, parameters.Parameters)
+
+	err := c.client.Update(ctx, parameters, observedDisableUserAdmin, parametersToUpdate)
+
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	cr.Status.AtProvider.DisableUserAdmin = parameters.DisableUserAdmin
+	cr.Status.AtProvider.Parameters = parameters.Parameters
 
 	return managed.ExternalUpdate{}, nil
+}
+
+func changedParameters(observed map[string]string, desired map[string]string) map[string]string {
+	changed := make(map[string]string)
+
+	for key, value := range desired {
+		if observed[key] != value {
+			changed[key] = value
+		}
+	}
+
+	if len(changed) == 0 {
+		return nil
+	}
+	return changed
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {

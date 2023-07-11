@@ -15,6 +15,7 @@ import (
 const (
 	errSelectUsergroup = "cannot select usergroup"
 	errCreateUsergroup = "cannot create usergroup"
+	errUpdateUsergroup = "cannot update usergroup"
 	errDropUsergroup   = "cannot drop usergroup"
 )
 
@@ -36,14 +37,20 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 		Parameters:       make(map[string]string),
 	}
 
+	var disableUserAdminString string
+
 	query := "SELECT USERGROUP_NAME, IS_USER_ADMIN_ENABLED FROM SYS.USERGROUPS WHERE USERGROUP_NAME = ?"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{parameters.UsergroupName}}, &observed.UsergroupName, &observed.DisableUserAdmin)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{parameters.UsergroupName}}, &observed.UsergroupName, &disableUserAdminString)
 	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
 	if err != nil {
 		return observed, errors.Wrap(err, errSelectUsergroup)
+	}
+
+	if disableUserAdminString == "FALSE" {
+		observed.DisableUserAdmin = true
 	}
 
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
@@ -96,7 +103,38 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParame
 
 func (c Client) Update(ctx context.Context, parameters *v1alpha1.UsergroupParameters, args ...any) error {
 
-	// TODO
+	disableUserAdmin, ok1 := args[0].(bool)
+	changedParameters, ok2 := args[1].(map[string]string)
+
+	if !ok1 || !ok2 {
+		return errors.New("incorrect argument types for Update")
+	}
+
+	if disableUserAdmin != parameters.DisableUserAdmin {
+		query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)
+		if parameters.DisableUserAdmin {
+			query += " DISABLE USER ADMIN"
+		} else {
+			query += " ENABLE USER ADMIN"
+		}
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.Wrap(err, errUpdateUsergroup)
+		}
+	}
+
+	if changedParameters != nil {
+		query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)
+		query += " SET PARAMETER"
+		for key, value := range changedParameters {
+			query += fmt.Sprintf(" '%s' = '%s',", key, value)
+		}
+		query = strings.TrimSuffix(query, ",")
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.Wrap(err, errUpdateUsergroup)
+		}
+	}
 
 	return nil
 }

@@ -5,7 +5,8 @@ metadata:
 spec:
   forProvider:
     usergroupName: EXAMPLE_USERGROUP
-    parameters:
-      password_layout: 'A1a!'
-      minimal_password_length: '16'
-    enableParameterSet: password policy
+    disableUserAdmin: true
+#    parameters:
+#      password_layout: 'A1a'
+#      minimal_password_length: '16'
+#    enableParameterSet: password policy
