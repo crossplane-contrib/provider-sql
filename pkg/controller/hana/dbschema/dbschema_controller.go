@@ -125,7 +125,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.DbSchemaParameters{
-		Name: strings.ToUpper(cr.Spec.ForProvider.Name),
+		SchemaName: strings.ToUpper(cr.Spec.ForProvider.SchemaName),
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -134,7 +134,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, err
 	}
 
-	if observed.Name != parameters.Name {
+	if observed.SchemaName != parameters.SchemaName {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
@@ -153,8 +153,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	parameters := &v1alpha1.DbSchemaParameters{
-		Name:  cr.Spec.ForProvider.Name,
-		Owner: cr.Spec.ForProvider.Owner,
+		SchemaName: cr.Spec.ForProvider.SchemaName,
+		Owner:      cr.Spec.ForProvider.Owner,
 	}
 
 	cr.SetConditions(xpv1.Creating())
@@ -184,7 +184,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	parameters := &v1alpha1.DbSchemaParameters{
-		Name: cr.Spec.ForProvider.Name,
+		SchemaName: cr.Spec.ForProvider.SchemaName,
 	}
 
 	cr.SetConditions(xpv1.Deleting())
