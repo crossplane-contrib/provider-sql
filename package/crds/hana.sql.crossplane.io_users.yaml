@@ -102,14 +102,18 @@ spec:
                   restrictedUser:
                     type: boolean
                   usergroup:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                   username:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                   validity:
                     properties:
                       from:
+                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
                         type: string
                       until:
+                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
                         type: string
                     required:
                     - until
@@ -320,6 +324,8 @@ spec:
                             type: object
                         type: object
                     type: object
+                  last-password-change-time:
+                    type: string
                   ldapGroupAuthorization:
                     type: string
                   parameters:
@@ -335,8 +341,10 @@ spec:
                   validity:
                     properties:
                       from:
+                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
                         type: string
                       until:
+                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
                         type: string
                     required:
                     - until

@@ -4,8 +4,9 @@ metadata:
   name: exampleuser
 spec:
   forProvider:
-    username: example_user
-    usergroup: default
+    username: EXAMPLE_USER
+    usergroup: DEFAULT
+    restrictedUser: false
     authentication:
       password:
         passwordSecretRef:
@@ -13,6 +14,8 @@ spec:
           name: example-user-password
           namespace: default
         forceFirstPasswordChange: false
+    validity:
+      until: 2023-07-30 17:00:00
     parameters:
       CLIENT: "Client"
       LOCALE: 'DE'

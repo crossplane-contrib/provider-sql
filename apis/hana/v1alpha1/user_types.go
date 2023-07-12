@@ -35,18 +35,22 @@ type Password struct {
 }
 
 type Validity struct {
-	From  string `json:"from,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`
+	From string `json:"from,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`
 	Until string `json:"until"`
 }
 
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Username       string            `json:"username"`
 	RestrictedUser bool              `json:"restrictedUser,omitempty"`
 	Authentication Authentication    `json:"authentication,omitempty"`
 	Validity       Validity          `json:"validity,omitempty"`
 	Parameters     map[string]string `json:"parameters,omitempty"`
-	Usergroup      string            `json:"usergroup,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	Usergroup string `json:"usergroup,omitempty"`
 	// +kubebuilder:validation:Enum=LOCAL;LDAP
 	LdapGroupAuthorization string `json:"ldapGroupAuthorization,omitempty"`
 }
@@ -56,6 +60,7 @@ type UserObservation struct {
 	Username               string            `json:"username"`
 	RestrictedUser         bool              `json:"restrictedUser,omitempty"`
 	Authentication         Authentication    `json:"authentication,omitempty"`
+	LastPasswordChangeTime string            `json:"last-password-change-time,omitempty"`
 	Validity               Validity          `json:"validity,omitempty"`
 	Parameters             map[string]string `json:"parameters,omitempty"`
 	Usergroup              string            `json:"usergroup,omitempty"`

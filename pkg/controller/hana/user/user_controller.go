@@ -18,7 +18,6 @@ package user
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -126,7 +125,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.UserParameters{
-		Username: strings.ToUpper(cr.Spec.ForProvider.Username),
+		Username: cr.Spec.ForProvider.Username,
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
