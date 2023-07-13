@@ -125,7 +125,21 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	parameters := &v1alpha1.UserParameters{
-		Username: cr.Spec.ForProvider.Username,
+		Username:       cr.Spec.ForProvider.Username,
+		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
+		Authentication: apisv1alpha1.Authentication{
+			Password: apisv1alpha1.Password{
+				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
+				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
+			},
+		},
+		Validity: apisv1alpha1.Validity{
+			From:  cr.Spec.ForProvider.Validity.From,
+			Until: cr.Spec.ForProvider.Validity.Until,
+		},
+		Parameters:             cr.Spec.ForProvider.Parameters,
+		Usergroup:              cr.Spec.ForProvider.Usergroup,
+		LdapGroupAuthorization: cr.Spec.ForProvider.LdapGroupAuthorization,
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -138,12 +152,77 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
+	cr.Status.AtProvider.Username = observed.Username
+	//	cr.Status.AtProvider.RestrictedUser = observed.RestrictedUser
+	cr.Status.AtProvider.LastPasswordChangeTime = observed.LastPasswordChangeTime
+	cr.Status.AtProvider.Validity.From = observed.Validity.From
+	cr.Status.AtProvider.Validity.Until = observed.Validity.Until
+	cr.Status.AtProvider.Parameters = observed.Parameters
+	cr.Status.AtProvider.Usergroup = observed.Usergroup
+
 	cr.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: true,
+		ResourceUpToDate: upToDate(observed, parameters),
 	}, nil
+}
+
+func upToDate(observed *v1alpha1.UserObservation, desired *v1alpha1.UserParameters) bool {
+	if observed.Username != desired.Username {
+		return false
+	}
+	//if passwordChanged(observed.PasswordSetTime, observed.LastPasswordChangeTime) {
+	//	return false
+	//}
+	if observed.Validity.From != desired.Validity.From {
+		return false
+	}
+	if observed.Validity.Until != desired.Validity.Until {
+		return false
+	}
+	if !equalParameterMap(observed.Parameters, desired.Parameters) {
+		return false
+	}
+	if observed.Usergroup != desired.Usergroup {
+		return false
+	}
+	//if observed.LdapGroupAuthorization != desired.LdapGroupAuthorization {
+	//	return false
+	//}
+	return true
+}
+
+func equalParameterMap(map1, map2 map[string]string) bool {
+	if len(map1) != len(map2) {
+		return false
+	}
+	for key, value1 := range map1 {
+		value2, ok := map2[key]
+		if !ok || value1 != value2 {
+			return false
+		}
+	}
+	return true
+}
+
+func passwordChanged(set, changed string) bool {
+	setTime, err1 := time.Parse(time.RFC3339, set)
+	changedTime, err2 := time.Parse(time.RFC3339, changed)
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	if changedTime.After(setTime) {
+		return true
+	}
+	return false
+}
+
+func compareLdapGroupAuth(observed, desired string) bool {
+	if desired == "" && observed == "LOCAL" {
+		return true
+	}
+	return false
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
@@ -184,16 +263,125 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
+	cr.Status.AtProvider.Username = parameters.Username
+	cr.Status.AtProvider.RestrictedUser = parameters.RestrictedUser
+	// cr.Status.AtProvider.PasswordSetTime = time.Now().Add(2 * time.Second).Format("2006-01-02 15:04:05")
+	cr.Status.AtProvider.Validity.From = parameters.Validity.From
+	cr.Status.AtProvider.Validity.Until = parameters.Validity.Until
+	cr.Status.AtProvider.Parameters = parameters.Parameters
+	cr.Status.AtProvider.Usergroup = parameters.Usergroup
+	cr.Status.AtProvider.LdapGroupAuthorization = parameters.LdapGroupAuthorization
+
 	return managed.ExternalCreation{
 		ConnectionDetails: managed.ConnectionDetails{},
 	}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	cr, ok := mg.(*v1alpha1.User)
+	if !ok {
+		return managed.ExternalUpdate{}, errors.New(errNotUser)
+	}
 
-	// TODO
+	desired := &v1alpha1.UserParameters{
+		Username: cr.Spec.ForProvider.Username,
+		Authentication: apisv1alpha1.Authentication{
+			Password: apisv1alpha1.Password{
+				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
+				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
+			},
+		},
+		Validity: apisv1alpha1.Validity{
+			From:  cr.Spec.ForProvider.Validity.From,
+			Until: cr.Spec.ForProvider.Validity.Until,
+		},
+		Parameters:             cr.Spec.ForProvider.Parameters,
+		Usergroup:              cr.Spec.ForProvider.Usergroup,
+		LdapGroupAuthorization: cr.Spec.ForProvider.LdapGroupAuthorization,
+	}
+
+	observed := &v1alpha1.UserObservation{
+		LastPasswordChangeTime: cr.Status.AtProvider.LastPasswordChangeTime,
+		PasswordSetTime:        cr.Status.AtProvider.PasswordSetTime,
+		Validity: apisv1alpha1.Validity{
+			From:  cr.Status.AtProvider.Validity.From,
+			Until: cr.Status.AtProvider.Validity.Until,
+		},
+		Parameters:             cr.Status.AtProvider.Parameters,
+		Usergroup:              cr.Status.AtProvider.Usergroup,
+		LdapGroupAuthorization: cr.Status.AtProvider.LdapGroupAuthorization,
+	}
+
+	//if passwordChanged(observed.PasswordSetTime, observed.LastPasswordChangeTime) {
+	//	password, pasErr := c.getPassword(ctx, desired.Authentication.Password.PasswordSecretRef)
+	//
+	//	if pasErr != nil {
+	//		return managed.ExternalUpdate{}, pasErr
+	//	}
+	//	err := c.client.UpdatePassword(ctx, desired.Username, password, desired.Authentication.Password.ForceFirstPasswordChange)
+	//	if err != nil {
+	//		return managed.ExternalUpdate{}, err
+	//	}
+	//}
+	if observed.Validity.From != desired.Validity.From {
+		err := c.client.UpdateValidity(ctx, desired.Username, desired.Validity)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
+	if observed.Validity.Until != desired.Validity.Until {
+		err := c.client.UpdateValidity(ctx, desired.Username, desired.Validity)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
+	if !equalParameterMap(observed.Parameters, desired.Parameters) {
+		parametersToSet := compareMaps(desired.Parameters, observed.Parameters)
+		parametersToClear := compareMaps(observed.Parameters, desired.Parameters)
+
+		err := c.client.UpdateParameters(ctx, desired.Username, parametersToSet, parametersToClear)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
+	if observed.Usergroup != desired.Usergroup {
+		err := c.client.UpdateUsergroup(ctx, desired.Username, desired.Usergroup)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
+	if observed.LdapGroupAuthorization != desired.LdapGroupAuthorization {
+		err := c.client.UpdateLDAPGroupAuth(ctx, desired.Username, desired.LdapGroupAuthorization)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
 
 	return managed.ExternalUpdate{}, nil
+}
+
+func compareMaps(map1, map2 map[string]string) map[string]string {
+	differenceMap := make(map[string]string)
+
+	for key, val := range map1 {
+		if map2[key] != val {
+			differenceMap[key] = val
+		}
+	}
+
+	return differenceMap
+}
+
+func validityDrift(created string, desiredValidity, observedValidity *v1alpha1.Validity) bool {
+	if desiredValidity.From == "" && observedValidity.From != created {
+		return false
+	}
+	if desiredValidity.From != observedValidity.From {
+		return false
+	}
+	if desiredValidity.Until != observedValidity.From {
+		return true
+	}
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {

@@ -154,10 +154,91 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 	return nil
 }
 
-func (c Client) Update(ctx context.Context, parameters *v1alpha1.UserParameters, args ...any) error {
+func (c Client) UpdatePassword(ctx context.Context, username string, password string, forceFirstPasswordChange bool) error {
+	query := fmt.Sprintf("ALTER USER %s PASSWORD \"%s\" %s", username, password, ternary(forceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
+	err := c.db.Exec(ctx, xsql.Query{String: query})
 
-	// TODO
+	if err != nil {
+		return errors.Wrap(err, "cannot update user password")
+	}
+	return nil
+}
 
+func (c Client) UpdateValidity(ctx context.Context, username string, validity v1alpha1.Validity) error {
+	query := fmt.Sprintf("ALTER USER %s VALID", username)
+	if validity.From == "" {
+		query += fmt.Sprintf(" UNTIL '%s'", validity.Until)
+	} else {
+		query += fmt.Sprintf(" FROM '%s' UNTIL '%s'", validity.From, validity.Until)
+	}
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, "cannot update user validity")
+	}
+	return nil
+}
+
+func (c Client) UpdateParameters(ctx context.Context, username string, parametersToSet map[string]string, parametersToClear map[string]string) error {
+	query := fmt.Sprintf("ALTER USER %s", username)
+
+	validParams := []string{"CLIENT", "LOCALE", "TIME ZONE", "EMAIL ADDRESS", "STATEMENT MEMORY LIMIT", "STATEMENT THREAD LIMIT"}
+
+	if len(parametersToSet) > 0 {
+		query += " SET PARAMETER"
+		for key, value := range parametersToSet {
+			key = strings.ToUpper(key)
+			if contains(validParams, key) {
+				query += fmt.Sprintf(" %s = '%s',", key, value)
+			}
+		}
+		query = strings.TrimSuffix(query, ",")
+	}
+
+	if len(parametersToClear) > 0 {
+		query += " CLEAR PARAMETER"
+		for key, _ := range parametersToClear {
+			key = strings.ToUpper(key)
+			if contains(validParams, key) {
+				query += fmt.Sprintf(" %s,", key)
+			}
+		}
+		query = strings.TrimSuffix(query, ",")
+	}
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, "cannot update user parameters")
+	}
+	return nil
+}
+
+func (c Client) UpdateUsergroup(ctx context.Context, username string, usergroup string) error {
+	query := fmt.Sprintf("ALTER USER %s", username)
+
+	if usergroup != "" {
+		query += fmt.Sprintf(" SET USERGROUP '%s'", usergroup)
+	} else {
+		query += fmt.Sprintf(" UNSET USERGROUP")
+	}
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, "cannot update user usergroup")
+	}
+	return nil
+}
+
+func (c Client) UpdateLDAPGroupAuth(ctx context.Context, username string, ldapGroupAuth string) error {
+	query := fmt.Sprintf("ALTER USER %s AUTHORIZATION %s", username, ldapGroupAuth)
+
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+
+	if err != nil {
+		return errors.Wrap(err, "cannot update user ldapGroupAuthentication")
+	}
 	return nil
 }
 

@@ -91,6 +91,7 @@ spec:
                         type: object
                     type: object
                   ldapGroupAuthorization:
+                    default: LOCAL
                     enum:
                     - LOCAL
                     - LDAP
@@ -324,7 +325,9 @@ spec:
                             type: object
                         type: object
                     type: object
-                  last-password-change-time:
+                  createdAt:
+                    type: string
+                  lastPasswordChangeTime:
                     type: string
                   ldapGroupAuthorization:
                     type: string
@@ -332,6 +335,8 @@ spec:
                     additionalProperties:
                       type: string
                     type: object
+                  passwordSetTime:
+                    type: string
                   restrictedUser:
                     type: boolean
                   usergroup:
@@ -350,6 +355,7 @@ spec:
                     - until
                     type: object
                 required:
+                - passwordSetTime
                 - username
                 type: object
               conditions:

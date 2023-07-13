@@ -52,6 +52,7 @@ type UserParameters struct {
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Usergroup string `json:"usergroup,omitempty"`
 	// +kubebuilder:validation:Enum=LOCAL;LDAP
+	// +kubebuilder:default=LOCAL
 	LdapGroupAuthorization string `json:"ldapGroupAuthorization,omitempty"`
 }
 
@@ -60,8 +61,10 @@ type UserObservation struct {
 	Username               string            `json:"username"`
 	RestrictedUser         bool              `json:"restrictedUser,omitempty"`
 	Authentication         Authentication    `json:"authentication,omitempty"`
-	LastPasswordChangeTime string            `json:"last-password-change-time,omitempty"`
+	LastPasswordChangeTime string            `json:"lastPasswordChangeTime,omitempty"`
+	PasswordSetTime        string            `json:"passwordSetTime"`
 	Validity               Validity          `json:"validity,omitempty"`
+	CreatedAt              string            `json:"createdAt,omitempty"`
 	Parameters             map[string]string `json:"parameters,omitempty"`
 	Usergroup              string            `json:"usergroup,omitempty"`
 	LdapGroupAuthorization string            `json:"ldapGroupAuthorization,omitempty"`
