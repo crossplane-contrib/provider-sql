@@ -34,26 +34,15 @@ type Password struct {
 	ForceFirstPasswordChange bool                    `json:"forceFirstPasswordChange,omitempty"`
 }
 
-type Validity struct {
-	// +kubebuilder:validation:Pattern:=`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`
-	From string `json:"from,omitempty"`
-	// +kubebuilder:validation:Pattern:=`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`
-	Until string `json:"until"`
-}
-
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Username       string            `json:"username"`
 	RestrictedUser bool              `json:"restrictedUser,omitempty"`
 	Authentication Authentication    `json:"authentication,omitempty"`
-	Validity       Validity          `json:"validity,omitempty"`
 	Parameters     map[string]string `json:"parameters,omitempty"`
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Usergroup string `json:"usergroup,omitempty"`
-	// +kubebuilder:validation:Enum=LOCAL;LDAP
-	// +kubebuilder:default=LOCAL
-	LdapGroupAuthorization string `json:"ldapGroupAuthorization,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.
@@ -62,12 +51,9 @@ type UserObservation struct {
 	RestrictedUser         bool              `json:"restrictedUser,omitempty"`
 	Authentication         Authentication    `json:"authentication,omitempty"`
 	LastPasswordChangeTime string            `json:"lastPasswordChangeTime,omitempty"`
-	PasswordSetTime        string            `json:"passwordSetTime"`
-	Validity               Validity          `json:"validity,omitempty"`
 	CreatedAt              string            `json:"createdAt,omitempty"`
 	Parameters             map[string]string `json:"parameters,omitempty"`
 	Usergroup              string            `json:"usergroup,omitempty"`
-	LdapGroupAuthorization string            `json:"ldapGroupAuthorization,omitempty"`
 }
 
 // A UserSpec defines the desired state of a User.

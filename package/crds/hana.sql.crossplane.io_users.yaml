@@ -90,12 +90,6 @@ spec:
                             type: object
                         type: object
                     type: object
-                  ldapGroupAuthorization:
-                    default: LOCAL
-                    enum:
-                    - LOCAL
-                    - LDAP
-                    type: string
                   parameters:
                     additionalProperties:
                       type: string
@@ -108,17 +102,6 @@ spec:
                   username:
                     pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
-                  validity:
-                    properties:
-                      from:
-                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
-                        type: string
-                      until:
-                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
-                        type: string
-                    required:
-                    - until
-                    type: object
                 required:
                 - username
                 type: object
@@ -329,33 +312,17 @@ spec:
                     type: string
                   lastPasswordChangeTime:
                     type: string
-                  ldapGroupAuthorization:
-                    type: string
                   parameters:
                     additionalProperties:
                       type: string
                     type: object
-                  passwordSetTime:
-                    type: string
                   restrictedUser:
                     type: boolean
                   usergroup:
                     type: string
                   username:
                     type: string
-                  validity:
-                    properties:
-                      from:
-                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
-                        type: string
-                      until:
-                        pattern: ^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$
-                        type: string
-                    required:
-                    - until
-                    type: object
                 required:
-                - passwordSetTime
                 - username
                 type: object
               conditions:

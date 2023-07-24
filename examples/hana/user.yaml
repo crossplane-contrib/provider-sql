@@ -14,8 +14,6 @@ spec:
           name: example-user-password
           namespace: default
         forceFirstPasswordChange: false
-    validity:
-      until: 2023-07-30 17:00:00
     parameters:
       CLIENT: "Client"
       LOCALE: 'DE'
@@ -23,4 +21,6 @@ spec:
       EMAIL ADDRESS: 'exampleuser@example.com'
       STATEMENT MEMORY LIMIT: '0'
       STATEMENT THREAD LIMIT: '0'
-    #ldapGroupAuthorization: LOCAL
+  writeConnectionSecretToRef:
+    name: example-user-secret
+    namespace: default

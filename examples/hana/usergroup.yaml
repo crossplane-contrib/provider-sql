@@ -6,7 +6,7 @@ spec:
   forProvider:
     usergroupName: EXAMPLE_USERGROUP
     disableUserAdmin: true
-#    parameters:
-#      password_layout: 'A1a'
-#      minimal_password_length: '16'
-#    enableParameterSet: password policy
+    parameters:
+      password_layout: 'A1a!'
+      minimal_password_length: '10'
+    enableParameterSet: password policy
