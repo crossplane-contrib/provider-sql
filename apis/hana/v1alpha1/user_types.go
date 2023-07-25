@@ -45,12 +45,17 @@ type UserParameters struct {
 
 	Authentication Authentication `json:"authentication,omitempty"`
 
+	Privileges []string `json:"privileges,omitempty"`
+
+	Roles []string `json:"roles,omitempty"`
+
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 	Parameters map[string]string `json:"parameters,omitempty"`
 
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
-	Usergroup string `json:"usergroup,omitempty"`
+	// +kubebuilder:default:=DEFAULT
+	Usergroup string `json:"usergroup,omitempty" default:"DEFAULT"`
 }
 
 // UserObservation are the observable fields of a User.
@@ -68,10 +73,15 @@ type UserObservation struct {
 
 	CreatedAt string `json:"createdAt,omitempty"`
 
+	Privileges []string `json:"privileges,omitempty"`
+
+	Roles []string `json:"roles,omitempty"`
+
 	Parameters map[string]string `json:"parameters,omitempty"`
 
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
-	Usergroup string `json:"usergroup,omitempty"`
+	// +kubebuilder:default:=DEFAULT
+	Usergroup string `json:"usergroup,omitempty" default:"DEFAULT"`
 }
 
 // A UserSpec defines the desired state of a User.

@@ -14,6 +14,10 @@ spec:
           name: example-user-password
           namespace: default
         forceFirstPasswordChange: false
+    privileges:
+      - CREATE SCHEMA
+    roles:
+      - EXAMPLE_SCHEMA.EXAMPLE_ROLE
     parameters:
       CLIENT: "Client"
       LOCALE: 'DE'

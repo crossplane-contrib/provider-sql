@@ -18,6 +18,8 @@ package user
 
 import (
 	"context"
+	"k8s.io/utils/strings/slices"
+	"reflect"
 	"time"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -133,8 +135,20 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
 		},
+		Privileges: cr.Spec.ForProvider.Privileges,
+		Roles:      cr.Spec.ForProvider.Roles,
 		Parameters: cr.Spec.ForProvider.Parameters,
 		Usergroup:  cr.Spec.ForProvider.Usergroup,
+	}
+
+	// Append default Privilege
+	if !parameters.RestrictedUser && !slices.Contains(parameters.Privileges, "CREATE ANY") {
+		parameters.Privileges = append(parameters.Privileges, "CREATE ANY")
+	}
+
+	// Append default Role
+	if !parameters.RestrictedUser && !slices.Contains(parameters.Roles, "PUBLIC") {
+		parameters.Roles = append(parameters.Roles, "PUBLIC")
 	}
 
 	observed, err := c.client.Observe(ctx, parameters)
@@ -150,6 +164,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	cr.Status.AtProvider.Username = observed.Username
 	cr.Status.AtProvider.LastPasswordChangeTime = observed.LastPasswordChangeTime
 	cr.Status.AtProvider.CreatedAt = observed.CreatedAt
+	cr.Status.AtProvider.Privileges = observed.Privileges
 	cr.Status.AtProvider.Parameters = observed.Parameters
 	cr.Status.AtProvider.Usergroup = observed.Usergroup
 
@@ -168,10 +183,35 @@ func upToDate(observed *v1alpha1.UserObservation, desired *v1alpha1.UserParamete
 	if !equalParameterMap(observed.Parameters, desired.Parameters) {
 		return false
 	}
+	if !equalArrays(observed.Privileges, desired.Privileges) {
+		return false
+	}
+	if !equalArrays(observed.Roles, desired.Roles) {
+		return false
+	}
 	if observed.Usergroup != desired.Usergroup {
 		return false
 	}
 	return true
+}
+
+func equalArrays(arr1, arr2 []string) bool {
+	if len(arr1) != len(arr2) {
+		return false
+	}
+
+	set1 := arrayToSet(arr1)
+	set2 := arrayToSet(arr2)
+
+	return reflect.DeepEqual(set1, set2)
+}
+
+func arrayToSet(arr []string) map[string]bool {
+	set := make(map[string]bool)
+	for _, item := range arr {
+		set[item] = true
+	}
+	return set
 }
 
 func equalParameterMap(map1, map2 map[string]string) bool {
@@ -204,6 +244,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
 		},
+		Privileges: cr.Spec.ForProvider.Privileges,
+		Roles:      cr.Spec.ForProvider.Roles,
 		Parameters: cr.Spec.ForProvider.Parameters,
 		Usergroup:  cr.Spec.ForProvider.Usergroup,
 	}
@@ -220,8 +262,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, err
 	}
 
+	// Append default Privilege
+	if !parameters.RestrictedUser && !slices.Contains(parameters.Privileges, "CREATE ANY") {
+		parameters.Privileges = append(parameters.Privileges, "CREATE ANY")
+	}
+
+	// Append default Role
+	if !parameters.RestrictedUser && !slices.Contains(parameters.Roles, "PUBLIC") {
+		parameters.Roles = append(parameters.Roles, "PUBLIC")
+	}
+
 	cr.Status.AtProvider.Username = parameters.Username
 	cr.Status.AtProvider.RestrictedUser = parameters.RestrictedUser
+	cr.Status.AtProvider.Privileges = parameters.Privileges
+	cr.Status.AtProvider.Roles = parameters.Roles
 	cr.Status.AtProvider.Parameters = parameters.Parameters
 	cr.Status.AtProvider.Usergroup = parameters.Usergroup
 
@@ -240,27 +294,60 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	desired := &v1alpha1.UserParameters{
-		Username: cr.Spec.ForProvider.Username,
+		Username:       cr.Spec.ForProvider.Username,
+		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
 		Authentication: apisv1alpha1.Authentication{
 			Password: apisv1alpha1.Password{
 				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
 				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
 			},
 		},
+		Privileges: cr.Spec.ForProvider.Privileges,
+		Roles:      cr.Spec.ForProvider.Roles,
 		Parameters: cr.Spec.ForProvider.Parameters,
 		Usergroup:  cr.Spec.ForProvider.Usergroup,
+	}
+
+	// Append default Privilege
+	if !desired.RestrictedUser && !slices.Contains(desired.Privileges, "CREATE ANY") {
+		desired.Privileges = append(desired.Privileges, "CREATE ANY")
+	}
+
+	// Append default Role
+	if !desired.RestrictedUser && !slices.Contains(desired.Roles, "PUBLIC") {
+		desired.Roles = append(desired.Roles, "PUBLIC")
 	}
 
 	observed := &v1alpha1.UserObservation{
 		LastPasswordChangeTime: cr.Status.AtProvider.LastPasswordChangeTime,
 		CreatedAt:              cr.Status.AtProvider.CreatedAt,
 		Parameters:             cr.Status.AtProvider.Parameters,
+		Privileges:             cr.Status.AtProvider.Privileges,
+		Roles:                  cr.Status.AtProvider.Roles,
 		Usergroup:              cr.Status.AtProvider.Usergroup,
 	}
 
 	if observed.CreatedAt != observed.LastPasswordChangeTime {
 		err := errors.New("Password was changed externally")
 		return managed.ExternalUpdate{}, err
+	}
+	if !equalArrays(observed.Privileges, desired.Privileges) {
+		privilegesToGrant := stringArrayDifference(desired.Privileges, observed.Privileges)
+		privilegesToRevoke := stringArrayDifference(observed.Privileges, desired.Privileges)
+		err := c.client.UpdateRolesOrPrivileges(ctx, desired.Username, privilegesToGrant, privilegesToRevoke)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.Privileges = desired.Privileges
+	}
+	if !equalArrays(observed.Roles, desired.Roles) {
+		rolesToGrant := stringArrayDifference(desired.Roles, observed.Roles)
+		rolesToRevoke := stringArrayDifference(observed.Roles, desired.Roles)
+		err := c.client.UpdateRolesOrPrivileges(ctx, desired.Username, rolesToGrant, rolesToRevoke)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.Roles = desired.Roles
 	}
 	if !equalParameterMap(observed.Parameters, desired.Parameters) {
 		parametersToSet := compareMaps(desired.Parameters, observed.Parameters)
@@ -279,6 +366,24 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	return managed.ExternalUpdate{}, nil
+}
+
+func stringArrayDifference(arr1, arr2 []string) []string {
+	set := make(map[string]bool)
+
+	for _, item := range arr2 {
+		set[item] = true
+	}
+
+	var difference []string
+
+	for _, item := range arr1 {
+		if _, found := set[item]; !found {
+			difference = append(difference, item)
+		}
+	}
+
+	return difference
 }
 
 func compareMaps(map1, map2 map[string]string) map[string]string {

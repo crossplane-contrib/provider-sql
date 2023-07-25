@@ -560,6 +560,16 @@ func (in *UserList) DeepCopyObject() runtime.Object {
 func (in *UserObservation) DeepCopyInto(out *UserObservation) {
 	*out = *in
 	in.Authentication.DeepCopyInto(&out.Authentication)
+	if in.Privileges != nil {
+		in, out := &in.Privileges, &out.Privileges
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Roles != nil {
+		in, out := &in.Roles, &out.Roles
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Parameters != nil {
 		in, out := &in.Parameters, &out.Parameters
 		*out = make(map[string]string, len(*in))
@@ -583,6 +593,16 @@ func (in *UserObservation) DeepCopy() *UserObservation {
 func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 	*out = *in
 	in.Authentication.DeepCopyInto(&out.Authentication)
+	if in.Privileges != nil {
+		in, out := &in.Privileges, &out.Privileges
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Roles != nil {
+		in, out := &in.Roles, &out.Roles
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Parameters != nil {
 		in, out := &in.Parameters, &out.Parameters
 		*out = make(map[string]string, len(*in))

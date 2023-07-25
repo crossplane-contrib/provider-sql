@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"github.com/pkg/errors"
 	"strings"
@@ -36,11 +37,11 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		RestrictedUser:         false,
 		LastPasswordChangeTime: "",
 		CreatedAt:              "",
+		Privileges:             nil,
+		Roles:                  nil,
 		Parameters:             make(map[string]string),
 		Usergroup:              "",
 	}
-
-	userName := strings.ToUpper(parameters.Username)
 
 	query := "SELECT USER_NAME, " +
 		"USERGROUP_NAME, " +
@@ -49,20 +50,17 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		"IS_RESTRICTED " +
 		"FROM SYS.USERS " +
 		"WHERE USER_NAME = ?"
-
 	err := c.db.Scan(ctx, xsql.Query{
 		String:     query,
-		Parameters: []interface{}{userName}},
+		Parameters: []interface{}{parameters.Username}},
 		&observed.Username,
 		&observed.Usergroup,
 		&observed.CreatedAt,
 		&observed.LastPasswordChangeTime,
 		&observed.RestrictedUser,
 	)
-
 	observed.CreatedAt = formatTime(observed.CreatedAt)
 	observed.LastPasswordChangeTime = formatTime(observed.LastPasswordChangeTime)
-
 	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
@@ -75,15 +73,55 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		"VALUE " +
 		"FROM SYS.USER_PARAMETERS " +
 		"WHERE USER_NAME = ?"
-
-	rows, err := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.Username}})
-
+	rows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.Username}})
+	if xsql.IsNoRows(err2) {
+		return observed, nil
+	}
 	for rows.Next() {
 		var username, key, value string
 		rowErr := rows.Scan(&username, &key, &value)
 		if rowErr == nil {
 			observed.Parameters[key] = value
 		}
+	}
+	if err2 != nil {
+		return observed, errors.Wrap(err2, errSelectUser)
+	}
+
+	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
+	privRows, err3 := c.db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{parameters.Username}})
+	if xsql.IsNoRows(err3) {
+		return observed, nil
+	}
+	for privRows.Next() {
+		var grantee, granteeType, privilege string
+		rowErr := privRows.Scan(&grantee, &granteeType, &privilege)
+		if rowErr == nil {
+			observed.Privileges = append(observed.Privileges, privilege)
+		}
+	}
+	if err3 != nil {
+		return observed, errors.Wrap(err3, errSelectUser)
+	}
+
+	queryRoles := "SELECT GRANTEE, GRANTEE_TYPE, ROLE_SCHEMA_NAME, ROLE_NAME FROM GRANTED_ROLES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
+	roleRows, err4 := c.db.Query(ctx, xsql.Query{String: queryRoles, Parameters: []interface{}{parameters.Username}})
+	if xsql.IsNoRows(err4) {
+		return observed, nil
+	}
+	for roleRows.Next() {
+		var grantee, granteeType, roleName string
+		var roleSchemaName sql.NullString
+		rowErr := roleRows.Scan(&grantee, &granteeType, &roleSchemaName, &roleName)
+		if rowErr == nil {
+			if roleSchemaName.Valid {
+				roleName = fmt.Sprintf("%s.%s", roleSchemaName.String, roleName)
+			}
+			observed.Roles = append(observed.Roles, roleName)
+		}
+	}
+	if err4 != nil {
+		return observed, errors.Wrap(err4, errSelectUser)
 	}
 
 	return observed, nil
@@ -99,7 +137,7 @@ func formatTime(inTime string) string {
 
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters, args ...any) error {
 
-	query := fmt.Sprintf("CREATE %s USER %s", ternary(parameters.RestrictedUser, "RESTRICTED", ""), parameters.Username)
+	query := fmt.Sprintf("CREATE %sUSER %s", ternary(parameters.RestrictedUser, "RESTRICTED ", ""), parameters.Username)
 
 	password := parameters.Authentication.Password
 	if password.PasswordSecretRef != nil {
@@ -133,6 +171,32 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 		return errors.Wrap(err, errCreateUser)
 	}
 
+	if len(parameters.Privileges) > 0 {
+		queryPrives := "GRANT"
+		for _, privilege := range parameters.Privileges {
+			queryPrives += fmt.Sprintf(" %s,", privilege)
+		}
+		queryPrives = strings.TrimSuffix(queryPrives, ",")
+		queryPrives += fmt.Sprintf(" TO %s", parameters.Username)
+		err2 := c.db.Exec(ctx, xsql.Query{String: queryPrives})
+		if err2 != nil {
+			return errors.Wrap(err2, errCreateUser)
+		}
+	}
+
+	if len(parameters.Roles) > 0 {
+		queryRoles := "GRANT"
+		for _, role := range parameters.Roles {
+			queryRoles += fmt.Sprintf(" %s,", role)
+		}
+		queryRoles = strings.TrimSuffix(queryRoles, ",")
+		queryRoles += fmt.Sprintf(" TO %s", parameters.Username)
+		err3 := c.db.Exec(ctx, xsql.Query{String: queryRoles})
+		if err3 != nil {
+			return errors.Wrap(err3, errCreateUser)
+		}
+	}
+
 	return nil
 }
 
@@ -143,6 +207,37 @@ func (c Client) UpdatePassword(ctx context.Context, username string, password st
 	if err != nil {
 		return errors.Wrap(err, "cannot update user password")
 	}
+	return nil
+}
+
+func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, rolesOrPrivilegesToGrant, RolesOrPrivilegesToRevoke []string) error {
+
+	if len(rolesOrPrivilegesToGrant) > 0 {
+		query := "GRANT"
+		for _, roleOrPrivilege := range rolesOrPrivilegesToGrant {
+			query += fmt.Sprintf(" %s,", roleOrPrivilege)
+		}
+		query = strings.TrimSuffix(query, ",")
+		query += fmt.Sprintf(" TO %s", username)
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.Wrap(err, "failed to grant privileges/roles")
+		}
+	}
+
+	if len(RolesOrPrivilegesToRevoke) > 0 {
+		query := "REVOKE"
+		for _, roleOrPrivilege := range RolesOrPrivilegesToRevoke {
+			query += fmt.Sprintf(" %s,", roleOrPrivilege)
+		}
+		query = strings.TrimSuffix(query, ",")
+		query += fmt.Sprintf(" FROM %s", username)
+		err := c.db.Exec(ctx, xsql.Query{String: query})
+		if err != nil {
+			return errors.Wrap(err, "failed to revoke privileges/roles")
+		}
+	}
+
 	return nil
 }
 

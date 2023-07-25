@@ -94,9 +94,18 @@ spec:
                     additionalProperties:
                       type: string
                     type: object
+                  privileges:
+                    items:
+                      type: string
+                    type: array
                   restrictedUser:
                     type: boolean
+                  roles:
+                    items:
+                      type: string
+                    type: array
                   usergroup:
+                    default: DEFAULT
                     pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                   username:
@@ -316,9 +325,18 @@ spec:
                     additionalProperties:
                       type: string
                     type: object
+                  privileges:
+                    items:
+                      type: string
+                    type: array
                   restrictedUser:
                     type: boolean
+                  roles:
+                    items:
+                      type: string
+                    type: array
                   usergroup:
+                    default: DEFAULT
                     pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                   username:
