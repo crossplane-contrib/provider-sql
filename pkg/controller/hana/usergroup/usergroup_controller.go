@@ -158,9 +158,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 }
 
 func upToDate(observed *v1alpha1.UsergroupObservation, desired *v1alpha1.UsergroupParameters) bool {
-	if observed.UsergroupName != desired.UsergroupName {
-		return false
-	}
 	if observed.DisableUserAdmin != desired.DisableUserAdmin {
 		return false
 	}
@@ -222,18 +219,25 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		Parameters:       cr.Spec.ForProvider.Parameters,
 	}
 
-	observedParameters := cr.Status.AtProvider.Parameters
-	observedDisableUserAdmin := cr.Status.AtProvider.DisableUserAdmin
-	parametersToUpdate := changedParameters(observedParameters, parameters.Parameters)
-
-	err := c.client.Update(ctx, parameters, observedDisableUserAdmin, parametersToUpdate)
-
-	if err != nil {
-		return managed.ExternalUpdate{}, err
+	if cr.Status.AtProvider.DisableUserAdmin != parameters.DisableUserAdmin {
+		err := c.client.UpdateDisableUserAdmin(ctx, parameters)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.DisableUserAdmin = parameters.DisableUserAdmin
 	}
 
-	cr.Status.AtProvider.DisableUserAdmin = parameters.DisableUserAdmin
-	cr.Status.AtProvider.Parameters = parameters.Parameters
+	observedParameters := cr.Status.AtProvider.Parameters
+	desiredParameters := parameters.Parameters
+
+	if !parametersConfigured(observedParameters, desiredParameters) {
+		parametersToUpdate := changedParameters(observedParameters, desiredParameters)
+		err := c.client.UpdateParameters(ctx, parameters, parametersToUpdate)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.Parameters = parameters.Parameters
+	}
 
 	return managed.ExternalUpdate{}, nil
 }

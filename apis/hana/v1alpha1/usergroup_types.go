@@ -28,18 +28,29 @@ import (
 // UsergroupParameters are the configurable fields of a Usergroup.
 type UsergroupParameters struct {
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
-	UsergroupName      string            `json:"usergroupName"`
-	DisableUserAdmin   bool              `json:"disableUserAdmin,omitempty"`
-	NoGrantToCreator   bool              `json:"noGrantToCreator,omitempty"`
-	Parameters         map[string]string `json:"parameters,omitempty"`
-	EnableParameterSet string            `json:"enableParameterSet,omitempty"`
+	UsergroupName string `json:"usergroupName"`
+
+	DisableUserAdmin bool `json:"disableUserAdmin,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	NoGrantToCreator bool `json:"noGrantToCreator,omitempty"`
+
+	Parameters map[string]string `json:"parameters,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	EnableParameterSet string `json:"enableParameterSet,omitempty"`
 }
 
 // UsergroupObservation are the observable fields of a Usergroup.
 type UsergroupObservation struct {
-	UsergroupName    string            `json:"usergroupName"`
-	DisableUserAdmin bool              `json:"disableUserAdmin,omitempty"`
-	Parameters       map[string]string `json:"parameters,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	UsergroupName string `json:"usergroupName"`
+
+	DisableUserAdmin bool `json:"disableUserAdmin,omitempty"`
+
+	Parameters map[string]string `json:"parameters,omitempty"`
 }
 
 // A UsergroupSpec defines the desired state of a Usergroup.

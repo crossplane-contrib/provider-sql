@@ -265,6 +265,7 @@ spec:
                       type: string
                     type: object
                   usergroupName:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                 required:
                 - usergroupName
