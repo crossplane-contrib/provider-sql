@@ -127,6 +127,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	parameters := &v1alpha1.RoleParameters{
 		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		Schema:     strings.ToUpper(cr.Spec.ForProvider.Schema),
+		Privileges: arrayToUpper(cr.Spec.ForProvider.Privileges),
 		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
 	}
 
@@ -141,6 +143,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	cr.Status.AtProvider.RoleName = observed.RoleName
+	cr.Status.AtProvider.Schema = observed.Schema
+	cr.Status.AtProvider.Privileges = observed.Privileges
 	cr.Status.AtProvider.LdapGroups = observed.LdapGroups
 
 	cr.SetConditions(xpv1.Available())
@@ -152,7 +156,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 }
 
 func upToDate(observed *v1alpha1.RoleObservation, desired *v1alpha1.RoleParameters) bool {
-	if observed.RoleName != desired.RoleName {
+	if observed.Schema != desired.Schema {
+		return false
+	}
+	if !equalArrays(observed.Privileges, desired.Privileges) {
 		return false
 	}
 	if !equalArrays(observed.LdapGroups, desired.LdapGroups) {
@@ -198,6 +205,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	parameters := &v1alpha1.RoleParameters{
 		RoleName:         cr.Spec.ForProvider.RoleName,
+		Schema:           cr.Spec.ForProvider.Schema,
+		Privileges:       cr.Spec.ForProvider.Privileges,
 		LdapGroups:       cr.Spec.ForProvider.LdapGroups,
 		NoGrantToCreator: cr.Spec.ForProvider.NoGrantToCreator,
 	}
@@ -209,6 +218,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	cr.Status.AtProvider.RoleName = parameters.RoleName
+	cr.Status.AtProvider.Schema = parameters.Schema
+	cr.Status.AtProvider.Privileges = parameters.Privileges
 	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 
 	return managed.ExternalCreation{
@@ -224,25 +235,36 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	parameters := &v1alpha1.RoleParameters{
 		RoleName:   strings.ToUpper(cr.Spec.ForProvider.RoleName),
+		Schema:     strings.ToUpper(cr.Spec.ForProvider.Schema),
+		Privileges: arrayToUpper(cr.Spec.ForProvider.Privileges),
 		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
 	}
 
 	observedLdapGroups := cr.Status.AtProvider.LdapGroups
 	desiredLdapGroups := parameters.LdapGroups
 
-	if equalArrays(observedLdapGroups, desiredLdapGroups) {
-		return managed.ExternalUpdate{}, nil
+	observedPrivileges := cr.Status.AtProvider.Privileges
+	desiredPrivileges := parameters.Privileges
+
+	if !equalArrays(observedLdapGroups, desiredLdapGroups) {
+		groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
+		groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
+		err := c.client.UpdateLdapGroups(ctx, parameters, groupsToAdd, groupsToRemove)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 	}
 
-	groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
-	groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
-	err := c.client.Update(ctx, parameters, groupsToAdd, groupsToRemove)
-
-	if err != nil {
-		return managed.ExternalUpdate{}, err
+	if !equalArrays(observedPrivileges, desiredPrivileges) {
+		privilegesToAdd := stringArrayDifference(desiredPrivileges, observedPrivileges)
+		privilegesToRemove := stringArrayDifference(observedPrivileges, desiredPrivileges)
+		err := c.client.UpdatePrivileges(ctx, parameters, privilegesToAdd, privilegesToRemove)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		cr.Status.AtProvider.Privileges = parameters.Privileges
 	}
-
-	cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 
 	return managed.ExternalUpdate{}, nil
 }
@@ -273,6 +295,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	parameters := &v1alpha1.RoleParameters{
 		RoleName: cr.Spec.ForProvider.RoleName,
+		Schema:   cr.Spec.ForProvider.Schema,
 	}
 
 	cr.SetConditions(xpv1.Deleting())

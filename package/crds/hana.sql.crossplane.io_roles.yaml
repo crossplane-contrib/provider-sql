@@ -70,10 +70,18 @@ spec:
                     type: array
                   noGrantToCreator:
                     type: boolean
-                  rolename:
+                  privileges:
+                    items:
+                      type: string
+                    type: array
+                  roleName:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
+                    type: string
+                  schema:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                 required:
-                - rolename
+                - roleName
                 type: object
               providerConfigRef:
                 default:
@@ -256,10 +264,18 @@ spec:
                     items:
                       type: string
                     type: array
-                  rolename:
+                  privileges:
+                    items:
+                      type: string
+                    type: array
+                  roleName:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
+                    type: string
+                  schema:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                 required:
-                - rolename
+                - roleName
                 type: object
               conditions:
                 description: Conditions of the resource.

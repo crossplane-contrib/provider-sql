@@ -27,15 +27,36 @@ import (
 
 // RoleParameters are the configurable fields of a Role.
 type RoleParameters struct {
-	RoleName         string   `json:"rolename"`
-	LdapGroups       []string `json:"ldapGroups,omitempty"`
-	NoGrantToCreator bool     `json:"noGrantToCreator,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	RoleName string `json:"roleName"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	Schema string `json:"schema,omitempty"`
+
+	LdapGroups []string `json:"ldapGroups,omitempty"`
+
+	Privileges []string `json:"privileges,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	NoGrantToCreator bool `json:"noGrantToCreator,omitempty"`
 }
 
 // RoleObservation are the observable fields of a Role.
 type RoleObservation struct {
-	RoleName   string   `json:"rolename"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	RoleName string `json:"roleName"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	Schema string `json:"schema,omitempty"`
+
 	LdapGroups []string `json:"ldapGroups,omitempty"`
+
+	Privileges []string `json:"privileges,omitempty"`
 }
 
 // A RoleSpec defines the desired state of a Role.

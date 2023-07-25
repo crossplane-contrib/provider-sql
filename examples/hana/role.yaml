@@ -4,7 +4,12 @@ metadata:
   name: examplerole
 spec:
   forProvider:
-    rolename: example_role
+    roleName: EXAMPLE_ROLE
+    schema: EXAMPLE_SCHEMA
+    privileges:
+      - CREATE SCHEMA
+      - AUDIT READ
+      - BACKUP OPERATOR
     ldapGroups:
       - ldapGroup1
       - ldapGroup2
