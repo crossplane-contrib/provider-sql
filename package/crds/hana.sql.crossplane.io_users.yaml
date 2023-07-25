@@ -319,8 +319,10 @@ spec:
                   restrictedUser:
                     type: boolean
                   usergroup:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                   username:
+                    pattern: ^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$
                     type: string
                 required:
                 - username

@@ -37,23 +37,41 @@ type Password struct {
 // UserParameters are the configurable fields of a User.
 type UserParameters struct {
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
-	Username       string            `json:"username"`
-	RestrictedUser bool              `json:"restrictedUser,omitempty"`
-	Authentication Authentication    `json:"authentication,omitempty"`
-	Parameters     map[string]string `json:"parameters,omitempty"`
+	Username string `json:"username"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	RestrictedUser bool `json:"restrictedUser,omitempty"`
+
+	Authentication Authentication `json:"authentication,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	Parameters map[string]string `json:"parameters,omitempty"`
+
 	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
 	Usergroup string `json:"usergroup,omitempty"`
 }
 
 // UserObservation are the observable fields of a User.
 type UserObservation struct {
-	Username               string            `json:"username"`
-	RestrictedUser         bool              `json:"restrictedUser,omitempty"`
-	Authentication         Authentication    `json:"authentication,omitempty"`
-	LastPasswordChangeTime string            `json:"lastPasswordChangeTime,omitempty"`
-	CreatedAt              string            `json:"createdAt,omitempty"`
-	Parameters             map[string]string `json:"parameters,omitempty"`
-	Usergroup              string            `json:"usergroup,omitempty"`
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	Username string `json:"username"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	RestrictedUser bool `json:"restrictedUser,omitempty"`
+
+	Authentication Authentication `json:"authentication,omitempty"`
+
+	LastPasswordChangeTime string `json:"lastPasswordChangeTime,omitempty"`
+
+	CreatedAt string `json:"createdAt,omitempty"`
+
+	Parameters map[string]string `json:"parameters,omitempty"`
+
+	// +kubebuilder:validation:Pattern:=`^[^",\$\.'\+\-<>|\[\]\{\}\(\)!%*,/:;=\?@\\^~\x60a-z]+$`
+	Usergroup string `json:"usergroup,omitempty"`
 }
 
 // A UserSpec defines the desired state of a User.
