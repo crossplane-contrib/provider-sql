@@ -25,6 +25,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/pointer"
@@ -239,6 +240,41 @@ func TestObserve(t *testing.T) {
 			},
 			want: want{
 				o: managed.ExternalObservation{ResourceExists: false},
+			},
+		},
+		"AllMapsToExpandedPrivileges": {
+			reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						privileges := q.Parameters[3]
+
+						// Return if there's a diff between the expected and actual privileges
+						diff := cmp.Diff(&pq.StringArray{"CREATE", "TEMPORARY", "CONNECT"}, privileges)
+
+						bv := dest[0].(*bool)
+						*bv = diff == ""
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							Role:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
 			},
 		},
 		"ErrSelectGrant": {
