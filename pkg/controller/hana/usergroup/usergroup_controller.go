@@ -18,6 +18,8 @@ package usergroup
 
 import (
 	"context"
+	"time"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -28,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/usergroup"
 
@@ -45,13 +46,6 @@ const (
 	errGetSecret = "cannot get credentials Secret"
 )
 
-// A NoOpService does nothing.
-type NoOpService struct{}
-
-var (
-	newNoOpService = func(_ []byte) (interface{}, error) { return &NoOpService{}, nil }
-)
-
 // Setup adds a controller that reconciles Usergroup managed resources.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	name := managed.ControllerName(v1alpha1.UsergroupGroupKind)
@@ -62,7 +56,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: usergroup.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(time.Second*10),
-		//managed.WithPollInterval(o.PollInterval),
+		// managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -202,7 +196,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	cr.Status.AtProvider.UsergroupName = parameters.UsergroupName
-	cr.Status.AtProvider.DisableUserAdmin = true //This is a weird behavior
+	cr.Status.AtProvider.DisableUserAdmin = true // This is a weird behavior
 	cr.Status.AtProvider.Parameters = parameters.Parameters
 
 	return managed.ExternalCreation{

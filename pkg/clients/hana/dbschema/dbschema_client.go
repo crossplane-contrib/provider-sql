@@ -3,6 +3,7 @@ package dbschema
 import (
 	"context"
 	"fmt"
+
 	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -16,16 +17,19 @@ const (
 	errDropSchema   = "cannot drop schema"
 )
 
+// Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
 }
 
+// New creates a new db client
 func New(creds map[string][]byte) Client {
 	return Client{
 		db: hana.New(creds),
 	}
 }
 
+// Observe checks the state of the schema
 func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (*v1alpha1.DbSchemaObservation, error) {
 
 	observed := &v1alpha1.DbSchemaObservation{
@@ -46,6 +50,7 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParame
 	return observed, nil
 }
 
+// Create a new schema
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE SCHEMA %s", parameters.SchemaName)
@@ -63,13 +68,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 	return nil
 }
 
-func (c Client) Update(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
-
-	// TODO
-
-	return nil
-}
-
+// Delete an existing schema
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error {
 
 	query := fmt.Sprintf("DROP SCHEMA %s", parameters.SchemaName)

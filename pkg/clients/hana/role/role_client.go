@@ -19,16 +19,19 @@ const (
 	errDropRole   = "cannot drop role"
 )
 
+// Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
 }
 
+// New creates a new db client
 func New(creds map[string][]byte) Client {
 	return Client{
 		db: hana.New(creds),
 	}
 }
 
+// Observe checks the state of the role
 func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters) (*v1alpha1.RoleObservation, error) {
 
 	observed := &v1alpha1.RoleObservation{
@@ -49,34 +52,14 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters
 		return observed, errors.Wrap(err1, errSelectRole)
 	}
 
-	queryLdapGroups := "SELECT ROLE_NAME, LDAP_GROUP_NAME FROM SYS.ROLE_LDAP_GROUPS WHERE ROLE_NAME = ?"
-	ldapRows, err2 := c.db.Query(ctx, xsql.Query{String: queryLdapGroups, Parameters: []interface{}{parameters.RoleName}})
-	if xsql.IsNoRows(err2) {
-		return observed, nil
-	}
-	for ldapRows.Next() {
-		var role, ldapGroup string
-		rowErr := ldapRows.Scan(&role, &ldapGroup)
-		if rowErr == nil {
-			observed.LdapGroups = append(observed.LdapGroups, ldapGroup)
-		}
-	}
+	var err2 error
+	observed.LdapGroups, err2 = observeLdapGroups(ctx, c.db, parameters.RoleName)
 	if err2 != nil {
 		return observed, errors.Wrap(err2, errSelectRole)
 	}
 
-	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'ROLE'"
-	privRows, err3 := c.db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{parameters.RoleName}})
-	if xsql.IsNoRows(err3) {
-		return observed, nil
-	}
-	for privRows.Next() {
-		var grantee, granteeType, privilege string
-		rowErr := privRows.Scan(&grantee, &granteeType, &privilege)
-		if rowErr == nil {
-			observed.Privileges = append(observed.Privileges, privilege)
-		}
-	}
+	var err3 error
+	observed.Privileges, err3 = observePrivileges(ctx, c.db, parameters.RoleName)
 	if err3 != nil {
 		return observed, errors.Wrap(err3, errSelectRole)
 	}
@@ -84,6 +67,53 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters
 	return observed, nil
 }
 
+func observeLdapGroups(ctx context.Context, db xsql.DB, roleName string) (ldapGroups []string, errr error) {
+	queryLdapGroups := "SELECT ROLE_NAME, LDAP_GROUP_NAME FROM SYS.ROLE_LDAP_GROUPS WHERE ROLE_NAME = ?"
+	ldapRows, err := db.Query(ctx, xsql.Query{String: queryLdapGroups, Parameters: []interface{}{roleName}})
+	if err != nil {
+		return nil, errors.Wrap(err, errSelectRole)
+	}
+	defer ldapRows.Close() //nolint:errcheck
+	if xsql.IsNoRows(err) {
+		return nil, nil
+	}
+	for ldapRows.Next() {
+		var role, ldapGroup string
+		rowErr := ldapRows.Scan(&role, &ldapGroup)
+		if rowErr == nil {
+			ldapGroups = append(ldapGroups, ldapGroup)
+		}
+	}
+	if err := ldapRows.Err(); err != nil {
+		return nil, errors.Wrap(err, errSelectRole)
+	}
+	return ldapGroups, nil
+}
+
+func observePrivileges(ctx context.Context, db xsql.DB, roleName string) (privileges []string, errr error) {
+	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'ROLE'"
+	privRows, err := db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{roleName}})
+	if err != nil {
+		return nil, errors.Wrap(err, errSelectRole)
+	}
+	defer privRows.Close() //nolint:errcheck
+	if xsql.IsNoRows(err) {
+		return nil, nil
+	}
+	for privRows.Next() {
+		var grantee, granteeType, privilege string
+		rowErr := privRows.Scan(&grantee, &granteeType, &privilege)
+		if rowErr == nil {
+			privileges = append(privileges, privilege)
+		}
+	}
+	if err := privRows.Err(); err != nil {
+		return nil, errors.Wrap(err, errSelectRole)
+	}
+	return privileges, nil
+}
+
+// Create creates a new role in the db
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE ROLE %s", getRoleName(parameters.Schema, parameters.RoleName))
@@ -122,6 +152,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters,
 	return nil
 }
 
+// UpdateLdapGroups modifies the ldap groups of an existing role in the db
 func (c Client) UpdateLdapGroups(ctx context.Context, parameters *v1alpha1.RoleParameters, groupsToAdd, groupsToRemove []string) error {
 
 	if len(groupsToAdd) > 0 {
@@ -151,6 +182,7 @@ func (c Client) UpdateLdapGroups(ctx context.Context, parameters *v1alpha1.RoleP
 	return nil
 }
 
+// UpdatePrivileges modifies the privileges of an existing role in the db
 func (c Client) UpdatePrivileges(ctx context.Context, parameters *v1alpha1.RoleParameters, privilegesToGrant, privilegesToRevoke []string) error {
 
 	if len(privilegesToGrant) > 0 {
@@ -182,6 +214,7 @@ func (c Client) UpdatePrivileges(ctx context.Context, parameters *v1alpha1.RoleP
 	return nil
 }
 
+// Delete removes an existing role from the db
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.RoleParameters) error {
 
 	query := fmt.Sprintf("DROP ROLE %s", getRoleName(parameters.Schema, parameters.RoleName))
@@ -198,7 +231,6 @@ func (c Client) Delete(ctx context.Context, parameters *v1alpha1.RoleParameters)
 func getRoleName(schemaName, roleName string) string {
 	if schemaName != "" {
 		return fmt.Sprintf("%s.%s", schemaName, roleName)
-	} else {
-		return roleName
 	}
+	return roleName
 }

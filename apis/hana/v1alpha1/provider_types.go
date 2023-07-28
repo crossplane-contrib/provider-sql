@@ -32,6 +32,7 @@ type ProviderConfigSpec struct {
 }
 
 const (
+	// CredentialsSourceHanaConnectionSecret specifies the name of the CredentialsSource
 	CredentialsSourceHanaConnectionSecret xpv1.CredentialsSource = "HanaConnectionSecret"
 )
 
