@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 
+	// Blank import as specified by the driver
 	_ "github.com/SAP/go-hdb/driver"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -18,6 +19,7 @@ type hanaDB struct {
 	port     string
 }
 
+// New returns a new DB client
 func New(creds map[string][]byte) xsql.DB {
 
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
@@ -33,6 +35,7 @@ func New(creds map[string][]byte) xsql.DB {
 	}
 }
 
+// DSN returns a DSN string for the HANA DB connection
 func DSN(username string, password string, endpoint string, port string) string {
 	return "hdb://" +
 		username + ":" +
@@ -42,6 +45,7 @@ func DSN(username string, password string, endpoint string, port string) string 
 		endpoint
 }
 
+// Exec executes a query
 func (h hanaDB) Exec(ctx context.Context, q xsql.Query) error {
 	db, err := sql.Open("hdb", h.dsn)
 	if err != nil {
@@ -53,6 +57,7 @@ func (h hanaDB) Exec(ctx context.Context, q xsql.Query) error {
 	return err
 }
 
+// ExecTx executes a transaction
 func (h hanaDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	db, err := sql.Open("hdb", h.dsn)
 	if err != nil {
@@ -83,6 +88,7 @@ func (h hanaDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	return err
 }
 
+// Scan scans a query
 func (h hanaDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 	db, err := sql.Open("hdb", h.dsn)
 	if err != nil {
@@ -93,6 +99,7 @@ func (h hanaDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) err
 	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
+// Query queries a query
 func (h hanaDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	db, err := sql.Open("hdb", h.dsn)
 	if err != nil {
@@ -104,6 +111,7 @@ func (h hanaDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	return rows, err
 }
 
+// GetConnectionDetails returns the connection details
 func (h hanaDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
 		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
@@ -113,9 +121,9 @@ func (h hanaDB) GetConnectionDetails(username, password string) managed.Connecti
 	}
 }
 
+// QueryClient defines the methods for a query client
 type QueryClient[P any, O any] interface {
 	Observe(ctx context.Context, parameters *P) (observed *O, err error)
 	Create(ctx context.Context, parameters *P, args ...any) error
-	//Update(ctx context.Context, parameters *P, args ...any) error
 	Delete(ctx context.Context, parameters *P) error
 }

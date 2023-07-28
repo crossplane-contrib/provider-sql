@@ -18,16 +18,19 @@ const (
 	errDropUsergroup   = "cannot drop usergroup"
 )
 
+// Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
 }
 
+// New creates a new db client
 func New(creds map[string][]byte) Client {
 	return Client{
 		db: hana.New(creds),
 	}
 }
 
+// Observe checks the state of the usergroup
 func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (*v1alpha1.UsergroupObservation, error) {
 
 	observed := &v1alpha1.UsergroupObservation{
@@ -65,9 +68,14 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 		return observed, errors.Wrap(err1, errSelectUsergroup)
 	}
 
+	if paramRows.Err() != nil {
+		return observed, errors.Wrap(err2, errSelectUsergroup)
+	}
+
 	return observed, nil
 }
 
+// Create creates a usergroup
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE USERGROUP %s", parameters.UsergroupName)
@@ -133,6 +141,7 @@ func (c Client) UpdateParameters(ctx context.Context, parameters *v1alpha1.Userg
 	return nil
 }
 
+// Delete deletes the usergroup
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.UsergroupParameters) error {
 
 	query := fmt.Sprintf("DROP USERGROUP %s", parameters.UsergroupName)

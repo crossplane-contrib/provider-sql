@@ -20,16 +20,19 @@ const (
 	errGetPassword = "cannot get user password"
 )
 
+// Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
 }
 
+// New creates a new db client
 func New(creds map[string][]byte) Client {
 	return Client{
 		db: hana.New(creds),
 	}
 }
 
+// Observe checks the state of the user
 func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters) (*v1alpha1.UserObservation, error) {
 
 	observed := &v1alpha1.UserObservation{
@@ -124,6 +127,10 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		return observed, errors.Wrap(err4, errSelectUser)
 	}
 
+	if rows.Err() != nil {
+		return observed, errors.Wrap(err, errSelectUser)
+	}
+
 	return observed, nil
 }
 
@@ -135,6 +142,7 @@ func formatTime(inTime string) string {
 	return inTime
 }
 
+// Create a new user
 func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters, args ...any) error {
 
 	query := fmt.Sprintf("CREATE %sUSER %s", ternary(parameters.RestrictedUser, "RESTRICTED ", ""), parameters.Username)
@@ -200,6 +208,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 	return nil
 }
 
+// UpdatePassword returns an error about not being able to update the password
 func (c Client) UpdatePassword(ctx context.Context, username string, password string, forceFirstPasswordChange bool) error {
 	query := fmt.Sprintf("ALTER USER %s PASSWORD \"%s\" %s", username, password, ternary(forceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	err := c.db.Exec(ctx, xsql.Query{String: query})
@@ -241,6 +250,7 @@ func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, ro
 	return nil
 }
 
+// UpdateParameters updates the parameters of the user
 func (c Client) UpdateParameters(ctx context.Context, username string, parametersToSet map[string]string, parametersToClear map[string]string) error {
 	query := fmt.Sprintf("ALTER USER %s", username)
 
@@ -259,7 +269,7 @@ func (c Client) UpdateParameters(ctx context.Context, username string, parameter
 
 	if len(parametersToClear) > 0 {
 		query += " CLEAR PARAMETER"
-		for key, _ := range parametersToClear {
+		for key := range parametersToClear {
 			key = strings.ToUpper(key)
 			if contains(validParams, key) {
 				query += fmt.Sprintf(" %s,", key)
@@ -276,13 +286,14 @@ func (c Client) UpdateParameters(ctx context.Context, username string, parameter
 	return nil
 }
 
+// UpdateUsergroup updates the usergroup of the user
 func (c Client) UpdateUsergroup(ctx context.Context, username string, usergroup string) error {
 	query := fmt.Sprintf("ALTER USER %s", username)
 
 	if usergroup != "" {
 		query += fmt.Sprintf(" SET USERGROUP %s", usergroup)
 	} else {
-		query += fmt.Sprintf(" UNSET USERGROUP")
+		query += " UNSET USERGROUP"
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: query})
@@ -293,6 +304,7 @@ func (c Client) UpdateUsergroup(ctx context.Context, username string, usergroup 
 	return nil
 }
 
+// Delete deletes the user
 func (c Client) Delete(ctx context.Context, parameters *v1alpha1.UserParameters) error {
 
 	query := fmt.Sprintf("DROP USER %s", parameters.Username)

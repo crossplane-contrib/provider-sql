@@ -25,10 +25,12 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
+// Authentication includes different authentication methods
 type Authentication struct {
 	Password Password `json:"password,omitempty"`
 }
 
+// Password authentication type
 type Password struct {
 	PasswordSecretRef        *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 	ForceFirstPasswordChange bool                    `json:"forceFirstPasswordChange,omitempty"`
