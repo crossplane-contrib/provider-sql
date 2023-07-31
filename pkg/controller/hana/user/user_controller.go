@@ -165,6 +165,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	cr.Status.AtProvider.LastPasswordChangeTime = observed.LastPasswordChangeTime
 	cr.Status.AtProvider.CreatedAt = observed.CreatedAt
 	cr.Status.AtProvider.Privileges = observed.Privileges
+	cr.Status.AtProvider.Roles = observed.Roles
 	cr.Status.AtProvider.Parameters = observed.Parameters
 	cr.Status.AtProvider.Usergroup = observed.Usergroup
 

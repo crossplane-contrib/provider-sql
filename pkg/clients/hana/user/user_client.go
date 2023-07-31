@@ -127,10 +127,6 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		return observed, errors.Wrap(err4, errSelectUser)
 	}
 
-	if rows.Err() != nil {
-		return observed, errors.Wrap(err, errSelectUser)
-	}
-
 	return observed, nil
 }
 
