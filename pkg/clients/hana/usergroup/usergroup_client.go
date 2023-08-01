@@ -109,6 +109,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParame
 	return nil
 }
 
+// UpdateDisableUserAdmin updates disableUserAdmin parameter of the usergroup
 func (c Client) UpdateDisableUserAdmin(ctx context.Context, parameters *v1alpha1.UsergroupParameters) error {
 
 	query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)
@@ -125,6 +126,7 @@ func (c Client) UpdateDisableUserAdmin(ctx context.Context, parameters *v1alpha1
 	return nil
 }
 
+// UpdateParameters updates the parameters of the usergroup
 func (c Client) UpdateParameters(ctx context.Context, parameters *v1alpha1.UsergroupParameters, changedParameters map[string]string) error {
 
 	query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)

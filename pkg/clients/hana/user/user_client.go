@@ -215,7 +215,7 @@ func (c Client) UpdatePassword(ctx context.Context, username string, password st
 	return nil
 }
 
-func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, rolesOrPrivilegesToGrant, RolesOrPrivilegesToRevoke []string) error {
+func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, rolesOrPrivilegesToGrant, rolesOrPrivilegesToRevoke []string) error {
 
 	if len(rolesOrPrivilegesToGrant) > 0 {
 		query := "GRANT"
@@ -230,9 +230,9 @@ func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, ro
 		}
 	}
 
-	if len(RolesOrPrivilegesToRevoke) > 0 {
+	if len(rolesOrPrivilegesToRevoke) > 0 {
 		query := "REVOKE"
-		for _, roleOrPrivilege := range RolesOrPrivilegesToRevoke {
+		for _, roleOrPrivilege := range rolesOrPrivilegesToRevoke {
 			query += fmt.Sprintf(" %s,", roleOrPrivilege)
 		}
 		query = strings.TrimSuffix(query, ",")
