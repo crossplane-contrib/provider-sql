@@ -255,9 +255,9 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
+	privileges, grantOption := getPrivilegesString(cr)
 
-	query := createGrantQuery(privileges, dbname, username, table)
+	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
@@ -275,7 +275,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
+	privileges, grantOption := getPrivilegesString(cr)
 	username, host := mysql.SplitUserHost(username)
 
 	// Remove current grants since it's not possible to update grants.
@@ -293,7 +293,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
 	}
 
-	query = createGrantQuery(privileges, dbname, username, table)
+	query = createGrantQuery(privileges, dbname, username, table, grantOption)
 	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
@@ -301,7 +301,22 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
 }
 
-func createGrantQuery(privileges, dbname, username string, table string) string {
+// getPrivilegesString returns a privileges string without grant option item and a grantOption boolean
+func getPrivilegesString(cr *v1alpha1.Grant) (string, bool) {
+	privilegesWithoutGrantOption := v1alpha1.GrantPrivileges{}
+	grantOption := false
+	for _, p := range cr.Spec.ForProvider.Privileges {
+		if string(p) == "GRANT OPTION" {
+			grantOption = true
+			continue
+		}
+		privilegesWithoutGrantOption = append(privilegesWithoutGrantOption, p)
+	}
+	privileges := strings.Join(privilegesWithoutGrantOption.ToStringSlice(), ", ")
+	return privileges, grantOption
+}
+
+func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
 	username, host := mysql.SplitUserHost(username)
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
@@ -310,6 +325,10 @@ func createGrantQuery(privileges, dbname, username string, table string) string 
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
+
+	if grantOption {
+		result = fmt.Sprintf("%s WITH GRANT OPTION", result)
+	}
 
 	return result
 }
