@@ -54,6 +54,10 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
 	paramRows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.UsergroupName}})
+	if err2 != nil {
+		return observed, errors.Wrap(err1, errSelectUsergroup)
+	}
+	defer paramRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err2) {
 		return observed, nil
 	}
@@ -63,9 +67,6 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParam
 		if rowErr == nil {
 			observed.Parameters[parameter] = value
 		}
-	}
-	if err2 != nil {
-		return observed, errors.Wrap(err1, errSelectUsergroup)
 	}
 
 	if paramRows.Err() != nil {
@@ -109,6 +110,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParame
 	return nil
 }
 
+// UpdateDisableUserAdmin updates the disableUserAdmin property of the usergroup
 func (c Client) UpdateDisableUserAdmin(ctx context.Context, parameters *v1alpha1.UsergroupParameters) error {
 
 	query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)
@@ -125,6 +127,7 @@ func (c Client) UpdateDisableUserAdmin(ctx context.Context, parameters *v1alpha1
 	return nil
 }
 
+// UpdateParameters updates the parameters of the usergroup
 func (c Client) UpdateParameters(ctx context.Context, parameters *v1alpha1.UsergroupParameters, changedParameters map[string]string) error {
 
 	query := fmt.Sprintf("ALTER USERGROUP %s", parameters.UsergroupName)

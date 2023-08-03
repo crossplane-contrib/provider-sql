@@ -77,6 +77,10 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		"FROM SYS.USER_PARAMETERS " +
 		"WHERE USER_NAME = ?"
 	rows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.Username}})
+	if err2 != nil {
+		return observed, errors.Wrap(err2, errSelectUser)
+	}
+	defer rows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err2) {
 		return observed, nil
 	}
@@ -87,12 +91,16 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 			observed.Parameters[key] = value
 		}
 	}
-	if err2 != nil {
-		return observed, errors.Wrap(err2, errSelectUser)
+	if err := rows.Err(); err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 
 	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
 	privRows, err3 := c.db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{parameters.Username}})
+	if err3 != nil {
+		return observed, errors.Wrap(err3, errSelectUser)
+	}
+	defer privRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err3) {
 		return observed, nil
 	}
@@ -103,12 +111,16 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 			observed.Privileges = append(observed.Privileges, privilege)
 		}
 	}
-	if err3 != nil {
-		return observed, errors.Wrap(err3, errSelectUser)
+	if err := privRows.Err(); err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 
 	queryRoles := "SELECT GRANTEE, GRANTEE_TYPE, ROLE_SCHEMA_NAME, ROLE_NAME FROM GRANTED_ROLES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
 	roleRows, err4 := c.db.Query(ctx, xsql.Query{String: queryRoles, Parameters: []interface{}{parameters.Username}})
+	if err4 != nil {
+		return observed, errors.Wrap(err4, errSelectUser)
+	}
+	defer roleRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err4) {
 		return observed, nil
 	}
@@ -123,8 +135,8 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 			observed.Roles = append(observed.Roles, roleName)
 		}
 	}
-	if err4 != nil {
-		return observed, errors.Wrap(err4, errSelectUser)
+	if err := roleRows.Err(); err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 
 	return observed, nil
@@ -215,7 +227,8 @@ func (c Client) UpdatePassword(ctx context.Context, username string, password st
 	return nil
 }
 
-func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, rolesOrPrivilegesToGrant, RolesOrPrivilegesToRevoke []string) error {
+// UpdateRolesOrPrivileges updates the roles or privileges of the user
+func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, rolesOrPrivilegesToGrant, rolesOrPrivilegesToRevoke []string) error {
 
 	if len(rolesOrPrivilegesToGrant) > 0 {
 		query := "GRANT"
@@ -230,9 +243,9 @@ func (c Client) UpdateRolesOrPrivileges(ctx context.Context, username string, ro
 		}
 	}
 
-	if len(RolesOrPrivilegesToRevoke) > 0 {
+	if len(rolesOrPrivilegesToRevoke) > 0 {
 		query := "REVOKE"
-		for _, roleOrPrivilege := range RolesOrPrivilegesToRevoke {
+		for _, roleOrPrivilege := range rolesOrPrivilegesToRevoke {
 			query += fmt.Sprintf(" %s,", roleOrPrivilege)
 		}
 		query = strings.TrimSuffix(query, ",")
