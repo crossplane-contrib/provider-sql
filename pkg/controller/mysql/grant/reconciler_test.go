@@ -700,7 +700,7 @@ func TestCreate(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   pointer.StringPtr("test-example"),
 							User:       pointer.StringPtr("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "INSERT", "SELECT"},
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
 						},
 					},
 				},
@@ -721,7 +721,36 @@ func TestCreate(t *testing.T) {
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
 							User:       pointer.StringPtr("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "INSERT", "SELECT"},
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessGrantOption": {
+			reason: "No error should be returned when we successfully create a grant with grant option",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") &&
+							!strings.HasSuffix(q.String, "WITH GRANT OPTION") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
 						},
 					},
 				},
@@ -940,6 +969,35 @@ func TestUpdate(t *testing.T) {
 			want: want{
 				err: nil,
 				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SuccessGrantOption": {
+			reason: "No error should be returned when we successfully create a grant with grant option",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") &&
+							!strings.HasSuffix(q.String, "WITH GRANT OPTION") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
 			},
 		},
 	}
