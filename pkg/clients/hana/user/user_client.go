@@ -72,57 +72,85 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 		return observed, errors.Wrap(err, errSelectUser)
 	}
 
-	queryParams := "SELECT USER_NAME, " +
+	observed.Parameters, err = queryParameters(ctx, c, parameters.Username)
+	if err != nil {
+		return observed, err
+	}
+
+	observed.Privileges, err = queryPrivileges(ctx, c, parameters.Username)
+	if err != nil {
+		return observed, err
+	}
+
+	observed.Roles, err = queryRoles(ctx, c, parameters.Username)
+	if err != nil {
+		return observed, err
+	}
+
+	return observed, nil
+}
+
+func queryParameters(ctx context.Context, c Client, username string) (map[string]string, error) {
+	observed := make(map[string]string)
+	query := "SELECT USER_NAME, " +
 		"PARAMETER, " +
 		"VALUE " +
 		"FROM SYS.USER_PARAMETERS " +
 		"WHERE USER_NAME = ?"
-	rows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.Username}})
-	if err2 != nil {
-		return observed, errors.Wrap(err2, errSelectUser)
+	rows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
+	if err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 	defer rows.Close() //nolint:errcheck
-	if xsql.IsNoRows(err2) {
+	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
 	for rows.Next() {
 		var username, key, value string
 		rowErr := rows.Scan(&username, &key, &value)
 		if rowErr == nil {
-			observed.Parameters[key] = value
+			observed[key] = value
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return observed, errors.Wrap(err, errSelectUser)
 	}
+	return observed, nil
+}
 
-	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
-	privRows, err3 := c.db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{parameters.Username}})
-	if err3 != nil {
-		return observed, errors.Wrap(err3, errSelectUser)
+func queryPrivileges(ctx context.Context, c Client, username string) ([]string, error) {
+	observed := make([]string, 0)
+	query := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
+	privRows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
+	if err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 	defer privRows.Close() //nolint:errcheck
-	if xsql.IsNoRows(err3) {
+	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
 	for privRows.Next() {
 		var grantee, granteeType, privilege string
 		rowErr := privRows.Scan(&grantee, &granteeType, &privilege)
 		if rowErr == nil {
-			observed.Privileges = append(observed.Privileges, privilege)
+			observed = append(observed, privilege)
 		}
 	}
 	if err := privRows.Err(); err != nil {
 		return observed, errors.Wrap(err, errSelectUser)
 	}
+	return observed, nil
+}
 
-	queryRoles := "SELECT GRANTEE, GRANTEE_TYPE, ROLE_SCHEMA_NAME, ROLE_NAME FROM GRANTED_ROLES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
-	roleRows, err4 := c.db.Query(ctx, xsql.Query{String: queryRoles, Parameters: []interface{}{parameters.Username}})
-	if err4 != nil {
-		return observed, errors.Wrap(err4, errSelectUser)
+func queryRoles(ctx context.Context, c Client, username string) ([]string, error) {
+	observed := make([]string, 0)
+	query := "SELECT GRANTEE, GRANTEE_TYPE, ROLE_SCHEMA_NAME, ROLE_NAME FROM GRANTED_ROLES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
+	roleRows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
+	if err != nil {
+		return observed, errors.Wrap(err, errSelectUser)
 	}
 	defer roleRows.Close() //nolint:errcheck
-	if xsql.IsNoRows(err4) {
+	if xsql.IsNoRows(err) {
 		return observed, nil
 	}
 	for roleRows.Next() {
@@ -133,13 +161,12 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters
 			if roleSchemaName.Valid {
 				roleName = fmt.Sprintf("%s.%s", roleSchemaName.String, roleName)
 			}
-			observed.Roles = append(observed.Roles, roleName)
+			observed = append(observed, roleName)
 		}
 	}
 	if err := roleRows.Err(); err != nil {
 		return observed, errors.Wrap(err, errSelectUser)
 	}
-
 	return observed, nil
 }
 
@@ -165,17 +192,8 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 		query += fmt.Sprintf(" PASSWORD \"%s\" %s", passwrd, ternary(password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	}
 
-	validParams := []string{"CLIENT", "LOCALE", "TIME ZONE", "EMAIL ADDRESS", "STATEMENT MEMORY LIMIT", "STATEMENT THREAD LIMIT"}
-
 	if len(parameters.Parameters) > 0 {
-		query += " SET PARAMETER"
-		for key, value := range parameters.Parameters {
-			key = strings.ToUpper(key)
-			if contains(validParams, key) {
-				query += fmt.Sprintf(" %s = '%s',", key, value)
-			}
-		}
-		query = strings.TrimSuffix(query, ",")
+		query = setParameters(query, parameters.Parameters)
 	}
 
 	if parameters.Usergroup != "" {
@@ -189,31 +207,46 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 	}
 
 	if len(parameters.Privileges) > 0 {
-		queryPrives := "GRANT"
-		for _, privilege := range parameters.Privileges {
-			queryPrives += fmt.Sprintf(" %s,", privilege)
-		}
-		queryPrives = strings.TrimSuffix(queryPrives, ",")
-		queryPrives += fmt.Sprintf(" TO %s", parameters.Username)
-		err2 := c.db.Exec(ctx, xsql.Query{String: queryPrives})
-		if err2 != nil {
-			return errors.Wrap(err2, errCreateUser)
+		err := grantObjects(ctx, c, parameters.Username, parameters.Privileges)
+		if err != nil {
+			return err
 		}
 	}
 
 	if len(parameters.Roles) > 0 {
-		queryRoles := "GRANT"
-		for _, role := range parameters.Roles {
-			queryRoles += fmt.Sprintf(" %s,", role)
-		}
-		queryRoles = strings.TrimSuffix(queryRoles, ",")
-		queryRoles += fmt.Sprintf(" TO %s", parameters.Username)
-		err3 := c.db.Exec(ctx, xsql.Query{String: queryRoles})
-		if err3 != nil {
-			return errors.Wrap(err3, errCreateUser)
+		err := grantObjects(ctx, c, parameters.Username, parameters.Roles)
+		if err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+func setParameters(query string, parameters map[string]string) string {
+	validParams := []string{"CLIENT", "LOCALE", "TIME ZONE", "EMAIL ADDRESS", "STATEMENT MEMORY LIMIT", "STATEMENT THREAD LIMIT"}
+	query += " SET PARAMETER"
+	for key, value := range parameters {
+		key = strings.ToUpper(key)
+		if contains(validParams, key) {
+			query += fmt.Sprintf(" %s = '%s',", key, value)
+		}
+	}
+	query = strings.TrimSuffix(query, ",")
+	return query
+}
+
+func grantObjects(ctx context.Context, c Client, username string, objects []string) error {
+	query := "GRANT"
+	for _, object := range objects {
+		query += fmt.Sprintf(" %s,", object)
+	}
+	query = strings.TrimSuffix(query, ",")
+	query += fmt.Sprintf(" TO %s", username)
+	err := c.db.Exec(ctx, xsql.Query{String: query})
+	if err != nil {
+		return errors.Wrap(err, errCreateUser)
+	}
 	return nil
 }
 

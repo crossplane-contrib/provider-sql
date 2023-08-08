@@ -295,62 +295,26 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	desired := &v1alpha1.UserParameters{
-		Username:       cr.Spec.ForProvider.Username,
-		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
-		Authentication: apisv1alpha1.Authentication{
-			Password: apisv1alpha1.Password{
-				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
-				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
-			},
-		},
-		Privileges: cr.Spec.ForProvider.Privileges,
-		Roles:      cr.Spec.ForProvider.Roles,
-		Parameters: cr.Spec.ForProvider.Parameters,
-		Usergroup:  cr.Spec.ForProvider.Usergroup,
-	}
+	desired := buildDesiredParameters(cr)
+	observed := buildObservedParameters(cr)
 
-	// Append default Privilege
-	if !desired.RestrictedUser && !slices.Contains(desired.Privileges, "CREATE ANY") {
-		desired.Privileges = append(desired.Privileges, "CREATE ANY")
-	}
-
-	// Append default Role
-	if !desired.RestrictedUser && !slices.Contains(desired.Roles, "PUBLIC") {
-		desired.Roles = append(desired.Roles, "PUBLIC")
-	}
-
-	observed := &v1alpha1.UserObservation{
-		LastPasswordChangeTime: cr.Status.AtProvider.LastPasswordChangeTime,
-		CreatedAt:              cr.Status.AtProvider.CreatedAt,
-		Parameters:             cr.Status.AtProvider.Parameters,
-		Privileges:             cr.Status.AtProvider.Privileges,
-		Roles:                  cr.Status.AtProvider.Roles,
-		Usergroup:              cr.Status.AtProvider.Usergroup,
-	}
-
-	if observed.CreatedAt != observed.LastPasswordChangeTime {
+	if passwordChanged(observed.CreatedAt, observed.LastPasswordChangeTime) {
 		err := errors.New("Password was changed externally")
 		return managed.ExternalUpdate{}, err
 	}
-	if !equalArrays(observed.Privileges, desired.Privileges) {
-		privilegesToGrant := stringArrayDifference(desired.Privileges, observed.Privileges)
-		privilegesToRevoke := stringArrayDifference(observed.Privileges, desired.Privileges)
-		err := c.client.UpdateRolesOrPrivileges(ctx, desired.Username, privilegesToGrant, privilegesToRevoke)
-		if err != nil {
-			return managed.ExternalUpdate{}, err
-		}
-		cr.Status.AtProvider.Privileges = desired.Privileges
+
+	err1 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Privileges, observed.Privileges)
+	if err1 != nil {
+		return managed.ExternalUpdate{}, err1
 	}
-	if !equalArrays(observed.Roles, desired.Roles) {
-		rolesToGrant := stringArrayDifference(desired.Roles, observed.Roles)
-		rolesToRevoke := stringArrayDifference(observed.Roles, desired.Roles)
-		err := c.client.UpdateRolesOrPrivileges(ctx, desired.Username, rolesToGrant, rolesToRevoke)
-		if err != nil {
-			return managed.ExternalUpdate{}, err
-		}
-		cr.Status.AtProvider.Roles = desired.Roles
+	cr.Status.AtProvider.Privileges = desired.Privileges
+
+	err2 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Roles, observed.Roles)
+	if err2 != nil {
+		return managed.ExternalUpdate{}, err2
 	}
+	cr.Status.AtProvider.Roles = desired.Roles
+
 	if !equalParameterMap(observed.Parameters, desired.Parameters) {
 		parametersToSet := compareMaps(desired.Parameters, observed.Parameters)
 		parametersToClear := compareMaps(observed.Parameters, desired.Parameters)
@@ -368,6 +332,68 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	return managed.ExternalUpdate{}, nil
+}
+
+func buildDesiredParameters(cr *v1alpha1.User) *v1alpha1.UserParameters {
+	desired := &v1alpha1.UserParameters{
+		Username:       cr.Spec.ForProvider.Username,
+		RestrictedUser: cr.Spec.ForProvider.RestrictedUser,
+		Authentication: apisv1alpha1.Authentication{
+			Password: apisv1alpha1.Password{
+				PasswordSecretRef:        cr.Spec.ForProvider.Authentication.Password.PasswordSecretRef,
+				ForceFirstPasswordChange: cr.Spec.ForProvider.Authentication.Password.ForceFirstPasswordChange,
+			},
+		},
+		Privileges: cr.Spec.ForProvider.Privileges,
+		Roles:      cr.Spec.ForProvider.Roles,
+		Parameters: cr.Spec.ForProvider.Parameters,
+		Usergroup:  cr.Spec.ForProvider.Usergroup,
+	}
+	// Append default Privilege
+	if !desired.RestrictedUser && !slices.Contains(desired.Privileges, "CREATE ANY") {
+		desired.Privileges = append(desired.Privileges, "CREATE ANY")
+	}
+	// Append default Role
+	if !desired.RestrictedUser && !slices.Contains(desired.Roles, "PUBLIC") {
+		desired.Roles = append(desired.Roles, "PUBLIC")
+	}
+	return desired
+}
+
+func buildObservedParameters(cr *v1alpha1.User) *v1alpha1.UserObservation {
+	observed := &v1alpha1.UserObservation{
+		LastPasswordChangeTime: cr.Status.AtProvider.LastPasswordChangeTime,
+		CreatedAt:              cr.Status.AtProvider.CreatedAt,
+		Parameters:             cr.Status.AtProvider.Parameters,
+		Privileges:             cr.Status.AtProvider.Privileges,
+		Roles:                  cr.Status.AtProvider.Roles,
+		Usergroup:              cr.Status.AtProvider.Usergroup,
+	}
+	return observed
+}
+
+func passwordChanged(created, changed string) bool {
+	changedTime, err1 := time.Parse(time.RFC3339, changed)
+	createdTime, err2 := time.Parse(time.RFC3339, created)
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	if changedTime.After(createdTime.Add(3 * time.Second)) {
+		return true
+	}
+	return false
+}
+
+func updateRolesOrPrivileges(ctx context.Context, c *external, username string, desired, observed []string) error {
+	if !equalArrays(observed, desired) {
+		toGrant := stringArrayDifference(desired, observed)
+		toRevoke := stringArrayDifference(observed, desired)
+		err := c.client.UpdateRolesOrPrivileges(ctx, username, toGrant, toRevoke)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func stringArrayDifference(arr1, arr2 []string) []string {
