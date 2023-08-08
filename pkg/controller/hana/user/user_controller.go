@@ -18,9 +18,10 @@ package user
 
 import (
 	"context"
-	"k8s.io/utils/strings/slices"
 	"reflect"
 	"time"
+
+	"k8s.io/utils/strings/slices"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
