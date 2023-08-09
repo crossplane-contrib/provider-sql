@@ -47,6 +47,11 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+
+	errSelectRole = "cannot select role"
+	errCreateRole = "cannot create role"
+	errUpdateRole = "cannot update role"
+	errDropRole   = "cannot drop role"
 )
 
 // Setup adds a controller that reconciles Role managed resources.
@@ -135,7 +140,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	observed, err := c.client.Read(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalObservation{}, err
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectRole)
 	}
 
 	if observed.RoleName != parameters.RoleName {
@@ -214,7 +219,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	err := c.client.Create(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalCreation{}, err
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateRole)
 	}
 
 	cr.Status.AtProvider.RoleName = parameters.RoleName
@@ -251,7 +256,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
 		err := c.client.UpdateLdapGroups(ctx, parameters, groupsToAdd, groupsToRemove)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 		cr.Status.AtProvider.LdapGroups = parameters.LdapGroups
 	}
@@ -261,7 +266,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		privilegesToRemove := stringArrayDifference(observedPrivileges, desiredPrivileges)
 		err := c.client.UpdatePrivileges(ctx, parameters, privilegesToAdd, privilegesToRemove)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 		cr.Status.AtProvider.Privileges = parameters.Privileges
 	}
@@ -301,6 +306,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	err := c.client.Delete(ctx, parameters)
+
+	if err != nil {
+		return errors.Wrap(err, errDropRole)
+	}
 
 	return err
 }

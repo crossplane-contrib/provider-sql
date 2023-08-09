@@ -13,12 +13,6 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
-const (
-	errSelectRole = "cannot select role"
-	errCreateRole = "cannot create role"
-	errDropRole   = "cannot drop role"
-)
-
 // Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
@@ -49,19 +43,19 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.RoleParameters) (
 	}
 	observed.Schema = schema.String
 	if err1 != nil {
-		return observed, errors.Wrap(err1, errSelectRole)
+		return observed, err1
 	}
 
 	var err2 error
 	observed.LdapGroups, err2 = observeLdapGroups(ctx, c.db, parameters.RoleName)
 	if err2 != nil {
-		return observed, errors.Wrap(err2, errSelectRole)
+		return observed, err2
 	}
 
 	var err3 error
 	observed.Privileges, err3 = observePrivileges(ctx, c.db, parameters.RoleName)
 	if err3 != nil {
-		return observed, errors.Wrap(err3, errSelectRole)
+		return observed, err3
 	}
 
 	return observed, nil
@@ -71,7 +65,7 @@ func observeLdapGroups(ctx context.Context, db xsql.DB, roleName string) (ldapGr
 	queryLdapGroups := "SELECT ROLE_NAME, LDAP_GROUP_NAME FROM SYS.ROLE_LDAP_GROUPS WHERE ROLE_NAME = ?"
 	ldapRows, err := db.Query(ctx, xsql.Query{String: queryLdapGroups, Parameters: []interface{}{roleName}})
 	if err != nil {
-		return nil, errors.Wrap(err, errSelectRole)
+		return nil, err
 	}
 	defer ldapRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err) {
@@ -85,7 +79,7 @@ func observeLdapGroups(ctx context.Context, db xsql.DB, roleName string) (ldapGr
 		}
 	}
 	if err := ldapRows.Err(); err != nil {
-		return nil, errors.Wrap(err, errSelectRole)
+		return nil, err
 	}
 	return ldapGroups, nil
 }
@@ -94,7 +88,7 @@ func observePrivileges(ctx context.Context, db xsql.DB, roleName string) (privil
 	queryPrivileges := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'ROLE'"
 	privRows, err := db.Query(ctx, xsql.Query{String: queryPrivileges, Parameters: []interface{}{roleName}})
 	if err != nil {
-		return nil, errors.Wrap(err, errSelectRole)
+		return nil, err
 	}
 	defer privRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err) {
@@ -108,7 +102,7 @@ func observePrivileges(ctx context.Context, db xsql.DB, roleName string) (privil
 		}
 	}
 	if err := privRows.Err(); err != nil {
-		return nil, errors.Wrap(err, errSelectRole)
+		return nil, err
 	}
 	return privileges, nil
 }
@@ -133,7 +127,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters,
 	err1 := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err1 != nil {
-		return errors.Wrap(err1, errCreateRole)
+		return err1
 	}
 
 	if len(parameters.Privileges) > 0 {
@@ -145,7 +139,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.RoleParameters,
 		queryPrives += fmt.Sprintf(" TO %s", getRoleName(parameters.Schema, parameters.RoleName))
 		err2 := c.db.Exec(ctx, xsql.Query{String: queryPrives})
 		if err2 != nil {
-			return errors.Wrap(err2, errCreateRole)
+			return err2
 		}
 	}
 
@@ -222,7 +216,7 @@ func (c Client) Delete(ctx context.Context, parameters *v1alpha1.RoleParameters)
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errDropRole)
+		return err
 	}
 
 	return nil

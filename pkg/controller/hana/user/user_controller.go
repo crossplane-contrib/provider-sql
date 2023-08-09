@@ -49,6 +49,11 @@ const (
 	errNoSecretRef             = "ProviderConfig does not reference a credentials Secret"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errGetSecret               = "cannot get credentials Secret"
+
+	errSelectUser = "cannot select user"
+	errCreateUser = "cannot create user"
+	errUpdateUser = "cannot update user"
+	errDropUser   = "cannot drop user"
 )
 
 // Setup adds a controller that reconciles User managed resources.
@@ -155,7 +160,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	observed, err := c.client.Read(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalObservation{}, err
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
 	if observed.Username != parameters.Username {
@@ -255,13 +260,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	password, pasErr := c.getPassword(ctx, parameters.Authentication.Password.PasswordSecretRef)
 
 	if pasErr != nil {
-		return managed.ExternalCreation{}, pasErr
+		return managed.ExternalCreation{}, errors.Wrap(pasErr, errCreateUser)
 	}
 
 	err := c.client.Create(ctx, parameters, password)
 
 	if err != nil {
-		return managed.ExternalCreation{}, err
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
 	}
 
 	// Append default Privilege
@@ -300,18 +305,18 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if passwordChanged(observed.CreatedAt, observed.LastPasswordChangeTime) {
 		err := errors.New("Password was changed externally")
-		return managed.ExternalUpdate{}, err
+		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 	}
 
 	err1 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Privileges, observed.Privileges)
 	if err1 != nil {
-		return managed.ExternalUpdate{}, err1
+		return managed.ExternalUpdate{}, errors.Wrap(err1, errUpdateUser)
 	}
 	cr.Status.AtProvider.Privileges = desired.Privileges
 
 	err2 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Roles, observed.Roles)
 	if err2 != nil {
-		return managed.ExternalUpdate{}, err2
+		return managed.ExternalUpdate{}, errors.Wrap(err2, errUpdateUser)
 	}
 	cr.Status.AtProvider.Roles = desired.Roles
 
@@ -321,13 +326,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 		err := c.client.UpdateParameters(ctx, desired.Username, parametersToSet, parametersToClear)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
 	}
 	if observed.Usergroup != desired.Usergroup {
 		err := c.client.UpdateUsergroup(ctx, desired.Username, desired.Usergroup)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
 	}
 
@@ -439,6 +444,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	err := c.client.Delete(ctx, parameters)
+
+	if err != nil {
+		return errors.Wrap(err, errDropUser)
+	}
 
 	return err
 }

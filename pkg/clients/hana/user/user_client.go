@@ -14,13 +14,6 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
-const (
-	errSelectUser  = "cannot select user"
-	errCreateUser  = "cannot create user"
-	errDropUser    = "cannot drop user"
-	errGetPassword = "cannot get user password"
-)
-
 // Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
@@ -69,7 +62,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UserParameters) (
 		return observed, nil
 	}
 	if err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 
 	observed.Parameters, err = queryParameters(ctx, c, parameters.Username)
@@ -99,7 +92,7 @@ func queryParameters(ctx context.Context, c Client, username string) (map[string
 		"WHERE USER_NAME = ?"
 	rows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
 	if err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	defer rows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err) {
@@ -113,7 +106,7 @@ func queryParameters(ctx context.Context, c Client, username string) (map[string
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	return observed, nil
 }
@@ -123,7 +116,7 @@ func queryPrivileges(ctx context.Context, c Client, username string) ([]string, 
 	query := "SELECT GRANTEE, GRANTEE_TYPE, PRIVILEGE FROM GRANTED_PRIVILEGES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
 	privRows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
 	if err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	defer privRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err) {
@@ -137,7 +130,7 @@ func queryPrivileges(ctx context.Context, c Client, username string) ([]string, 
 		}
 	}
 	if err := privRows.Err(); err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	return observed, nil
 }
@@ -147,7 +140,7 @@ func queryRoles(ctx context.Context, c Client, username string) ([]string, error
 	query := "SELECT GRANTEE, GRANTEE_TYPE, ROLE_SCHEMA_NAME, ROLE_NAME FROM GRANTED_ROLES WHERE GRANTEE = ? AND GRANTEE_TYPE = 'USER'"
 	roleRows, err := c.db.Query(ctx, xsql.Query{String: query, Parameters: []interface{}{username}})
 	if err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	defer roleRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err) {
@@ -165,7 +158,7 @@ func queryRoles(ctx context.Context, c Client, username string) ([]string, error
 		}
 	}
 	if err := roleRows.Err(); err != nil {
-		return observed, errors.Wrap(err, errSelectUser)
+		return observed, err
 	}
 	return observed, nil
 }
@@ -187,7 +180,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 	if password.PasswordSecretRef != nil {
 		passwrd := args[0].(string)
 		if passwrd == "" {
-			return errors.New(errGetPassword)
+			return errors.New("cannot get user password")
 		}
 		query += fmt.Sprintf(" PASSWORD \"%s\" %s", passwrd, ternary(password.ForceFirstPasswordChange, "", "NO FORCE_FIRST_PASSWORD_CHANGE"))
 	}
@@ -203,7 +196,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UserParameters,
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errCreateUser)
+		return err
 	}
 
 	if len(parameters.Privileges) > 0 {
@@ -245,7 +238,7 @@ func grantObjects(ctx context.Context, c Client, username string, objects []stri
 	query += fmt.Sprintf(" TO %s", username)
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 	if err != nil {
-		return errors.Wrap(err, errCreateUser)
+		return err
 	}
 	return nil
 }
@@ -355,7 +348,7 @@ func (c Client) Delete(ctx context.Context, parameters *v1alpha1.UserParameters)
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errDropUser)
+		return err
 	}
 
 	return nil

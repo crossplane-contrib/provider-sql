@@ -42,8 +42,12 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
+	errGetSecret    = "cannot get credentials Secret"
 
-	errGetSecret = "cannot get credentials Secret"
+	errSelectUsergroup = "cannot select usergroup"
+	errCreateUsergroup = "cannot create usergroup"
+	errUpdateUsergroup = "cannot update usergroup"
+	errDropUsergroup   = "cannot drop usergroup"
 )
 
 // Setup adds a controller that reconciles Usergroup managed resources.
@@ -131,7 +135,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	observed, err := c.client.Read(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalObservation{}, err
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUsergroup)
 	}
 
 	if observed.UsergroupName != parameters.UsergroupName {
@@ -189,7 +193,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	err := c.client.Create(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalCreation{}, err
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUsergroup)
 	}
 
 	cr.Status.AtProvider.UsergroupName = parameters.UsergroupName
@@ -216,7 +220,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if cr.Status.AtProvider.DisableUserAdmin != parameters.DisableUserAdmin {
 		err := c.client.UpdateDisableUserAdmin(ctx, parameters)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUsergroup)
 		}
 		cr.Status.AtProvider.DisableUserAdmin = parameters.DisableUserAdmin
 	}
@@ -228,7 +232,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		parametersToUpdate := changedParameters(observedParameters, desiredParameters)
 		err := c.client.UpdateParameters(ctx, parameters, parametersToUpdate)
 		if err != nil {
-			return managed.ExternalUpdate{}, err
+			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUsergroup)
 		}
 		cr.Status.AtProvider.Parameters = parameters.Parameters
 	}
@@ -264,6 +268,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	err := c.client.Delete(ctx, parameters)
+
+	if err != nil {
+		return errors.Wrap(err, errDropUsergroup)
+	}
 
 	return err
 }

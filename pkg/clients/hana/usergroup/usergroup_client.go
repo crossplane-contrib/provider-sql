@@ -12,12 +12,6 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
-const (
-	errSelectUsergroup = "cannot select usergroup"
-	errCreateUsergroup = "cannot create usergroup"
-	errDropUsergroup   = "cannot drop usergroup"
-)
-
 // Client struct holds the connection to the db
 type Client struct {
 	db xsql.DB
@@ -46,7 +40,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParamete
 		return observed, nil
 	}
 	if err1 != nil {
-		return observed, errors.Wrap(err1, errSelectUsergroup)
+		return observed, err1
 	}
 	if disableUserAdminString == "FALSE" {
 		observed.DisableUserAdmin = true
@@ -55,7 +49,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParamete
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
 	paramRows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.UsergroupName}})
 	if err2 != nil {
-		return observed, errors.Wrap(err1, errSelectUsergroup)
+		return observed, err2
 	}
 	defer paramRows.Close() //nolint:errcheck
 	if xsql.IsNoRows(err2) {
@@ -70,7 +64,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParamete
 	}
 
 	if paramRows.Err() != nil {
-		return observed, errors.Wrap(err2, errSelectUsergroup)
+		return observed, err2
 	}
 
 	return observed, nil
@@ -104,7 +98,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.UsergroupParame
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errCreateUsergroup)
+		return err
 	}
 
 	return nil
@@ -152,7 +146,7 @@ func (c Client) Delete(ctx context.Context, parameters *v1alpha1.UsergroupParame
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errDropUsergroup)
+		return err
 	}
 
 	return nil
