@@ -2,7 +2,7 @@
 /vendor
 /.vendor-new
 .vscode
-/.idea
+.idea
 
 .cache
 .work
