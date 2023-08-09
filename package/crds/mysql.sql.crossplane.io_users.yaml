@@ -62,6 +62,11 @@ spec:
                 description: UserParameters define the desired state of a MySQL user
                   instance.
                 properties:
+                  binlog:
+                    description: BinLog defines whether the create, delete, update
+                      operations of this user are propagated to replicas. Defaults
+                      to true
+                    type: boolean
                   passwordSecretRef:
                     description: PasswordSecretRef references the secret that contains
                       the password used for this user. If no reference is given, a

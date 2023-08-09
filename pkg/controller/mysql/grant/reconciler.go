@@ -52,7 +52,6 @@ const (
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
-	errFlushPriv    = "cannot flush privileges"
 
 	allPrivileges      = "ALL PRIVILEGES"
 	errCodeNoSuchGrant = 1141
@@ -253,13 +252,14 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-
+	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table)
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
+
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		return managed.ExternalCreation{}, err
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+
+	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -273,6 +273,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	username, host := mysql.SplitUserHost(username)
+	binlog := cr.Spec.ForProvider.BinLog
 
 	observed := cr.Status.AtProvider.Privileges
 	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
@@ -288,14 +289,15 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			mysql.QuoteValue(host),
 		)
 
-		if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errRevokeGrant)
-		}
-
-		if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+			mysql.ExecQuery{
+				Query: query, ErrorValue: errRevokeGrant,
+			}, mysql.ExecOptions{
+				Binlog: binlog}); err != nil {
+			return managed.ExternalUpdate{}, err
 		}
 	}
+
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
 		query := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
@@ -306,12 +308,12 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			mysql.QuoteValue(host),
 		)
 
-		if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errCreateGrant)
-		}
-
-		if err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+			mysql.ExecQuery{
+				Query: query, ErrorValue: errCreateGrant,
+			}, mysql.ExecOptions{
+				Binlog: binlog}); err != nil {
+			return managed.ExternalUpdate{}, err
 		}
 	}
 
@@ -343,6 +345,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
 	username, host := mysql.SplitUserHost(username)
+	binlog := cr.Spec.ForProvider.BinLog
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
@@ -352,16 +355,17 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		mysql.QuoteValue(host),
 	)
 
-	if err := c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
 			// MySQL automatically deletes related grants if the user has been deleted
 			return nil
 		}
-		return errors.Wrap(err, errRevokeGrant)
+
+		return err
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: "FLUSH PRIVILEGES"})
-	return errors.Wrap(err, errFlushPriv)
+
+	return nil
 }
 
 func diffPermissions(desired, observed []string) ([]string, []string) {
