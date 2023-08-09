@@ -6,8 +6,9 @@ import (
 	"errors"
 	"net/url"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
