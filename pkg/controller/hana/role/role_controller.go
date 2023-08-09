@@ -18,12 +18,10 @@ package role
 
 import (
 	"context"
-	"reflect"
-	"strings"
-	"time"
-
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
+	"reflect"
+	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/role"
 
@@ -63,8 +61,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		resource.ManagedKind(v1alpha1.RoleGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: role.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		// managed.WithPollInterval(o.PollInterval),
-		managed.WithPollInterval(10*time.Second),
+		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).

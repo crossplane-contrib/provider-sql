@@ -18,8 +18,6 @@ package usergroup
 
 import (
 	"context"
-	"time"
-
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -59,8 +57,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		resource.ManagedKind(v1alpha1.UsergroupGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: usergroup.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(time.Second*10),
-		// managed.WithPollInterval(o.PollInterval),
+		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).

@@ -19,11 +19,9 @@ package dbschema
 import (
 	"context"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
-	"strings"
-	"time"
-
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/dbschema"
 
@@ -62,8 +60,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		resource.ManagedKind(v1alpha1.DbSchemaGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: dbschema.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		// managed.WithPollInterval(o.PollInterval),
-		managed.WithPollInterval(10*time.Second),
+		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
