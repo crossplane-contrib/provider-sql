@@ -132,7 +132,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		LdapGroups: arrayToUpper(cr.Spec.ForProvider.LdapGroups),
 	}
 
-	observed, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Read(ctx, parameters)
 
 	if err != nil {
 		return managed.ExternalObservation{}, err

@@ -32,7 +32,7 @@ func New(creds map[string][]byte) Client {
 }
 
 // Observe checks the state of the role
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.RoleParameters) (*v1alpha1.RoleObservation, error) {
+func (c Client) Read(ctx context.Context, parameters *v1alpha1.RoleParameters) (*v1alpha1.RoleObservation, error) {
 
 	observed := &v1alpha1.RoleObservation{
 		RoleName:   "",

@@ -34,7 +34,7 @@ func New(creds map[string][]byte) Client {
 }
 
 // Observe checks the state of the user
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UserParameters) (*v1alpha1.UserObservation, error) {
+func (c Client) Read(ctx context.Context, parameters *v1alpha1.UserParameters) (*v1alpha1.UserObservation, error) {
 
 	observed := &v1alpha1.UserObservation{
 		Username:               "",

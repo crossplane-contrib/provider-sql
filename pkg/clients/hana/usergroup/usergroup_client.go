@@ -31,7 +31,7 @@ func New(creds map[string][]byte) Client {
 }
 
 // Observe checks the state of the usergroup
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (*v1alpha1.UsergroupObservation, error) {
+func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParameters) (*v1alpha1.UsergroupObservation, error) {
 
 	observed := &v1alpha1.UsergroupObservation{
 		UsergroupName:    "",

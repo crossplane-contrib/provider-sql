@@ -123,7 +123,7 @@ func (h hanaDB) GetConnectionDetails(username, password string) managed.Connecti
 
 // QueryClient defines the methods for a query client
 type QueryClient[P any, O any] interface {
-	Observe(ctx context.Context, parameters *P) (observed *O, err error)
+	Read(ctx context.Context, parameters *P) (observed *O, err error)
 	Create(ctx context.Context, parameters *P, args ...any) error
 	Delete(ctx context.Context, parameters *P) error
 }
