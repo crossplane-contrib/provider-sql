@@ -45,6 +45,15 @@ type UserParameters struct {
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
 	// +optional
 	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
+
+	// AuthPlugin sets the mysql authentication plugin, defaults to mysql_native_password
+	// +optional
+	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
+	AuthPlugin *string `json:"authPlugin,omitempty" default:"mysql_native_password"`
+
+	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true
+	// +optional
+	UsePassword *bool `json:"usePassword,omitempty" default:"true"`
 }
 
 // ResourceOptions define the account specific resource limits.
@@ -70,6 +79,9 @@ type ResourceOptions struct {
 type UserObservation struct {
 	// ResourceOptionsAsClauses represents the applied resource options
 	ResourceOptionsAsClauses []string `json:"resourceOptionsAsClauses,omitempty"`
+
+	// AuthPlugin represents the applied mysql authentication plugin
+	AuthPlugin *string `json:"authPlugin,omitempty"`
 }
 
 // +kubebuilder:object:root=true
