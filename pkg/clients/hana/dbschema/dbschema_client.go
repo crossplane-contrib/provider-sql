@@ -4,17 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pkg/errors"
-
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
-)
-
-const (
-	errSelectSchema = "cannot select schema"
-	errCreateSchema = "cannot create schema"
-	errDropSchema   = "cannot drop schema"
 )
 
 // Client struct holds the connection to the db
@@ -29,8 +21,8 @@ func New(creds map[string][]byte) Client {
 	}
 }
 
-// Observe checks the state of the schema
-func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (*v1alpha1.DbSchemaObservation, error) {
+// Read checks the state of the schema
+func (c Client) Read(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (*v1alpha1.DbSchemaObservation, error) {
 
 	observed := &v1alpha1.DbSchemaObservation{
 		SchemaName: "",
@@ -44,7 +36,7 @@ func (c Client) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParame
 		return observed, nil
 	}
 	if err != nil {
-		return observed, errors.Wrap(err, errSelectSchema)
+		return observed, err
 	}
 
 	return observed, nil
@@ -62,7 +54,7 @@ func (c Client) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errCreateSchema)
+		return err
 	}
 
 	return nil
@@ -76,7 +68,7 @@ func (c Client) Delete(ctx context.Context, parameters *v1alpha1.DbSchemaParamet
 	err := c.db.Exec(ctx, xsql.Query{String: query})
 
 	if err != nil {
-		return errors.Wrap(err, errDropSchema)
+		return err
 	}
 
 	return nil

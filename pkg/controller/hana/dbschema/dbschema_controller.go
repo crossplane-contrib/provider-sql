@@ -18,6 +18,7 @@ package dbschema
 
 import (
 	"context"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"strings"
 	"time"
 
@@ -46,6 +47,10 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+
+	errSelectSchema = "cannot select schema"
+	errCreateSchema = "cannot create schema"
+	errDropSchema   = "cannot drop schema"
 )
 
 // Setup adds a controller that reconciles DbSchema managed resources.
@@ -114,7 +119,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client dbschema.Client
+	client hana.QueryClient[v1alpha1.DbSchemaParameters, v1alpha1.DbSchemaObservation]
 	kube   client.Client
 }
 
@@ -128,10 +133,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		SchemaName: strings.ToUpper(cr.Spec.ForProvider.SchemaName),
 	}
 
-	observed, err := c.client.Observe(ctx, parameters)
+	observed, err := c.client.Read(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalObservation{}, err
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
 	}
 
 	if observed.SchemaName != parameters.SchemaName {
@@ -162,18 +167,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	err := c.client.Create(ctx, parameters)
 
 	if err != nil {
-		return managed.ExternalCreation{}, err
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
 	}
 
-	return managed.ExternalCreation{
-		ConnectionDetails: managed.ConnectionDetails{},
-	}, nil
+	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-
-	// TODO
-
 	return managed.ExternalUpdate{}, nil
 }
 
@@ -190,6 +190,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	err := c.client.Delete(ctx, parameters)
+
+	if err != nil {
+		return errors.Wrap(err, errDropSchema)
+	}
 
 	return err
 }
