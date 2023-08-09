@@ -33,13 +33,13 @@ import (
 )
 
 type mockClient struct {
-	MockObserve func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error)
-	MockCreate  func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error
-	MockDelete  func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error
+	MockRead   func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error)
+	MockCreate func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error
+	MockDelete func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error
 }
 
-func (m mockClient) Observe(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error) {
-	return m.MockObserve(ctx, parameters)
+func (m mockClient) Read(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error) {
+	return m.MockRead(ctx, parameters)
 }
 
 func (m mockClient) Create(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
@@ -168,12 +168,106 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+func TestObserve(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		client hana.QueryClient[v1alpha1.DbSchemaParameters, v1alpha1.DbSchemaObservation]
+	}
+
+	type args struct {
+		ctx context.Context
+		mg  resource.Managed
+	}
+
+	type want struct {
+		c   managed.ExternalObservation
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a *Schema",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotDbSchema),
+			},
+		},
+		"ErrObserve": {
+			reason: "Any errors encountered while observing the schema should be returned",
+			fields: fields{
+				client: mockClient{
+					MockRead: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error) {
+						return nil, errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DbSchema{
+					Spec: v1alpha1.DbSchemaSpec{
+						ForProvider: v1alpha1.DbSchemaParameters{
+							SchemaName: "DEMO_SCHEMA",
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errSelectSchema),
+			},
+		},
+		"Success": {
+			reason: "No error should be returned when we successfully observe a schema",
+			fields: fields{
+				client: mockClient{
+					MockRead: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) (observed *v1alpha1.DbSchemaObservation, err error) {
+						return &v1alpha1.DbSchemaObservation{
+							SchemaName: "",
+							Owner:      "",
+						}, nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DbSchema{
+					Spec: v1alpha1.DbSchemaSpec{
+						ForProvider: v1alpha1.DbSchemaParameters{
+							SchemaName: "DEMO_SCHEMA",
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{client: tc.fields.client}
+			got, err := e.Observe(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Read(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.c, got); diff != "" {
+				t.Errorf("\n%s\ne.Read(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
 func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		client      dbschema.Client
-		queryClient hana.QueryClient[v1alpha1.DbSchemaParameters, v1alpha1.DbSchemaObservation]
+		client hana.QueryClient[v1alpha1.DbSchemaParameters, v1alpha1.DbSchemaObservation]
 	}
 
 	type args struct {
@@ -204,7 +298,7 @@ func TestCreate(t *testing.T) {
 		"ErrCreate": {
 			reason: "Any errors encountered while creating the schema should be returned",
 			fields: fields{
-				queryClient: mockClient{
+				client: mockClient{
 					MockCreate: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 						return errBoom
 					},
@@ -220,13 +314,13 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, "cannot select schema"),
+				err: errors.Wrap(errBoom, errCreateSchema),
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we successfully create a grant",
+			reason: "No error should be returned when we successfully create a schema",
 			fields: fields{
-				queryClient: mockClient{
+				client: mockClient{
 					MockCreate: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters, args ...any) error {
 						return nil
 					},
@@ -256,6 +350,95 @@ func TestCreate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestDelete(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		client hana.QueryClient[v1alpha1.DbSchemaParameters, v1alpha1.DbSchemaObservation]
+	}
+
+	type args struct {
+		ctx context.Context
+		mg  resource.Managed
+	}
+
+	type want struct {
+		c   managed.ExternalCreation
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a *Schema",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotDbSchema),
+			},
+		},
+		"ErrDelete": {
+			reason: "Any errors encountered while deleting the schema should be returned",
+			fields: fields{
+				client: mockClient{
+					MockDelete: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DbSchema{
+					Spec: v1alpha1.DbSchemaSpec{
+						ForProvider: v1alpha1.DbSchemaParameters{
+							SchemaName: "DEMO_SCHEMA",
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errDropSchema),
+			},
+		},
+		"Success": {
+			reason: "No error should be returned when we successfully delete a schema",
+			fields: fields{
+				client: mockClient{
+					MockDelete: func(ctx context.Context, parameters *v1alpha1.DbSchemaParameters) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DbSchema{
+					Spec: v1alpha1.DbSchemaSpec{
+						ForProvider: v1alpha1.DbSchemaParameters{
+							SchemaName: "DEMO_SCHEMA",
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{client: tc.fields.client}
+			err := e.Delete(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
 		})
 	}
