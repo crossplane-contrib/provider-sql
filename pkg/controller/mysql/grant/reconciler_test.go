@@ -601,7 +601,13 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the grant should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -899,7 +905,11 @@ func TestDelete(t *testing.T) {
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						return errBoom
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return errBoom
+						}
+
+						return nil
 					},
 				},
 			},
@@ -949,7 +959,11 @@ func TestDelete(t *testing.T) {
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+						}
+
+						return nil
 					},
 				},
 			},
