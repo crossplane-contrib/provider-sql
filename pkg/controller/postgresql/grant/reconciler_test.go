@@ -19,6 +19,8 @@ package grant
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sort"
 
 	"testing"
 
@@ -249,11 +251,24 @@ func TestObserve(t *testing.T) {
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						privileges := q.Parameters[3]
 
+						privs, ok := privileges.(*pq.StringArray)
+						if !ok {
+							return fmt.Errorf("expected Scan parameter to be pq.StringArray, got %T", privileges)
+						}
+
+						// The order is not guaranteed, so sort the slices before comparing
+						sort.Strings(*privs)
+
 						// Return if there's a diff between the expected and actual privileges
-						diff := cmp.Diff(&pq.StringArray{"CREATE", "TEMPORARY", "CONNECT"}, privileges)
+						diff := cmp.Diff(&pq.StringArray{"CONNECT", "CREATE", "TEMPORARY"}, privileges)
 
 						bv := dest[0].(*bool)
 						*bv = diff == ""
+
+						// Extra logging in case this test is going to fail
+						if diff != "" {
+							t.Logf("expected empty diff, got: %s", diff)
+						}
 
 						return nil
 					},
@@ -275,6 +290,7 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
+				err: nil,
 			},
 		},
 		"ErrSelectGrant": {
