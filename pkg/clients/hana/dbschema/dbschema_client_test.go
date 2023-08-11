@@ -3,13 +3,15 @@ package dbschema
 import (
 	"context"
 	"database/sql"
-	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"testing"
+
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
-	"testing"
+
+	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 type mockDB struct {

@@ -65,8 +65,11 @@ spec:
                 description: UserParameters are the configurable fields of a User.
                 properties:
                   authentication:
+                    description: Authentication includes different authentication
+                      methods
                     properties:
                       password:
+                        description: Password authentication type
                         properties:
                           forceFirstPasswordChange:
                             type: boolean
@@ -292,8 +295,11 @@ spec:
                 description: UserObservation are the observable fields of a User.
                 properties:
                   authentication:
+                    description: Authentication includes different authentication
+                      methods
                     properties:
                       password:
+                        description: Password authentication type
                         properties:
                           forceFirstPasswordChange:
                             type: boolean

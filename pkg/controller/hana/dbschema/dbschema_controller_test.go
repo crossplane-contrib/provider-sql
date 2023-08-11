@@ -18,9 +18,8 @@ package dbschema
 
 import (
 	"context"
-	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/dbschema"
+	"testing"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
@@ -29,7 +28,10 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"testing"
+
+	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/dbschema"
 )
 
 type mockClient struct {
