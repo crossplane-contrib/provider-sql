@@ -279,7 +279,7 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 		resourceOptions,
 	)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return err
 	}
 
@@ -310,7 +310,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			mysql.QuoteValue(host),
 			resourceOptions,
 		)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 
@@ -338,7 +338,7 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 	if pwchanged {
 		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 			return managed.ConnectionDetails{}, err
 		}
 
@@ -360,7 +360,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	binlog := cr.Spec.ForProvider.BinLog
 	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return err
 	}
 
