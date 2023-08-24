@@ -59,7 +59,7 @@ const (
 )
 
 var (
-	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (.+)\.(.+) TO .+`)
+	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (\S+)\.(\S+) TO \S+@\S+?(\sWITH GRANT OPTION)?$`)
 )
 
 // Setup adds a controller that reconciles Grant managed resources.
@@ -172,9 +172,16 @@ func defaultIdentifier(identifier *string) string {
 
 func parseGrant(grant, dbname string, table string) (privileges []string) {
 	matches := grantRegex.FindStringSubmatch(grant)
-	if len(matches) == 4 && matches[2] == dbname && matches[3] == table {
-		return strings.Split(matches[1], ", ")
+	if len(matches) == 5 && matches[2] == dbname && matches[3] == table {
+		privileges := strings.Split(matches[1], ", ")
+
+		if matches[4] != "" {
+			privileges = append(privileges, "GRANT OPTION")
+		}
+
+		return privileges
 	}
+
 	return nil
 }
 
@@ -252,13 +259,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
+	grantOption := hasGrantOption(cr)
 	binlog := cr.Spec.ForProvider.BinLog
-	query := createGrantQuery(privileges, dbname, username, table)
+	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
 	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
-
 	return managed.ExternalCreation{}, nil
 }
 
@@ -278,6 +285,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	observed := cr.Status.AtProvider.Privileges
 	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desired, observed)
+	grantOption := hasGrantOption(cr)
 
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
@@ -300,14 +308,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
-		query := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
-			strings.Join(toGrant, ", "),
-			dbname,
-			table,
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-		)
-
+		query := createGrantQuery(strings.Join(toGrant, ", "), dbname, username, table, grantOption)
 		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
@@ -316,11 +317,20 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, err
 		}
 	}
-
 	return managed.ExternalUpdate{}, nil
 }
 
-func createGrantQuery(privileges, dbname, username string, table string) string {
+// hasGrantOption returns true if the privileges has a grant option item
+func hasGrantOption(cr *v1alpha1.Grant) bool {
+	for _, p := range cr.Spec.ForProvider.Privileges {
+		if string(p) == "GRANT OPTION" {
+			return true
+		}
+	}
+	return false
+}
+
+func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
 	username, host := mysql.SplitUserHost(username)
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
@@ -329,6 +339,10 @@ func createGrantQuery(privileges, dbname, username string, table string) string 
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 	)
+
+	if grantOption {
+		result = fmt.Sprintf("%s WITH GRANT OPTION", result)
+	}
 
 	return result
 }
