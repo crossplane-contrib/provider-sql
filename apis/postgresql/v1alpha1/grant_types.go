@@ -43,6 +43,39 @@ type GrantPrivilege string
 // +kubebuilder:validation:MinItems:=1
 type GrantPrivileges []GrantPrivilege
 
+// Some privileges are shorthands for multiple privileges. These translations
+// happen internally inside postgresql when making grants. When we query the
+// privileges back, we need to look for the expanded set.
+// https://www.postgresql.org/docs/15/ddl-priv.html
+var grantReplacements = map[GrantPrivilege]GrantPrivileges{
+	"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
+	"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
+	"TEMP":           {"TEMPORARY"},
+}
+
+// ExpandPrivileges expands any shorthand privileges to their full equivalents.
+func (gp *GrantPrivileges) ExpandPrivileges() GrantPrivileges {
+	privilegeSet := make(map[GrantPrivilege]struct{})
+
+	// Replace any shorthand privileges with their full equivalents
+	for _, p := range *gp {
+		if _, ok := grantReplacements[p]; ok {
+			for _, rp := range grantReplacements[p] {
+				privilegeSet[rp] = struct{}{}
+			}
+		} else {
+			privilegeSet[p] = struct{}{}
+		}
+	}
+
+	privileges := make([]GrantPrivilege, 0, len(privilegeSet))
+	for p := range privilegeSet {
+		privileges = append(privileges, p)
+	}
+
+	return privileges
+}
+
 // ToStringSlice converts the slice of privileges to strings
 func (gp *GrantPrivileges) ToStringSlice() []string {
 	if gp == nil {
