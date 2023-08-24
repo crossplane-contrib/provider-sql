@@ -316,7 +316,7 @@ func getPrivilegesString(privileges []string) (string, bool) {
 	privilegesWithoutGrantOption := []string{}
 	grantOption := false
 	for _, p := range privileges {
-		if string(p) == "GRANT OPTION" {
+		if p == "GRANT OPTION" {
 			grantOption = true
 			continue
 		}
