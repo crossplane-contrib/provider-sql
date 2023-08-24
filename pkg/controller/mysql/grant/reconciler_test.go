@@ -320,6 +320,79 @@ func TestObserve(t *testing.T) {
 				observedPrivileges: []string{allPrivileges},
 			},
 		},
+		"SuccessGrantOptionNoDatabase": {
+			reason: "We should return no error if we can successfully show our grants",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows(
+								[]string{"Grants"},
+							).AddRow("GRANT INSERT, SELECT ON *.* TO 'success-user'@% WITH GRANT OPTION"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							User:       pointer.StringPtr("success-user"),
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT", "GRANT OPTION"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+				observedPrivileges: []string{
+					"GRANT OPTION",
+					"INSERT",
+					"SELECT",
+				},
+			},
+		},
+		"SuccessGrantOptionWithDatabase": {
+			reason: "We should return no error if we can successfully show our grants",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(
+							sqlmock.NewRows(
+								[]string{"Grants"},
+							).AddRow("GRANT INSERT, SELECT ON `success-db`.* TO 'success-user'@% WITH GRANT OPTION"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("success-db"),
+							User:       pointer.StringPtr("success-user"),
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT", "GRANT OPTION"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+				observedPrivileges: []string{
+					"GRANT OPTION",
+					"INSERT",
+					"SELECT",
+				},
+			},
+		},
 		"SuccessDiffGrants": {
 			reason: "We should return no error if different grants exist for the provided database",
 			fields: fields{
@@ -635,8 +708,59 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessNoDatabase": {
+			reason: "No error should be returned when we successfully create a grant with no database",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessGrantOption": {
+			reason: "No error should be returned when we successfully create a grant with grant option",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") &&
+							!strings.HasSuffix(q.String, "WITH GRANT OPTION") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
 						},
 					},
 				},
@@ -855,6 +979,35 @@ func TestUpdate(t *testing.T) {
 			want: want{
 				err: nil,
 				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SuccessGrantOption": {
+			reason: "No error should be returned when we successfully create a grant with grant option",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") &&
+							!strings.HasSuffix(q.String, "WITH GRANT OPTION") {
+							return errBoom
+						}
+
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   pointer.StringPtr("test-example"),
+							User:       pointer.StringPtr("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
 			},
 		},
 	}
