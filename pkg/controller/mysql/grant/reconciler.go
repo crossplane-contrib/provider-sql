@@ -277,8 +277,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	username, host := mysql.SplitUserHost(username)
 	binlog := cr.Spec.ForProvider.BinLog
 
 	observed := cr.Status.AtProvider.Privileges
