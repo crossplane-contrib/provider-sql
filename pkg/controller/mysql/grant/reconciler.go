@@ -288,17 +288,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
 		privileges, grantOption := getPrivilegesString(toRevoke)
-		query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
-			privileges,
-			dbname,
-			table,
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-		)
-		if grantOption {
-			query = fmt.Sprintf("%s WITH GRANT OPTION", query)
-		}
-
+		query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
@@ -336,6 +326,23 @@ func getPrivilegesString(privileges []string) (string, bool) {
 	}
 	out := strings.Join(privilegesWithoutGrantOption, ", ")
 	return out, grantOption
+}
+
+func createRevokeQuery(privileges, dbname, username string, table string, grantOption bool) string {
+	username, host := mysql.SplitUserHost(username)
+	result := fmt.Sprintf("REVOKE %s ON %s.%s TO %s@%s",
+		privileges,
+		dbname,
+		table,
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+	)
+
+	if grantOption {
+		result = fmt.Sprintf("%s WITH GRANT OPTION", result)
+	}
+
+	return result
 }
 
 func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
