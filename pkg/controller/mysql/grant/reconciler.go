@@ -371,18 +371,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	username, host := mysql.SplitUserHost(username)
 	binlog := cr.Spec.ForProvider.BinLog
 
-	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
-		privileges,
-		dbname,
-		table,
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-	)
+	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
+	query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 
 	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		var myErr *mysqldriver.MySQLError
