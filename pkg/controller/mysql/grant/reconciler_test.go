@@ -349,6 +349,11 @@ func TestObserve(t *testing.T) {
 					ResourceUpToDate: true,
 				},
 				err: nil,
+				observedPrivileges: []string{
+					"GRANT OPTION",
+					"INSERT",
+					"SELECT",
+				},
 			},
 		},
 		"SuccessGrantOptionWithDatabase": {
@@ -381,6 +386,11 @@ func TestObserve(t *testing.T) {
 					ResourceUpToDate: true,
 				},
 				err: nil,
+				observedPrivileges: []string{
+					"GRANT OPTION",
+					"INSERT",
+					"SELECT",
+				},
 			},
 		},
 		"SuccessDiffGrants": {

@@ -52,7 +52,6 @@ const (
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
-	errFlushPriv    = "cannot flush privileges"
 
 	allPrivileges      = "ALL PRIVILEGES"
 	errCodeNoSuchGrant = 1141
@@ -264,8 +263,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
-	err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog})
-	return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		return managed.ExternalCreation{}, err
+	}
+	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -313,7 +314,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 				Query: query, ErrorValue: errCreateGrant,
 			}, mysql.ExecOptions{
 				Binlog: binlog}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+			return managed.ExternalUpdate{}, err
 		}
 	}
 	return managed.ExternalUpdate{}, nil
