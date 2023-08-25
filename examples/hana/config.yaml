@@ -1,0 +1,10 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: HanaConnectionSecret
+    connectionSecretRef:
+      name: db-conn
+      namespace: default

@@ -1,0 +1,16 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: examplerole
+spec:
+  forProvider:
+    roleName: EXAMPLE_ROLE
+    schema: EXAMPLE_SCHEMA
+    privileges:
+      - CREATE SCHEMA
+      - AUDIT READ
+      - BACKUP OPERATOR
+    ldapGroups:
+      - ldapGroup1
+      - ldapGroup2
+      - ldapGroup3

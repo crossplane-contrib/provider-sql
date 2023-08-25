@@ -1,0 +1,12 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: Usergroup
+metadata:
+  name: exampleusergroup
+spec:
+  forProvider:
+    usergroupName: EXAMPLE_USERGROUP
+    disableUserAdmin: true
+    parameters:
+      password_layout: 'A1a!'
+      minimal_password_length: '10'
+    enableParameterSet: password policy

@@ -1,0 +1,8 @@
+apiVersion: hana.sql.crossplane.io/v1alpha1
+kind: DbSchema
+metadata:
+  name: exampleschema
+spec:
+  forProvider:
+    schemaName: EXAMPLE_SCHEMA
+    owner: DBADMIN
