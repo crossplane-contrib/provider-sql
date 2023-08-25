@@ -9,12 +9,6 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
-var hanaDb = hanaDB{
-	dsn:      "hdb://<USER>:<PASSWORD>@<HOST>:<PORT>?TLSServerName=<HOST>",
-	endpoint: "<HOST>",
-	port:     "<PORT>",
-}
-
 func TestNewDsn(t *testing.T) {
 	type args struct {
 		creds map[string][]byte

@@ -47,7 +47,7 @@ func (m mockClient) Read(ctx context.Context, parameters *v1alpha1.RoleParameter
 }
 
 func (m mockClient) Create(ctx context.Context, parameters *v1alpha1.RoleParameters, args ...any) error {
-	return m.MockCreate(ctx, parameters, args)
+	return m.MockCreate(ctx, parameters, args...)
 }
 
 func (m mockClient) Delete(ctx context.Context, parameters *v1alpha1.RoleParameters) error {
@@ -373,7 +373,6 @@ func TestDelete(t *testing.T) {
 	}
 
 	type want struct {
-		c   managed.ExternalCreation
 		err error
 	}
 
