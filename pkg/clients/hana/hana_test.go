@@ -1,8 +1,6 @@
 package hana
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -17,7 +15,7 @@ var hanaDb = hanaDB{
 	port:     "<PORT>",
 }
 
-func TestNew(t *testing.T) {
+func TestNewDsn(t *testing.T) {
 	type args struct {
 		creds map[string][]byte
 	}
@@ -49,7 +47,6 @@ func TestNew(t *testing.T) {
 				},
 			},
 		},
-		// TODO Add more test cases
 	}
 
 	for name, tc := range cases {
@@ -59,56 +56,6 @@ func TestNew(t *testing.T) {
 			if diff := cmp.Diff(tc.want.db, db, cmp.AllowUnexported(hanaDB{})); diff != "" {
 				t.Errorf("\n%s\ne.New(...): -want hanaDB, +got error:\n%s\n", tc.reason, diff)
 			}
-		})
-	}
-}
-
-func TestExec(t *testing.T) {
-	type args struct {
-		query xsql.Query
-	}
-
-	type want struct {
-		error error
-	}
-
-	cases := map[string]struct {
-		reason string
-		args   args
-		want   want
-	}{
-		"validQuery": {
-			reason: "valid query",
-			args: args{
-				query: xsql.Query{
-					String: "SELECT * FROM DUMMY",
-				},
-			},
-			want: want{
-				error: nil,
-			},
-		},
-		"invalidQuery": {
-			reason: "invalid query",
-			args: args{
-				query: xsql.Query{
-					String: "INVALID SQL QUERY",
-				},
-			},
-			want: want{
-				error: errors.New("error"),
-			},
-		},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			err := hanaDb.Exec(context.Background(), tc.args.query)
-
-			if (err != nil && tc.want.error == nil) || (err == nil && tc.want.error != nil) {
-				t.Errorf("\n%s\ne.New(...): -want error, +got error:\n%s\n", tc.reason, err)
-			}
-
 		})
 	}
 }

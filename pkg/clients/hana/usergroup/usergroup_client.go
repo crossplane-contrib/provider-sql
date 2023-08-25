@@ -35,7 +35,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParamete
 
 	var disableUserAdminString string
 	query := "SELECT USERGROUP_NAME, IS_USER_ADMIN_ENABLED FROM SYS.USERGROUPS WHERE USERGROUP_NAME = ?"
-	err1 := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{parameters.UsergroupName}}, &observed.UsergroupName, &disableUserAdminString)
+	err1 := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []any{parameters.UsergroupName}}, &observed.UsergroupName, &disableUserAdminString)
 	if xsql.IsNoRows(err1) {
 		return observed, nil
 	}
@@ -47,7 +47,7 @@ func (c Client) Read(ctx context.Context, parameters *v1alpha1.UsergroupParamete
 	}
 
 	queryParams := "SELECT USERGROUP_NAME, PARAMETER_NAME, PARAMETER_VALUE FROM SYS.USERGROUP_PARAMETERS WHERE USERGROUP_NAME = ?"
-	paramRows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []interface{}{parameters.UsergroupName}})
+	paramRows, err2 := c.db.Query(ctx, xsql.Query{String: queryParams, Parameters: []any{parameters.UsergroupName}})
 	if err2 != nil {
 		return observed, err2
 	}
