@@ -30,6 +30,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
+
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/usergroup"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
@@ -114,7 +116,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client usergroup.Client
+	client hana.QueryClient[apisv1alpha1.UsergroupParameters, apisv1alpha1.UsergroupObservation]
 	kube   client.Client
 }
 
@@ -214,9 +216,11 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		DisableUserAdmin: cr.Spec.ForProvider.DisableUserAdmin,
 		Parameters:       cr.Spec.ForProvider.Parameters,
 	}
+	// usergroup.Client has additional functions not defined in global interface
+	ugClient, _ := c.client.(usergroup.Client)
 
 	if cr.Status.AtProvider.DisableUserAdmin != parameters.DisableUserAdmin {
-		err := c.client.UpdateDisableUserAdmin(ctx, parameters)
+		err := ugClient.UpdateDisableUserAdmin(ctx, parameters)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUsergroup)
 		}
@@ -228,7 +232,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if !parametersConfigured(observedParameters, desiredParameters) {
 		parametersToUpdate := changedParameters(observedParameters, desiredParameters)
-		err := c.client.UpdateParameters(ctx, parameters, parametersToUpdate)
+		err := ugClient.UpdateParameters(ctx, parameters, parametersToUpdate)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUsergroup)
 		}

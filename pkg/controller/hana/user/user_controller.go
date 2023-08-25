@@ -21,8 +21,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"k8s.io/utils/strings/slices"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"

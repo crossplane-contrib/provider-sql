@@ -21,9 +21,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/role"
 

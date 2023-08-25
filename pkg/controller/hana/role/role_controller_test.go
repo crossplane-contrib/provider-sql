@@ -20,9 +20,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/pkg/errors"
+
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana/role"
-	"github.com/pkg/errors"
 
 	"github.com/crossplane-contrib/provider-sql/apis/hana/v1alpha1"
 
