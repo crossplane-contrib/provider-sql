@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	"k8s.io/utils/strings/slices"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -121,7 +122,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client user.Client
+	client hana.QueryClient[apisv1alpha1.UserParameters, apisv1alpha1.UserObservation]
 	kube   client.Client
 }
 
@@ -307,13 +308,16 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 	}
 
-	err1 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Privileges, observed.Privileges)
+	// userClient has additional functions not defined in global interface
+	userClient, _ := c.client.(user.Client)
+
+	err1 := updateRolesOrPrivileges(ctx, userClient, desired.Username, desired.Privileges, observed.Privileges)
 	if err1 != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err1, errUpdateUser)
 	}
 	cr.Status.AtProvider.Privileges = desired.Privileges
 
-	err2 := updateRolesOrPrivileges(ctx, c, desired.Username, desired.Roles, observed.Roles)
+	err2 := updateRolesOrPrivileges(ctx, userClient, desired.Username, desired.Roles, observed.Roles)
 	if err2 != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err2, errUpdateUser)
 	}
@@ -323,13 +327,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		parametersToSet := compareMaps(desired.Parameters, observed.Parameters)
 		parametersToClear := compareMaps(observed.Parameters, desired.Parameters)
 
-		err := c.client.UpdateParameters(ctx, desired.Username, parametersToSet, parametersToClear)
+		err := userClient.UpdateParameters(ctx, desired.Username, parametersToSet, parametersToClear)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
 	}
 	if observed.Usergroup != desired.Usergroup {
-		err := c.client.UpdateUsergroup(ctx, desired.Username, desired.Usergroup)
+		err := userClient.UpdateUsergroup(ctx, desired.Username, desired.Usergroup)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
@@ -388,11 +392,11 @@ func passwordChanged(created, changed string) bool {
 	return false
 }
 
-func updateRolesOrPrivileges(ctx context.Context, c *external, username string, desired, observed []string) error {
+func updateRolesOrPrivileges(ctx context.Context, client user.Client, username string, desired, observed []string) error {
 	if !equalArrays(observed, desired) {
 		toGrant := stringArrayDifference(desired, observed)
 		toRevoke := stringArrayDifference(observed, desired)
-		err := c.client.UpdateRolesOrPrivileges(ctx, username, toGrant, toRevoke)
+		err := client.UpdateRolesOrPrivileges(ctx, username, toGrant, toRevoke)
 		if err != nil {
 			return err
 		}

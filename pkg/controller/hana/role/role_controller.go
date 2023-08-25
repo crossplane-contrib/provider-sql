@@ -251,7 +251,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	desiredPrivileges := parameters.Privileges
 
 	// roleClient has additional functions not defined in global interface
-	roleClient, ok := c.client.(role.Client)
+	roleClient, _ := c.client.(role.Client)
 
 	if !equalArrays(observedLdapGroups, desiredLdapGroups) {
 		groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
