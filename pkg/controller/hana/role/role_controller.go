@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/hana"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	corev1 "k8s.io/api/core/v1"
 
@@ -118,7 +119,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 // An ExternalClient observes, then either creates, updates, or deletes an
 // external resource to ensure it reflects the managed resource's desired state.
 type external struct {
-	client role.Client
+	client hana.QueryClient[apisv1alpha1.RoleParameters, apisv1alpha1.RoleObservation]
 	kube   client.Client
 }
 
@@ -249,10 +250,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	observedPrivileges := cr.Status.AtProvider.Privileges
 	desiredPrivileges := parameters.Privileges
 
+	// roleClient has additional functions not defined in global interface
+	roleClient, ok := c.client.(role.Client)
+
 	if !equalArrays(observedLdapGroups, desiredLdapGroups) {
 		groupsToAdd := stringArrayDifference(desiredLdapGroups, observedLdapGroups)
 		groupsToRemove := stringArrayDifference(observedLdapGroups, desiredLdapGroups)
-		err := c.client.UpdateLdapGroups(ctx, parameters, groupsToAdd, groupsToRemove)
+		err := roleClient.UpdateLdapGroups(ctx, parameters, groupsToAdd, groupsToRemove)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
@@ -262,7 +266,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !equalArrays(observedPrivileges, desiredPrivileges) {
 		privilegesToAdd := stringArrayDifference(desiredPrivileges, observedPrivileges)
 		privilegesToRemove := stringArrayDifference(observedPrivileges, desiredPrivileges)
-		err := c.client.UpdatePrivileges(ctx, parameters, privilegesToAdd, privilegesToRemove)
+		err := roleClient.UpdatePrivileges(ctx, parameters, privilegesToAdd, privilegesToRemove)
 		if err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
