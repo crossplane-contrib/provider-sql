@@ -19,16 +19,16 @@ package user
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
+	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
@@ -372,7 +372,13 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the user should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "CREATE") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -555,7 +561,13 @@ func TestUpdate(t *testing.T) {
 			reason: "Any errors encountered while updating the user should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "ALTER") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -717,7 +729,13 @@ func TestUpdate(t *testing.T) {
 			reason: "We should not execute an SQL query if the resource options are unchanged.",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "ALTER") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -813,12 +831,16 @@ func TestDelete(t *testing.T) {
 			},
 			want: errors.New(errNotUser),
 		},
-		"ErrDropDB": {
+		"ErrDropUser": {
 			reason: "Errors dropping a user should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						return errBoom
+						if strings.HasPrefix(q.String, "DROP") {
+							return errBoom
+						}
+
+						return nil
 					},
 				},
 			},

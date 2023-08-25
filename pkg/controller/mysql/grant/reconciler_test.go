@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -30,8 +31,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -602,7 +601,13 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the grant should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.HasPrefix(q.String, "GRANT") {
+							return errBoom
+						}
+
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -900,7 +905,11 @@ func TestDelete(t *testing.T) {
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						return errBoom
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return errBoom
+						}
+
+						return nil
 					},
 				},
 			},
@@ -950,7 +959,11 @@ func TestDelete(t *testing.T) {
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
-						return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+						if strings.HasPrefix(q.String, "REVOKE") {
+							return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+						}
+
+						return nil
 					},
 				},
 			},

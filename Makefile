@@ -80,62 +80,11 @@ dev: $(KIND) $(KUBECTL)
 	@$(INFO) Starting Provider SQL controllers
 	@$(GO) run cmd/provider/main.go --debug
 
-dev-debug: $(KIND) $(KUBECTL)
-	@$(INFO) Creating kind cluster
-	@$(KIND) create cluster --name=$(PROJECT_NAME)-dev
-	@$(KUBECTL) cluster-info --context kind-$(PROJECT_NAME)-dev
-	@$(INFO) Installing Crossplane CRDs
-	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
-	@$(INFO) Installing Provider SQL CRDs
-	@$(KUBECTL) apply -R -f package/crds
-	@$(INFO) Start the controllers from IDE now ...
-
 dev-clean: $(KIND) $(KUBECTL)
 	@$(INFO) Deleting kind cluster
 	@$(KIND) delete cluster --name=$(PROJECT_NAME)-dev
 
-dev-install: $(KIND) $(KUBECTL)
-	@$(INFO) Installing Provider SQL CRDs
-	@$(KUBECTL) apply -R -f package/crds
-
-dev-init: $(KIND) $(KUBECTL)
-	@$(INFO) Applying hana examples
-	@$(KUBECTL) apply -f examples/hana/secret.yaml
-	@$(KUBECTL) apply -f examples/hana/config.yaml
-	@$(KUBECTL) apply -f examples/hana/dbschema.yaml
-	@$(KUBECTL) apply -f examples/hana/user_secret.yaml
-	@$(KUBECTL) apply -f examples/hana/user.yaml
-	@$(KUBECTL) apply -f examples/hana/usergroup.yaml
-	@$(KUBECTL) apply -f examples/hana/role.yaml
-
-.PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean dev-debug
-
-# Install gomplate
-GOMPLATE_VERSION := 3.10.0
-GOMPLATE := $(TOOLS_HOST_DIR)/gomplate-$(GOMPLATE_VERSION)
-
-$(GOMPLATE):
-	@$(INFO) installing gomplate $(SAFEHOSTPLATFORM)
-	@mkdir -p $(TOOLS_HOST_DIR)
-	@curl -fsSLo $(GOMPLATE) https://github.com/hairyhenderson/gomplate/releases/download/v$(GOMPLATE_VERSION)/gomplate_$(SAFEHOSTPLATFORM) || $(FAIL)
-	@chmod +x $(GOMPLATE)
-	@$(OK) installing gomplate $(SAFEHOSTPLATFORM)
-
-export GOMPLATE
-
-# This target adds a new api type and its controller.
-# You would still need to register new api in "apis/<provider>.go" and
-# controller in "internal/controller/<provider>.go".
-# Arguments:
-#   provider: Camel case name of your provider, e.g. GitHub, PlanetScale
-#   group: API group for the type you want to add.
-#   kind: Kind of the type you want to add
-#	apiversion: API version of the type you want to add. Optional and defaults to "v1alpha1"
-provider.addtype: $(GOMPLATE)
-	@[ "${provider}" ] || ( echo "argument \"provider\" is not set"; exit 1 )
-	@[ "${group}" ] || ( echo "argument \"group\" is not set"; exit 1 )
-	@[ "${kind}" ] || ( echo "argument \"kind\" is not set"; exit 1 )
-	@PROVIDER=$(provider) GROUP=$(group) KIND=$(kind) APIVERSION=$(apiversion) ./hack/helpers/addtype.sh
+.PHONY: submodules fallthrough test-integration run crds.clean dev dev-clean
 
 # ====================================================================================
 # Special Targets

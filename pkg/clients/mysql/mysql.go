@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
-
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -16,6 +16,8 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
+	errSetSQLLogBin = "cannot set sql_log_bin = 0"
+	errFlushPriv    = "cannot flush privileges"
 )
 
 type mySQLDB struct {
@@ -129,4 +131,55 @@ func SplitUserHost(user string) (username, host string) {
 		host = parts[1]
 	}
 	return username, host
+}
+
+// ExecQuery declares the query to execute and its error value if it fails
+type ExecQuery struct {
+	// Query defines the sql statement to execute
+	Query string
+	// ErrorValue defines what error will be returned if the provided sql statement failed when executing
+	ErrorValue string
+}
+
+// ExecOptions parametrizes which optional statements will be executed before or after ExecQuery.Query
+type ExecOptions struct {
+	// Binlog defines whether storing binlogs will be disabled before executing the query. Defaults to true
+	Binlog *bool
+	// Flush defines whether privileges will be flushed after executing the query. Defaults to true
+	Flush *bool
+}
+
+// ExecWithBinlogAndFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWithBinlogAndFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
+	if options.Binlog == nil {
+		options.Binlog = pointer.Bool(true)
+	}
+
+	if options.Flush == nil {
+		options.Flush = pointer.Bool(true)
+	}
+
+	if !*options.Binlog {
+		if err := db.Exec(ctx, xsql.Query{
+			String: "SET sql_log_bin = 0",
+		}); err != nil {
+			return errors.Wrap(err, errSetSQLLogBin)
+		}
+	}
+
+	if err := db.Exec(ctx, xsql.Query{
+		String: query.Query,
+	}); err != nil {
+		return errors.Wrap(err, query.ErrorValue)
+	}
+
+	if *options.Flush {
+		if err := db.Exec(ctx, xsql.Query{
+			String: "FLUSH PRIVILEGES",
+		}); err != nil {
+			return errors.Wrap(err, errFlushPriv)
+		}
+	}
+
+	return nil
 }

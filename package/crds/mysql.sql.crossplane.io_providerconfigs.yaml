@@ -81,7 +81,7 @@ spec:
                   allows a fallback to a connection which is not encrypted. Neither
                   skip-verify nor preferred add any reliable security.
                 enum:
-                - true
+                - "true"
                 - skip-verify
                 - preferred
                 type: string
