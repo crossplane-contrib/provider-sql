@@ -36,7 +36,7 @@ KIND_NODE_IMAGE_TAG ?= v1.23.4
 # ====================================================================================
 # Setup Kubernetes tools
 
-UP_VERSION = v0.13.0
+UP_VERSION = v0.18.0
 UP_CHANNEL = stable
 -include build/makelib/k8s_tools.mk
 
