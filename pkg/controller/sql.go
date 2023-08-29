@@ -19,7 +19,7 @@ package controller
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/controller"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql"
@@ -28,8 +28,8 @@ import (
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds
 // them to the supplied manager.
-func Setup(mgr ctrl.Manager, l logging.Logger) error {
-	for _, setup := range []func(ctrl.Manager, logging.Logger) error{
+func Setup(mgr ctrl.Manager, l controller.Options) error {
+	for _, setup := range []func(ctrl.Manager, controller.Options) error{
 		mssql.Setup,
 		mysql.Setup,
 		postgresql.Setup,

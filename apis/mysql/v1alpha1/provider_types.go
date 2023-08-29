@@ -31,7 +31,7 @@ type ProviderConfigSpec struct {
 	// or use preferred to use TLS only when advertised by the server. This is similar
 	// to skip-verify, but additionally allows a fallback to a connection which is
 	// not encrypted. Neither skip-verify nor preferred add any reliable security.
-	// +kubebuilder:validation:Enum=true;skip-verify;preferred
+	// +kubebuilder:validation:Enum="true";skip-verify;preferred
 	// +optional
 	TLS *string `json:"tls"`
 }

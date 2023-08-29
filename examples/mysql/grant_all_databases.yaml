@@ -1,7 +1,7 @@
 apiVersion: mysql.sql.crossplane.io/v1alpha1
 kind: Grant
 metadata:
-  name: example-grant
+  name: example-grant-all-databases
 spec:
   forProvider:
     privileges:
@@ -10,5 +10,3 @@ spec:
       - EVENT
     userRef:
       name: example-user
-    databaseRef:
-      name: example-db

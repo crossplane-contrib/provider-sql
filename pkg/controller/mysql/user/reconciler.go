@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -30,8 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	xpcontroller "github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/password"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -53,7 +52,6 @@ const (
 	errCreateUser              = "cannot create user"
 	errDropUser                = "cannot drop user"
 	errUpdateUser              = "cannot update user"
-	errFlushPriv               = "cannot flush privileges"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errCompareResourceOptions  = "cannot compare desired and observed resource options"
 
@@ -61,15 +59,15 @@ const (
 )
 
 // Setup adds a controller that reconciles User managed resources.
-func Setup(mgr ctrl.Manager, l logging.Logger) error {
+func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
-		managed.WithLogger(l.WithValues("controller", name)),
-		managed.WithPollInterval(10*time.Minute),
+		managed.WithLogger(o.Logger.WithValues("controller", name)),
+		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -244,6 +242,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
+
 	if pw == "" {
 		pw, err = password.Generate()
 		if err != nil {
@@ -251,28 +250,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	var resourceOptions string
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	if len(ro) != 0 {
-		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(ro, " "))
-	}
-
-	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s%s",
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-		mysql.QuoteValue(pw),
-		resourceOptions,
-	)
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: query,
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
-	}
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "FLUSH PRIVILEGES",
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errFlushPriv)
+	binlog := cr.Spec.ForProvider.BinLog
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw, binlog); err != nil {
+		return managed.ExternalCreation{}, err
 	}
 
 	if len(ro) != 0 {
@@ -284,6 +265,27 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string, binlog *bool) error {
+	resourceOptions := ""
+	if len(resourceOptionsClauses) != 0 {
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
+	}
+
+	query := fmt.Sprintf(
+		"CREATE USER %s@%s IDENTIFIED BY %s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		mysql.QuoteValue(pw),
+		resourceOptions,
+	)
+
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
@@ -291,10 +293,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	pw, pwchanged, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ExternalUpdate{}, err
-	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 	rochanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
@@ -305,44 +303,49 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(rochanged) > 0 {
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
+		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf(
 			"ALTER USER %s@%s %s",
 			mysql.QuoteValue(username),
 			mysql.QuoteValue(host),
 			resourceOptions,
 		)
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: query,
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
-		}
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+			return managed.ExternalUpdate{}, err
 		}
 
 		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
+	connectionDetails, err := c.UpdatePassword(ctx, cr, username, host)
+	if err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	if len(connectionDetails) > 0 {
+		return managed.ExternalUpdate{ConnectionDetails: connectionDetails}, nil
+	}
+
+	return managed.ExternalUpdate{}, nil
+}
+
+func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, username, host string) (managed.ConnectionDetails, error) {
+	pw, pwchanged, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ConnectionDetails{}, err
+	}
+
 	if pwchanged {
+		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: query,
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
-		}
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errFlushPriv)
+		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+			return managed.ConnectionDetails{}, err
 		}
 
-		return managed.ExternalUpdate{
-			ConnectionDetails: c.db.GetConnectionDetails(username, pw),
-		}, nil
+		return c.db.GetConnectionDetails(username, pw), nil
 	}
-	return managed.ExternalUpdate{}, nil
+
+	return managed.ConnectionDetails{}, nil
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
@@ -354,16 +357,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr.SetConditions(xpv1.Deleting())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host)),
-	}); err != nil {
-		return errors.Wrap(err, errDropUser)
+
+	binlog := cr.Spec.ForProvider.BinLog
+	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
+	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		return err
 	}
-	if err := c.db.Exec(ctx, xsql.Query{
-		String: "FLUSH PRIVILEGES",
-	}); err != nil {
-		return errors.Wrap(err, errFlushPriv)
-	}
+
 	return nil
 }
 

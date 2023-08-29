@@ -45,6 +45,10 @@ type UserParameters struct {
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
 	// +optional
 	ResourceOptions *ResourceOptions `json:"resourceOptions,omitempty"`
+
+	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
+	// +optional
+	BinLog *bool `json:"binlog,omitempty" default:"true"`
 }
 
 // ResourceOptions define the account specific resource limits.

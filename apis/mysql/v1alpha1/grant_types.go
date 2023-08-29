@@ -92,11 +92,22 @@ type GrantParameters struct {
 	// +immutable
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+
+	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
+	// +optional
+	BinLog *bool `json:"binlog,omitempty" default:"true"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
+	AtProvider          GrantObservation `json:"atProvider,omitempty"`
+}
+
+// A GrantObservation represents the observed state of a MySQL grant.
+type GrantObservation struct {
+	// Privileges represents the applied privileges
+	Privileges []string `json:"privileges,omitempty"`
 }
 
 // +kubebuilder:object:root=true
