@@ -137,11 +137,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	observedPrivileges, result, err := c.getPrivileges(ctx, username, dbname, table)
+	observedPrivileges, result, err := c.getPrivileges(ctx, user, dbname, table)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -254,15 +254,15 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
+	privileges := cr.Spec.ForProvider.Privileges.ToStringSlice()
 	grantOption := hasGrantOption(cr)
 	binlog := cr.Spec.ForProvider.BinLog
-	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
+	query := createGrantQuery(privileges, dbname, user, table, grantOption)
 	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
@@ -275,11 +275,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	username, host := mysql.SplitUserHost(username)
 	binlog := cr.Spec.ForProvider.BinLog
 
 	observed := cr.Status.AtProvider.Privileges
@@ -289,14 +288,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
-		query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
-			strings.Join(toRevoke, ", "),
-			dbname,
-			table,
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-		)
-
+		query := createRevokeQuery(toRevoke, dbname, user, table)
 		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
@@ -308,7 +300,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
-		query := createGrantQuery(strings.Join(toGrant, ", "), dbname, username, table, grantOption)
+		query := createGrantQuery(toGrant, dbname, user, table, grantOption)
 		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
@@ -330,10 +322,10 @@ func hasGrantOption(cr *v1alpha1.Grant) bool {
 	return false
 }
 
-func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
+func createGrantQuery(toGrant []string, dbname, username string, table string, grantOption bool) string {
 	username, host := mysql.SplitUserHost(username)
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
-		privileges,
+		strings.Join(toGrant, ", "),
 		dbname,
 		table,
 		mysql.QuoteValue(username),
@@ -347,18 +339,31 @@ func createGrantQuery(privileges, dbname, username string, table string, grantOp
 	return result
 }
 
+func createRevokeQuery(toRevoke []string, dbname, username string, table string) string {
+	username, host := mysql.SplitUserHost(username)
+	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
+		strings.Join(toRevoke, ", "),
+		dbname,
+		table,
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+	)
+
+	return query
+}
+
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
 		return errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	user := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	username, host := mysql.SplitUserHost(username)
+	username, host := mysql.SplitUserHost(user)
 	binlog := cr.Spec.ForProvider.BinLog
 
 	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
