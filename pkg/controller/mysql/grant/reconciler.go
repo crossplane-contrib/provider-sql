@@ -328,7 +328,7 @@ func getPrivilegesString(privileges []string) (string, bool) {
 
 func createRevokeQuery(privileges, dbname, username string, table string, grantOption bool) string {
 	username, host := mysql.SplitUserHost(username)
-	result := fmt.Sprintf("REVOKE %s ON %s.%s TO %s@%s",
+	result := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
 		dbname,
 		table,
