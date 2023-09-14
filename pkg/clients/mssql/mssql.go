@@ -48,6 +48,9 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 
+	// Remove port from endpoint if it is added to the endpoint
+	endpoint = strings.Split(endpoint, ":")[0]
+
 	host := endpoint
 	if port != "" {
 		host = fmt.Sprintf("%s:%s", endpoint, port)
