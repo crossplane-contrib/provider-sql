@@ -11,6 +11,8 @@ Please see [GOVERNANCE.md] for governance guidelines and responsibilities.
 * Jeroen Op 't Eynde ([Duologic](https://github.com/Duologic))
 * James Wilson <jwilson511@me.com> ([jdotw](https://github.com/jdotw))
 * Nic Cope <negz@upbound.io> ([negz](https://github.com/negz))
+* Javier Palomo ([jvrplmlmn](https://github.com/jvrplmlmn))
+* Iain Lane ([iainlane](https://github.com/iainlane))
 
 ## Emeritus maintainers
 
