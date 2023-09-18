@@ -258,8 +258,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	grantOption := hasGrantOption(cr)
+	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
 	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
@@ -278,25 +277,16 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	username, host := mysql.SplitUserHost(username)
 	binlog := cr.Spec.ForProvider.BinLog
 
 	observed := cr.Status.AtProvider.Privileges
 	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desired, observed)
-	grantOption := hasGrantOption(cr)
 
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
-		query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
-			strings.Join(toRevoke, ", "),
-			dbname,
-			table,
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-		)
-
+		privileges, grantOption := getPrivilegesString(toRevoke)
+		query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
@@ -308,8 +298,8 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
-		query := createGrantQuery(strings.Join(toGrant, ", "), dbname, username, table, grantOption)
-
+		privileges, grantOption := getPrivilegesString(toGrant)
+		query := createGrantQuery(privileges, dbname, username, table, grantOption)
 		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
@@ -321,14 +311,36 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, nil
 }
 
-// hasGrantOption returns true if the privileges has a grant option item
-func hasGrantOption(cr *v1alpha1.Grant) bool {
-	for _, p := range cr.Spec.ForProvider.Privileges {
-		if string(p) == "GRANT OPTION" {
-			return true
+// getPrivilegesString returns a privileges string without grant option item and a grantOption boolean
+func getPrivilegesString(privileges []string) (string, bool) {
+	privilegesWithoutGrantOption := []string{}
+	grantOption := false
+	for _, p := range privileges {
+		if p == "GRANT OPTION" {
+			grantOption = true
+			continue
 		}
+		privilegesWithoutGrantOption = append(privilegesWithoutGrantOption, p)
 	}
-	return false
+	out := strings.Join(privilegesWithoutGrantOption, ", ")
+	return out, grantOption
+}
+
+func createRevokeQuery(privileges, dbname, username string, table string, grantOption bool) string {
+	username, host := mysql.SplitUserHost(username)
+	result := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
+		privileges,
+		dbname,
+		table,
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+	)
+
+	if grantOption {
+		result = fmt.Sprintf("%s WITH GRANT OPTION", result)
+	}
+
+	return result
 }
 
 func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
@@ -357,18 +369,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	privileges := strings.Join(cr.Spec.ForProvider.Privileges.ToStringSlice(), ", ")
-	username, host := mysql.SplitUserHost(username)
 	binlog := cr.Spec.ForProvider.BinLog
 
-	query := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
-		privileges,
-		dbname,
-		table,
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-	)
+	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
+	query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		var myErr *mysqldriver.MySQLError
