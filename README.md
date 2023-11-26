@@ -14,9 +14,24 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
 ## Usage
 
-1. Create a connection secret:
+1. Install the provider
 
-   To create provider-sql managed resources, you will first need a K8s secret
+   In order to be able to use this provider you will need to apply this manifest first:
+
+   ```
+   echo "
+   apiVersion: pkg.crossplane.io/v1
+   kind: Provider
+   metadata:
+   name: provider-sql
+   spec:
+   package: "crossplane/provider-sql:v0.7.0"
+   " | kubectl -n crossplane-system apply -f -
+   ```
+
+2. Create a connection secret:
+
+   To create provider-sql managed resources, you will then need a K8s secret
    with the connection details to an existing SQL server.
 
    This secret could either be [created automatically] by provisioning an SQL server
@@ -31,7 +46,7 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
      --from-literal=port=3306
    ```
 
-2. Create managed resource for your SQL server flavor:
+3. Create managed resource for your SQL server flavor:
 
    - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
    - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
