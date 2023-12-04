@@ -1,0 +1,11 @@
+apiVersion: mssql.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-user-ad
+  annotations:
+    crossplane.io/external-name: "example-user@example.com"
+spec:
+  forProvider:
+    type: AD
+    databaseRef:
+      name: example-db-ad

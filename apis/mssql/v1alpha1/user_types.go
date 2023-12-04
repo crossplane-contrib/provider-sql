@@ -48,6 +48,7 @@ type UserParameters struct {
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	Type              *string                 `json:"type,omitempty"`
 }
 
 // A UserObservation represents the observed state of a MSSQL user.
