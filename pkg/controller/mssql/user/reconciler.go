@@ -169,16 +169,25 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
+	var query string
+	var pw string
+	if t := cr.Spec.ForProvider.Type; t == nil || *t != "AD" {
 
-	pw, _, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ExternalCreation{}, err
-	}
-	if pw == "" {
-		pw, err = password.Generate()
+		pw, _, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalCreation{}, err
 		}
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalCreation{}, err
+			}
+		}
+
+		query = fmt.Sprintf("CREATE USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+	} else {
+		query = fmt.Sprintf("CREATE USER %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+
 	}
 
 	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
@@ -219,9 +228,18 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
 
-		return managed.ExternalUpdate{
-			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
-		}, nil
+		if changed {
+			query := fmt.Sprintf("ALTER USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+			if err := c.db.Exec(ctx, xsql.Query{
+				String: query,
+			}); err != nil {
+				return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+			}
+
+			return managed.ExternalUpdate{
+				ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+			}, nil
+		}
 	}
 	return managed.ExternalUpdate{}, nil
 }

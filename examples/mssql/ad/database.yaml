@@ -1,5 +1,5 @@
 apiVersion: mssql.sql.crossplane.io/v1alpha1
 kind: Database
 metadata:
-  name: example-db
+  name: example-db-ad
 spec: {}
