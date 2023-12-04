@@ -132,8 +132,22 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	var name string
+	var query string
+	var userType string
+	if cr.Spec.ForProvider.Type == nil {
+		userType = v1alpha1.UserTypeLocal
+	} else {
+		userType = *cr.Spec.ForProvider.Type
+	}
+	switch userType {
+	case v1alpha1.UserTypeAD:
+		query = "SELECT name FROM sys.database_principals WHERE type IN ('E','X') AND name = @p1"
+	case v1alpha1.UserTypeLocal:
+		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
+	default:
+		return managed.ExternalObservation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 
-	query := "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
+	}
 	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{
 		meta.GetExternalName(cr)},
 	}, &name)
@@ -163,9 +177,17 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
 	var query string
-	var pw string
-	if t := cr.Spec.ForProvider.Type; t == nil || *t != "AD" {
-
+	var outPw string
+	var userType string
+	if cr.Spec.ForProvider.Type == nil {
+		userType = v1alpha1.UserTypeLocal
+	} else {
+		userType = *cr.Spec.ForProvider.Type
+	}
+	switch userType {
+	case v1alpha1.UserTypeAD:
+		query = fmt.Sprintf("CREATE USER %s FROM EXTERNAL PROVIDER", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	case v1alpha1.UserTypeLocal:
 		pw, _, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalCreation{}, err
@@ -176,10 +198,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 				return managed.ExternalCreation{}, err
 			}
 		}
-
+		outPw = pw
 		query = fmt.Sprintf("CREATE USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-	} else {
-		query = fmt.Sprintf("CREATE USER %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	default:
+		return managed.ExternalCreation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 
 	}
 
@@ -190,7 +212,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	return managed.ExternalCreation{
-		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), outPw),
 	}, nil
 }
 
@@ -200,7 +222,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	if t := cr.Spec.ForProvider.Type; t == nil || *t != "AD" {
+	if t := cr.Spec.ForProvider.Type; t == nil || *t == v1alpha1.UserTypeLocal {
 		pw, changed, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalUpdate{}, err

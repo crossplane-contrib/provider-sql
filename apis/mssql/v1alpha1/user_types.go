@@ -22,6 +22,12 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
+// UserTypes
+const (
+	UserTypeLocal = "Local"
+	UserTypeAD    = "AD"
+)
+
 // A UserSpec defines the desired state of a Database.
 type UserSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
