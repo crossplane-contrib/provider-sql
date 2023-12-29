@@ -240,11 +240,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	for rows.Next() {
 		var sessionID int
-
 		if err := rows.Scan(&sessionID); err != nil {
 			return errors.Wrap(err, errCannotGetLogins)
 		}
-
 		if err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
 			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
 		}
