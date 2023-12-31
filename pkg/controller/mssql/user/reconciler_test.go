@@ -384,7 +384,7 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.User{},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateUser),
+				err: errors.Wrapf(errBoom, errCreateLogin, ""),
 			},
 		},
 		"Success": {

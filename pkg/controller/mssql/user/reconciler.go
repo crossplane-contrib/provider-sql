@@ -49,7 +49,8 @@ const (
 
 	errNotUser                = "managed resource is not a User custom resource"
 	errSelectUser             = "cannot select user"
-	errCreateUser             = "cannot create user"
+	errCreateUser             = "cannot create user %s"
+	errCreateLogin            = "cannot create login %s"
 	errDropUser               = "error dropping user %s"
 	errDropLogin              = "error dropping login %s"
 	errCannotGetLogins        = "cannot get current logins"
@@ -130,8 +131,6 @@ type external struct {
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	fmt.Print("in observe")
-
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotUser)
@@ -184,14 +183,14 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: loginQuery,
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
 	}
 
-	query := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: query,
+		String: userQuery,
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
 	}
 
 	return managed.ExternalCreation{
