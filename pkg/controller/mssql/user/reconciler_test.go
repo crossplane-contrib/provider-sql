@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -42,6 +43,7 @@ type mockDB struct {
 	MockExec   func(ctx context.Context, q xsql.Query) error
 	MockExecTx func(ctx context.Context, ql []xsql.Query) error
 	MockScan   func(ctx context.Context, q xsql.Query, dest ...interface{}) error
+	MockQuery  func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -54,7 +56,7 @@ func (m mockDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) err
 	return m.MockScan(ctx, q, dest...)
 }
 func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	return &sql.Rows{}, nil
+	return m.MockQuery(ctx, q)
 }
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
@@ -63,6 +65,17 @@ func (m mockDB) GetConnectionDetails(username, password string) managed.Connecti
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 	}
+}
+
+func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
+	db, mock, _ := sqlmock.New()
+	mock.ExpectQuery("select").WillReturnRows(mockRows)
+	rows, err := db.Query("select")
+	if err != nil {
+		println("%v", err)
+		return nil
+	}
+	return rows
 }
 
 func TestConnect(t *testing.T) {
@@ -371,7 +384,7 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.User{},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateUser),
+				err: errors.Wrapf(errBoom, errCreateLogin, ""),
 			},
 		},
 		"Success": {
@@ -722,6 +735,9 @@ func TestDelete(t *testing.T) {
 			reason: "Errors dropping a user should be returned",
 			fields: fields{
 				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return errBoom
 					},
@@ -730,12 +746,15 @@ func TestDelete(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{},
 			},
-			want: errors.Wrap(errBoom, errDropUser),
+			want: errors.Wrapf(errBoom, errDropUser, ""),
 		},
 		"Success": {
 			reason: "No error should be returned",
 			fields: fields{
 				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return nil
 					},
