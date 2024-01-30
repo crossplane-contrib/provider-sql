@@ -22,7 +22,6 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -152,7 +151,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	binlog := cr.Spec.ForProvider.BinLog
 	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(false)}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -173,7 +172,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	binlog := cr.Spec.ForProvider.BinLog
 	query := "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}, mysql.ExecOptions{Binlog: binlog, Flush: pointer.Bool(false)}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return err
 	}
 

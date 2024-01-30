@@ -262,7 +262,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 	return managed.ExternalCreation{}, nil
@@ -287,7 +287,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		sort.Strings(toRevoke)
 		privileges, grantOption := getPrivilegesString(toRevoke)
 		query := createRevokeQuery(privileges, dbname, username, table, grantOption)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
 			}, mysql.ExecOptions{
@@ -300,7 +300,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		sort.Strings(toGrant)
 		privileges, grantOption := getPrivilegesString(toGrant)
 		query := createGrantQuery(privileges, dbname, username, table, grantOption)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
 			}, mysql.ExecOptions{
@@ -374,7 +374,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
 	query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
 			// MySQL automatically deletes related grants if the user has been deleted
