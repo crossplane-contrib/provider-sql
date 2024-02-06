@@ -38,6 +38,7 @@ func New(creds map[string][]byte, tls *string) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
+	endpoint = strings.Split(endpoint, ":")[0]
 	dsn := DSN(username, password, endpoint, port, *tls)
 
 	return mySQLDB{

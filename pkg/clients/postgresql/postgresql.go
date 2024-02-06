@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -37,6 +38,9 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
 	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
 	dsn := DSN(username, password, endpoint, port, database, sslmode)
+
+	// Remove port from endpoint if it is added to the endpoint
+	endpoint = strings.Split(endpoint, ":")[0]
 
 	return postgresDB{
 		dsn:      dsn,
