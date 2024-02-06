@@ -77,7 +77,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, tls *string) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -110,7 +110,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{db: c.newDB(s.Data, pc.Spec.TLS)}, nil
+	return &external{db: c.newDB(s.Data, pc.Spec.TLS, cr.Spec.ForProvider.BinLog)}, nil
 }
 
 type external struct{ db xsql.DB }
@@ -148,10 +148,9 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)
 	}
 
-	binlog := cr.Spec.ForProvider.BinLog
 	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}, mysql.ExecOptions{Binlog: binlog, Flush: ptr.To(false)}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}, mysql.ExecOptions{Flush: ptr.To(false)}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -169,10 +168,9 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotDatabase)
 	}
 
-	binlog := cr.Spec.ForProvider.BinLog
 	query := "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}, mysql.ExecOptions{Binlog: binlog, Flush: ptr.To(false)}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}, mysql.ExecOptions{Flush: ptr.To(false)}); err != nil {
 		return err
 	}
 

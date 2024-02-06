@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -16,7 +17,6 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
-	errSetSQLLogBin = "cannot set sql_log_bin = 0"
 	errFlushPriv    = "cannot flush privileges"
 )
 
@@ -28,7 +28,7 @@ type mySQLDB struct {
 }
 
 // New returns a new MySQL database client.
-func New(creds map[string][]byte, tls *string) xsql.DB {
+func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
@@ -38,7 +38,11 @@ func New(creds map[string][]byte, tls *string) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
-	dsn := DSN(username, password, endpoint, port, *tls)
+	if binlog == nil {
+		defaultBinlog := true
+		binlog = &defaultBinlog
+	}
+	dsn := DSN(username, password, endpoint, port, *tls, *binlog)
 
 	return mySQLDB{
 		dsn:      dsn,
@@ -49,16 +53,17 @@ func New(creds map[string][]byte, tls *string) xsql.DB {
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string) string {
+func DSN(username, password, endpoint, port, tls string, binlog bool) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
 		username,
 		password,
 		endpoint,
 		port,
-		tls)
+		tls,
+		strconv.FormatBool(binlog))
 }
 
 // ExecTx is unsupported in MySQL.
@@ -143,28 +148,14 @@ type ExecQuery struct {
 
 // ExecOptions parametrizes which optional statements will be executed before or after ExecQuery.Query
 type ExecOptions struct {
-	// Binlog defines whether storing binlogs will be disabled before executing the query. Defaults to true
-	Binlog *bool
 	// Flush defines whether privileges will be flushed after executing the query. Defaults to true
 	Flush *bool
 }
 
-// ExecWithBinlogAndFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
-func ExecWithBinlogAndFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
-	if options.Binlog == nil {
-		options.Binlog = ptr.To(true)
-	}
-
+// ExecWithFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWithFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
 	if options.Flush == nil {
 		options.Flush = ptr.To(true)
-	}
-
-	if !*options.Binlog {
-		if err := db.Exec(ctx, xsql.Query{
-			String: "SET sql_log_bin = 0",
-		}); err != nil {
-			return errors.Wrap(err, errSetSQLLogBin)
-		}
 	}
 
 	if err := db.Exec(ctx, xsql.Query{
