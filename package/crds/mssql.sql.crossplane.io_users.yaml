@@ -158,6 +158,8 @@ spec:
                     - name
                     - namespace
                     type: object
+                  type:
+                    type: string
                 type: object
               providerConfigRef:
                 default:

@@ -32,22 +32,26 @@ import (
 )
 
 const (
-	driverName = "sqlserver"
+	schema        = "sqlserver"
+	stdDriverName = "sqlserver"
+	azDriverName  = "azuresql"
 
 	errNotSupported = "%s not supported by MSSQL client"
+	fedauth         = "fedauth"
 )
 
 type mssqlDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	driver   string
 }
 
 // New returns a new mssql database client.
 func New(creds map[string][]byte, database string) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-
+	driver := stdDriverName
 	host := endpoint
 	if port != "" {
 		host = fmt.Sprintf("%s:%s", endpoint, port)
@@ -57,16 +61,36 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	if database != "" {
 		query.Add("database", database)
 	}
-	u := &url.URL{
-		Scheme:   driverName,
-		User:     url.UserPassword(string(creds[xpv1.ResourceCredentialsSecretUserKey]), string(creds[xpv1.ResourceCredentialsSecretPasswordKey])),
-		Host:     host,
-		RawQuery: query.Encode(),
+	var u *url.URL
+	if val, ok := creds[fedauth]; ok {
+		authType := string(val)
+		query.Add(fedauth, authType)
+		if authType == "ActiveDirectoryServicePrincipal" || authType == "ActiveDirectoryApplication" || authType == "ActiveDirectoryPassword" {
+			query.Add("password", string(creds[xpv1.ResourceCredentialsSecretPasswordKey]))
+		}
+		if val, ok := creds[xpv1.ResourceCredentialsSecretUserKey]; ok {
+			query.Add("user id", string(val))
+		}
+		u = &url.URL{
+			Scheme:   schema,
+			Host:     host,
+			RawQuery: query.Encode(),
+		}
+		driver = azDriverName
+	} else {
+
+		u = &url.URL{
+			Scheme:   schema,
+			User:     url.UserPassword(string(creds[xpv1.ResourceCredentialsSecretUserKey]), string(creds[xpv1.ResourceCredentialsSecretPasswordKey])),
+			Host:     host,
+			RawQuery: query.Encode(),
+		}
 	}
 	return mssqlDB{
 		dsn:      u.String(),
 		endpoint: endpoint,
 		port:     port,
+		driver:   driver,
 	}
 }
 
@@ -77,7 +101,7 @@ func (c mssqlDB) ExecTx(_ context.Context, _ []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -89,7 +113,7 @@ func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +124,7 @@ func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open(driverName, c.dsn)
+	db, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return err
 	}
