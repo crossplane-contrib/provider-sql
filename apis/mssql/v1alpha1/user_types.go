@@ -24,8 +24,9 @@ import (
 
 // UserTypes
 const (
-	UserTypeLocal = "Local"
-	UserTypeAD    = "AD"
+	UserTypeLocal 			= "Local"
+	UserTypeLocalContained  = "LocalContained"
+	UserTypeAD    			= "AD"
 )
 
 // A UserSpec defines the desired state of a Database.

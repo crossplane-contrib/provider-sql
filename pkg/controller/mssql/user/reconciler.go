@@ -149,6 +149,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		query = "SELECT name FROM sys.database_principals WHERE type IN ('E','X') AND name = @p1"
 	case v1alpha1.UserTypeLocal:
 		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
+	case v1alpha1.UserTypeLocalContained:
+		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	default:
 		return managed.ExternalObservation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 
@@ -223,7 +225,27 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}); err != nil {
 			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
 		}
-	
+
+	case v1alpha1.UserTypeLocalContained:
+		pw, _, err := c.getPassword(ctx, cr)
+		if err != nil {
+			return managed.ExternalCreation{}, err
+		}
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalCreation{}, err
+			}
+		}
+		outPw = pw
+
+		userQuery := fmt.Sprintf("CREATE USER %s WITH PASSWORD = %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+		if err := c.db.Exec(ctx, xsql.Query{
+			String: userQuery,
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
+		}
+		
 	default:
 		return managed.ExternalCreation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 
@@ -246,6 +268,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, err
 		}
 
+		// TODO: Need to support alterning contained users.
 		if changed {
 			query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
 			if err := c.db.Exec(ctx, xsql.Query{
@@ -268,6 +291,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
+	// TODO: Need to support alterning contained users.
 	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
 	if err != nil {
