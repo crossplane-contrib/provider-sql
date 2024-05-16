@@ -47,6 +47,7 @@ type GrantPrivileges []GrantPrivilege
 // happen internally inside postgresql when making grants. When we query the
 // privileges back, we need to look for the expanded set.
 // https://www.postgresql.org/docs/15/ddl-priv.html
+// TODO: Grand ALL ON SCHEMA should be expanded to GRANT USAGE, CREATE ON SCHEMA
 var grantReplacements = map[GrantPrivilege]GrantPrivileges{
 	"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
 	"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
@@ -141,6 +142,20 @@ type GrantParameters struct {
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
+	// Schema this grant is for.
+	// +optional
+	Schema *string `json:"schema,omitempty"`
+
+	// SchemaRef references the schema object this grant it for.
+	// +immutable
+	// +optional
+	SchemaRef *xpv1.Reference `json:"schemaRef,omitempty"`
+
+	// SchemaSelector selects a reference to a Schema this grant is for.
+	// +immutable
+	// +optional
+	SchemaSelector *xpv1.Selector `json:"schemaSelector,omitempty"`
+
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
 	MemberOf *string `json:"memberOf,omitempty"`
@@ -158,6 +173,22 @@ type GrantParameters struct {
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
 	RevokePublicOnDb *bool `json:"revokePublicOnDb,omitempty" default:"false"`
+
+	// ObjectType is the PostgreSQL object type to grant the privileges on.
+	// +kubebuilder:validation:Enum=database;schema;table;sequence;function;procedure;routine;foreign_data_wrapper;foreign_server;column
+	ObjectType string `json:"objectType" default:"database"`
+
+	// Objects are the objects upon which to grant the privileges.
+	// An empty list (the default) means to grant permissions on all objects of the specified type.
+	// You cannot specify this option if the objectType is database or schema.
+	// When objectType is column, only one value is allowed.
+	// +optional
+	Objects []string `json:"objects,omitempty"`
+
+	// The columns upon which to grant the privileges.
+	// Required when object_type is column. You cannot specify this option if the object_type is not column
+	// +optional
+	Columns []string `json:"columns,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
@@ -211,6 +242,20 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 	}
 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
 	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.schema
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
+		Reference:    mg.Spec.ForProvider.SchemaRef,
+		Selector:     mg.Spec.ForProvider.SchemaSelector,
+		To:           reference.To{Managed: &Schema{}, List: &SchemaList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.schema")
+	}
+	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
 
 	// Resolve spec.forProvider.role
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
