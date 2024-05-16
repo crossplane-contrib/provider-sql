@@ -52,6 +52,7 @@ const (
 	errSelectGrant  = "cannot select grant"
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
+	errNoSchema     = "schema not passed or could not be resolved"
 	errNoRole       = "role not passed or could not be resolved"
 	errNoDatabase   = "database not passed or could not be resolved"
 	errNoPrivileges = "privileges not passed"
@@ -144,6 +145,41 @@ const (
 	roleDatabase grantType = "ROLE_DATABASE"
 )
 
+// sliceContainsStr checks if a slice contains a specific string.
+func sliceContainsStr(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func validateGrantParams(gp v1alpha1.GrantParameters) error {
+	if gp.Schema == nil && !sliceContainsStr([]string{"database", "foreign_data_wrapper", "foreign_server"}, gp.ObjectType) {
+		return fmt.Errorf("parameter 'schema' is mandatory for grant resource")
+	}
+	if len(gp.Objects) > 0 && (gp.ObjectType == "database" || gp.ObjectType == "schema") {
+		return fmt.Errorf("cannot specify `objects` when `object_type` is `database` or `schema`")
+	}
+	if len(gp.Columns) > 0 && gp.ObjectType != "column" {
+		return fmt.Errorf("cannot specify `columns` when `object_type` is not `column`")
+	}
+	if len(gp.Columns) == 0 && gp.ObjectType == "column" {
+		return fmt.Errorf("must specify `columns` when `object_type` is `column`")
+	}
+	if len(gp.Privileges) != 1 && gp.ObjectType == "column" {
+		return fmt.Errorf("must specify exactly 1 `privileges` when `object_type` is `column`")
+	}
+	if len(gp.Objects) != 1 && gp.ObjectType == "column" {
+		return fmt.Errorf("must specify exactly 1 table in the `objects` field when `object_type` is `column`")
+	}
+	if len(gp.Objects) != 1 && (gp.ObjectType == "foreign_data_wrapper" || gp.ObjectType == "foreign_server") {
+		return fmt.Errorf("one element must be specified in `objects` when `object_type` is `foreign_data_wrapper` or `foreign_server`")
+	}
+	return nil
+}
+
 func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
 	pc := len(gp.Privileges)
 
@@ -201,32 +237,41 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 
 		ep := gp.Privileges.ExpandPrivileges()
 		sp := ep.ToStringSlice()
+
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
 		// permissions.
 		q.String = "SELECT EXISTS(SELECT 1 " +
-			"FROM pg_database db, " +
-			"aclexplode(datacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by database, role and grantable setting
-			"WHERE db.datname=$1 " +
-			"AND s.rolname=$2 " +
-			"AND acl.is_grantable=$3 " +
-			"GROUP BY db.datname, s.rolname, acl.is_grantable " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
+			"FROM pg_database db " +
+			"JOIN pg_namespace nsp ON db.datname = $1 " +
+			"JOIN LATERAL aclexplode(nsp.nspacl) acl ON true " +
+			"JOIN pg_roles s ON acl.grantee = s.oid " +
+			// Filter by role, schema and grantable setting
+			"WHERE nsp.nspname = $2 " +
+			"AND s.rolname = $3 " +
+			"AND acl.is_grantable = $6 " +
+			"GROUP BY db.datname, nsp.nspname, s.rolname, acl.is_grantable " +
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) = " +
+			"(SELECT array(SELECT unnest($7::text[]) ORDER BY 1)))"
 
 		q.Parameters = []interface{}{
 			gp.Database,
+			gp.Schema,
 			gp.Role,
+			gp.ObjectType,
+			gp.Objects,
 			gro,
 			pq.Array(sp),
 		}
-		return nil
 	}
 	return errors.New(errUnknownGrant)
+}
+
+func withSchema(schema *string) string {
+	if schema != nil {
+		return fmt.Sprintf("IN SCHEMA %s", *schema)
+	}
+	return ""
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
@@ -269,17 +314,19 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 
 		*ql = append(*ql,
 			// REVOKE ANY MATCHING EXISTING PERMISSIONS
-			xsql.Query{String: fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+			xsql.Query{String: fmt.Sprintf("REVOKE %s ON DATABASE %s %s FROM %s",
 				sp,
 				db,
+				withSchema(gp.Schema),
 				ro,
 			)},
 
 			// GRANT REQUESTED PERMISSIONS
-			xsql.Query{String: fmt.Sprintf("GRANT %s ON DATABASE %s TO %s %s",
+			xsql.Query{String: fmt.Sprintf("GRANT %s ON DATABASE %s TO %s %s %s",
 				sp,
 				db,
 				ro,
+				withSchema(gp.Schema),
 				withOption(gp.WithOption),
 			)},
 		)
@@ -312,9 +359,10 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		)
 		return nil
 	case roleDatabase:
-		q.String = fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+		q.String = fmt.Sprintf("REVOKE %s ON DATABASE %s %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			pq.QuoteIdentifier(*gp.Database),
+			withSchema(gp.Schema),
 			ro,
 		)
 		return nil
@@ -362,6 +410,11 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotGrant)
+	}
+
+	// Validate grant specs
+	if err := validateGrantParams(cr.Spec.ForProvider); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errInvalidParams)
 	}
 
 	var queries []xsql.Query
