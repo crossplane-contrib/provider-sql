@@ -39,6 +39,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/tls"
 )
 
 const (
@@ -46,6 +47,7 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+	errTLSConfig    = "cannot load TLS config"
 
 	errNotUser                 = "managed resource is not a User custom resource"
 	errSelectUser              = "cannot select user"
@@ -113,6 +115,10 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	s := &corev1.Secret{}
 	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
 		return nil, errors.Wrap(err, errGetSecret)
+	}
+
+	if err := tls.LoadConfig(ctx, c.kube, pc.Spec.TLS, pc.Spec.TLSConfig); err != nil {
+		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
 	return &external{

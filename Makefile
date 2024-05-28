@@ -76,10 +76,10 @@ fallthrough: submodules
 	@make
 
 crds.clean:
-	@$(INFO) cleaning generated CRDs
-	@find package/crds -name *.yaml -exec sed -i.sed -e '1,2d' {} \; || $(FAIL)
-	@find package/crds -name *.yaml.sed -delete || $(FAIL)
-	@$(OK) cleaned generated CRDs
+#	@$(INFO) cleaning generated CRDs
+#	@find package/crds -name *.yaml -exec sed -i.sed -e '1,2d' {} \; || $(FAIL)
+#	@find package/crds -name *.yaml.sed -delete || $(FAIL)
+#	@$(OK) cleaned generated CRDs
 
 generate: crds.clean
 
@@ -89,7 +89,8 @@ e2e.run: test-integration
 # Run integration tests.
 test-integration: $(KIND) $(KUBECTL) $(UP) $(HELM3)
 	@$(INFO) running integration tests using kind $(KIND_VERSION)
-	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
+#	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
+	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests_tls.sh || $(FAIL)
 	@$(OK) integration tests passed
 
 # Update the submodules, such as the common build scripts.
