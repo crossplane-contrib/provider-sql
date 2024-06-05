@@ -86,11 +86,20 @@ generate: crds.clean
 # integration tests
 e2e.run: test-integration
 
-# Run integration tests.
-test-integration: $(KIND) $(KUBECTL) $(UP) $(HELM3)
-	@$(INFO) running integration tests using kind $(KIND_VERSION)
-	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
-	@$(OK) integration tests passed
+# Run all integration tests.
+test-integration: test-integration-no-tls test-integration-tls
+
+# Run integration tests with TLS disabled.
+test-integration-no-tls: $(KIND) $(KUBECTL) $(UP) $(HELM3)
+	@$(INFO) running integration tests without TLS using kind $(KIND_VERSION)
+	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests_no_tls.sh || $(FAIL)
+	@$(OK) integration tests without TLS passed
+
+# Run integration tests with TLS enabled.
+test-integration-tls: $(KIND) $(KUBECTL) $(UP) $(HELM3)
+	@$(INFO) running integration tests with TLS using kind $(KIND_VERSION)
+	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests_tls.sh || $(FAIL)
+	@$(OK) integration tests with TLS passed
 
 # Update the submodules, such as the common build scripts.
 submodules:

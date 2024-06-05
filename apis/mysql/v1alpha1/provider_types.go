@@ -31,9 +31,27 @@ type ProviderConfigSpec struct {
 	// or use preferred to use TLS only when advertised by the server. This is similar
 	// to skip-verify, but additionally allows a fallback to a connection which is
 	// not encrypted. Neither skip-verify nor preferred add any reliable security.
-	// +kubebuilder:validation:Enum="true";skip-verify;preferred
+	// Alternatively, set tls=custom and provide a custom TLS configuration via the tlsConfig field.
+	// +kubebuilder:validation:Enum="true";skip-verify;preferred;custom
 	// +optional
 	TLS *string `json:"tls"`
+
+	// Optional TLS configuration for sql driver. Setting this field also requires the tls field to be set to custom.
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig"`
+}
+
+// TLSConfig defines the TLS configuration for the provider when tls=custom.
+type TLSConfig struct {
+	CACert             TLSSecret `json:"caCert,omitempty"`
+	ClientCert         TLSSecret `json:"clientCert,omitempty"`
+	ClientKey          TLSSecret `json:"clientKey,omitempty"`
+	InsecureSkipVerify bool      `json:"insecureSkipVerify,omitempty"`
+}
+
+// TLSSecret defines a reference to a K8s secret and its specific internal key that contains the TLS cert/keys in PEM format.
+type TLSSecret struct {
+	SecretRef xpv1.SecretKeySelector `json:"secretRef,omitempty"`
 }
 
 const (

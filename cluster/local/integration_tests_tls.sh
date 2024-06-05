@@ -54,6 +54,9 @@ PACKAGE_NAME="provider-sql"
 if [ "$skipcleanup" != true ]; then
   function cleanup {
     echo_step "Cleaning up..."
+    for file in *.pem *.srl; do
+        rm -f "$file"
+    done
     export KUBECONFIG=
     "${KIND}" delete cluster --name="${K8S_CLUSTER}"
   }
@@ -66,7 +69,8 @@ echo_step "setting up local package cache"
 CACHE_PATH="${projectdir}/.work/inttest-package-cache"
 mkdir -p "${CACHE_PATH}"
 echo "created cache dir at ${CACHE_PATH}"
-"${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${CACHE_PATH}/${PACKAGE_NAME}.gz" && chmod 644 "${CACHE_PATH}/${PACKAGE_NAME}.gz"
+"${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${CACHE_PATH}/${PACKAGE_NAME}.gz"
+chmod 644 "${CACHE_PATH}/${PACKAGE_NAME}.gz"
 
 # create kind cluster with extra mounts
 KIND_NODE_IMAGE="kindest/node:${KIND_NODE_IMAGE_TAG}"
@@ -174,23 +178,78 @@ docker exec "${K8S_CLUSTER}-control-plane" ls -la /cache
 echo_step "waiting for provider to be installed"
 "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
 
-# install MariaDB chart
-echo_step "installing MariaDB Helm chart into default namespace"
-mariadb_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+# Generate CA key and certificate
+openssl genrsa -out ca-key.pem 2048
+openssl req -new -x509 -key ca-key.pem -out ca-cert.pem -days 365 -subj "/CN=CA"
+
+# Generate server key and certificate
+openssl genrsa -out server-key.pem 2048
+openssl req -new -key server-key.pem -out server-req.pem -subj "/CN=mariadb.default.svc.cluster.local"
+openssl x509 -req -in server-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -days 365
+
+# Generate client key and certificate
+openssl genrsa -out client-key.pem 2048
+openssl req -new -key client-key.pem -out client-req.pem -subj "/CN=client"
+openssl x509 -req -in client-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out client-cert.pem -days 365
+
+# Create a secret for the server TLS certificates and keys
+#"${KUBECTL}" delete secret mariadb-server-tls || true
+"${KUBECTL}" create secret generic mariadb-server-tls \
+    --from-file=ca-cert.pem \
+    --from-file=server-cert.pem \
+    --from-file=server-key.pem
+
+# Create a secret for the client TLS certificates and keys
+#"${KUBECTL}" delete secret mariadb-client-tls || true
+"${KUBECTL}" create secret generic mariadb-client-tls \
+    --from-file=ca-cert.pem \
+    --from-file=client-cert.pem \
+    --from-file=client-key.pem
+
+# install MariaDB chart with TLS enabled
+echo_step "installing MariaDB Helm chart with TLS into default namespace"
+mariadb_root_pw=$(openssl rand -base64 32)
+mariadb_test_pw=$(openssl rand -base64 32)
 
 "${HELM3}" repo add bitnami https://charts.bitnami.com/bitnami
 
+MARIADB_VALUES=$(cat <<EOF
+auth:
+  rootPassword: ${mariadb_root_pw}
+primary:
+  extraFlags: "--ssl --require-secure-transport=ON --ssl-ca=/opt/bitnami/mariadb/certs/ca-cert.pem --ssl-cert=/opt/bitnami/mariadb/certs/server-cert.pem --ssl-key=/opt/bitnami/mariadb/certs/server-key.pem"
+  configurationSecret: mariadb-server-tls
+  extraVolumes:
+    - name: tls-certificates
+      secret:
+        secretName: mariadb-server-tls
+  extraVolumeMounts:
+    - name: tls-certificates
+      mountPath: /opt/bitnami/mariadb/certs
+      readOnly: true
+initdbScripts:
+  init.sql: |
+    CREATE USER 'test'@'%' IDENTIFIED BY '${mariadb_test_pw}' REQUIRE X509;
+    GRANT ALL PRIVILEGES ON *.* TO 'test'@'%' WITH GRANT OPTION;
+    FLUSH PRIVILEGES;
+EOF
+)
+
+# install MariaDB chart
 "${HELM3}" install mariadb bitnami/mariadb \
     --version 11.3.0 \
-    --set auth.rootPassword="${mariadb_root_pw}" \
+    --values <(echo "$MARIADB_VALUES") \
     --wait
 
-# create ProviderConfig
+# create ProviderConfig with TLS
 "${KUBECTL}" create secret generic mariadb-creds \
-    --from-literal username="root" \
-    --from-literal password="${mariadb_root_pw}" \
+    --from-literal username="test" \
+    --from-literal password="${mariadb_test_pw}" \
     --from-literal endpoint="mariadb.default.svc.cluster.local" \
-    --from-literal port="3306"
+    --from-literal port="3306" \
+    --from-file=ca-cert.pem \
+    --from-file=client-cert.pem \
+    --from-file=client-key.pem
 
 PROVIDER_CONFIG_YAML="$( cat <<EOF
 apiVersion: mysql.sql.crossplane.io/v1alpha1
@@ -203,6 +262,24 @@ spec:
     connectionSecretRef:
       namespace: default
       name: mariadb-creds
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: ca-cert.pem
+    clientCert:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: client-cert.pem
+    clientKey:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: client-key.pem
+    insecureSkipVerify: true
 EOF
 )"
 echo "${PROVIDER_CONFIG_YAML}" | "${KUBECTL}" apply -f -
@@ -265,10 +342,10 @@ echo "${INSTALL_YAML}" | "${KUBECTL}" delete -f -
 timeout=60
 current=0
 step=3
-while [[ $(kubectl get providerrevision.pkg.crossplane.io -o name | wc -l) != "0" ]]; do
+while [[ $(kubectl get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
   echo "waiting for provider to be deleted for another $step seconds"
-  current=$current+$step
-  if ! [[ $timeout > $current ]]; then
+  current=$((current + step))
+  if [[ $current -ge $timeout ]]; then
     echo_error "timeout of ${timeout}s has been reached"
   fi
   sleep $step;
