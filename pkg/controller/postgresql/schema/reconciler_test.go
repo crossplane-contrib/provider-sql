@@ -25,6 +25,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -248,7 +249,7 @@ func TestObserve(t *testing.T) {
 					ObjectMeta: cr.ObjectMeta,
 					Spec: v1alpha1.SchemaSpec{
 						ForProvider: v1alpha1.SchemaParameters{
-							Database: new(string),
+							Database: ptr.To("db"),
 						},
 					},
 				},
@@ -261,7 +262,11 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can successfully select our schema",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*string)
+						*bv = "role"
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -269,8 +274,8 @@ func TestObserve(t *testing.T) {
 					ObjectMeta: cr.ObjectMeta,
 					Spec: v1alpha1.SchemaSpec{
 						ForProvider: v1alpha1.SchemaParameters{
-							Database: new(string),
-							Role:     new(string),
+							Database: ptr.To("db"),
+							Role:     ptr.To("role"),
 						},
 					},
 				},
@@ -390,7 +395,7 @@ func TestCreate(t *testing.T) {
 					ObjectMeta: cr.ObjectMeta,
 					Spec: v1alpha1.SchemaSpec{
 						ForProvider: v1alpha1.SchemaParameters{
-							Database: new(string),
+							Database: ptr.To("db"),
 						},
 					},
 				},
@@ -460,7 +465,7 @@ func TestUpdate(t *testing.T) {
 					ObjectMeta: cr.ObjectMeta,
 					Spec: v1alpha1.SchemaSpec{
 						ForProvider: v1alpha1.SchemaParameters{
-							Database: new(string),
+							Database: ptr.To("db"),
 						},
 					},
 				},
@@ -527,7 +532,7 @@ func TestDelete(t *testing.T) {
 					ObjectMeta: cr.ObjectMeta,
 					Spec: v1alpha1.SchemaSpec{
 						ForProvider: v1alpha1.SchemaParameters{
-							Database: new(string),
+							Database: ptr.To("db"),
 						},
 					},
 				},
