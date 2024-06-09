@@ -29,7 +29,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -50,15 +50,19 @@ type mockDB struct {
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
 	return m.MockExec(ctx, q)
 }
+
 func (m mockDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	return m.MockExecTx(ctx, ql)
 }
+
 func (m mockDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 	return m.MockScan(ctx, q, dest...)
 }
+
 func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	return &sql.Rows{}, nil
 }
+
 func (m mockDB) GetConnectionDetails(rolename, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
 		xpv1.ResourceCredentialsSecretUserKey:     []byte(rolename),
@@ -301,7 +305,7 @@ func TestObserve(t *testing.T) {
 								Key: "password",
 							},
 							Privileges:      v1alpha1.RolePrivilege{},
-							ConnectionLimit: pointer.Int32Ptr(10),
+							ConnectionLimit: ptr.To(int32(10)),
 						},
 						ResourceSpec: xpv1.ResourceSpec{
 							WriteConnectionSecretToReference: &xpv1.SecretReference{
@@ -772,8 +776,8 @@ func TestUpdate(t *testing.T) {
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
-								Login:   pointer.BoolPtr(true),
-								Inherit: pointer.BoolPtr(false),
+								Login:   ptr.To(true),
+								Inherit: ptr.To(false),
 							},
 						},
 					},
@@ -824,8 +828,8 @@ func TestUpdate(t *testing.T) {
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
-								Login:   pointer.BoolPtr(true),
-								Inherit: pointer.BoolPtr(false),
+								Login:   ptr.To(true),
+								Inherit: ptr.To(false),
 							},
 						},
 					},
@@ -878,9 +882,9 @@ func TestUpdate(t *testing.T) {
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
-								Login:    pointer.BoolPtr(true),
-								Inherit:  pointer.BoolPtr(false),
-								CreateDb: pointer.BoolPtr(true),
+								Login:    ptr.To(true),
+								Inherit:  ptr.To(false),
+								CreateDb: ptr.To(true),
 							},
 						},
 					},
