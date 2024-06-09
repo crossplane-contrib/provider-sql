@@ -84,8 +84,8 @@ EOF
 echo "${KIND_CONFIG}" | "${KIND}" create cluster --name="${K8S_CLUSTER}" --wait=5m --image="${KIND_NODE_IMAGE}" --config=-
 
 # tag controller image and load it into kind cluster
-docker tag "${CONTROLLER_IMAGE}" "${PACKAGE_NAME}"
-"${KIND}" load docker-image "${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
+docker tag "${CONTROLLER_IMAGE}" "xpkg.upbound.io/${PACKAGE_NAME}"
+"${KIND}" load docker-image "xpkg.upbound.io/${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
 
 echo_step "create crossplane-system namespace"
 "${KUBECTL}" create ns crossplane-system
