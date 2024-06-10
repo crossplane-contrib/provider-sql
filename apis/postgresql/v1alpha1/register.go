@@ -90,6 +90,14 @@ var (
 	GrantGroupVersionKind = SchemeGroupVersion.WithKind(GrantKind)
 )
 
+// Schema type metadata.
+var (
+	SchemaKind             = reflect.TypeOf(Schema{}).Name()
+	SchemaGroupKind        = schema.GroupKind{Group: Group, Kind: SchemaKind}.String()
+	SchemaKindAPIVersion   = SchemaKind + "." + SchemeGroupVersion.String()
+	SchemaGroupVersionKind = SchemeGroupVersion.WithKind(SchemaKind)
+)
+
 func init() {
 	SchemeBuilder.Register(&ProviderConfig{}, &ProviderConfigList{})
 	SchemeBuilder.Register(&ProviderConfigUsage{}, &ProviderConfigUsageList{})
@@ -97,4 +105,5 @@ func init() {
 	SchemeBuilder.Register(&Role{}, &RoleList{})
 	SchemeBuilder.Register(&Grant{}, &GrantList{})
 	SchemeBuilder.Register(&Extension{}, &ExtensionList{})
+	SchemeBuilder.Register(&Schema{}, &SchemaList{})
 }
