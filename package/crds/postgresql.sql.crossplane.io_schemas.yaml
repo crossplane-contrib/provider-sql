@@ -4,18 +4,18 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: grants.mysql.sql.crossplane.io
+  name: schemas.postgresql.sql.crossplane.io
 spec:
-  group: mysql.sql.crossplane.io
+  group: postgresql.sql.crossplane.io
   names:
     categories:
     - crossplane
     - managed
     - sql
-    kind: Grant
-    listKind: GrantList
-    plural: grants
-    singular: grant
+    kind: Schema
+    listKind: SchemaList
+    plural: schemas
+    singular: schema
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -28,19 +28,16 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
-    - jsonPath: .spec.forProvider.user
+    - jsonPath: .spec.forProvider.role
       name: ROLE
       type: string
     - jsonPath: .spec.forProvider.database
       name: DATABASE
       type: string
-    - jsonPath: .spec.forProvider.privileges
-      name: PRIVILEGES
-      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A Grant represents the declarative state of a MySQL grant.
+        description: A Schema represents the declarative state of a PostgreSQL schema.
         properties:
           apiVersion:
             description: |-
@@ -60,7 +57,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: A GrantSpec defines the desired state of a Grant.
+            description: A SchemaSpec defines the desired state of a Schema.
             properties:
               deletionPolicy:
                 default: Delete
@@ -77,20 +74,15 @@ spec:
                 - Delete
                 type: string
               forProvider:
-                description: GrantParameters define the desired state of a MySQL grant
-                  instance.
+                description: SchemaParameters define the desired state of a PostgreSQL
+                  schema.
                 properties:
-                  binlog:
-                    description: BinLog defines whether the create, delete, update
-                      operations of this grant are propagated to replicas. Defaults
-                      to true
-                    type: boolean
                   database:
-                    description: Database this grant is for, default *.
+                    description: Database this schema is for.
                     type: string
                   databaseRef:
-                    description: DatabaseRef references the database object this grant
-                      it for.
+                    description: DatabaseRef references the database object this schema
+                      is for.
                     properties:
                       name:
                         description: Name of the referenced object.
@@ -125,7 +117,7 @@ spec:
                     type: object
                   databaseSelector:
                     description: DatabaseSelector selects a reference to a Database
-                      this grant is for.
+                      this schema is for.
                     properties:
                       matchControllerRef:
                         description: |-
@@ -164,24 +156,11 @@ spec:
                             type: string
                         type: object
                     type: object
-                  privileges:
-                    description: |-
-                      Privileges to be granted.
-                      See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
-                    items:
-                      description: GrantPrivilege represents a privilege to be granted
-                      pattern: ^[A-Z_ ]+$
-                      type: string
-                    minItems: 1
-                    type: array
-                  table:
-                    description: Tables this grant is for, default *.
+                  role:
+                    description: Role for ownership of this schema.
                     type: string
-                  user:
-                    description: User this grant is for.
-                    type: string
-                  userRef:
-                    description: UserRef references the user object this grant is
+                  roleRef:
+                    description: RoleRef references the role object this schema is
                       for.
                     properties:
                       name:
@@ -215,8 +194,8 @@ spec:
                     required:
                     - name
                     type: object
-                  userSelector:
-                    description: UserSelector selects a reference to a User this grant
+                  roleSelector:
+                    description: RoleSelector selects a reference to a Role this schema
                       is for.
                     properties:
                       matchControllerRef:
@@ -256,8 +235,6 @@ spec:
                             type: string
                         type: object
                     type: object
-                required:
-                - privileges
                 type: object
               managementPolicies:
                 default:
@@ -427,18 +404,8 @@ spec:
             - forProvider
             type: object
           status:
-            description: A GrantStatus represents the observed state of a Grant.
+            description: A SchemaStatus represents the observed state of a Schema.
             properties:
-              atProvider:
-                description: A GrantObservation represents the observed state of a
-                  MySQL grant.
-                properties:
-                  privileges:
-                    description: Privileges represents the applied privileges
-                    items:
-                      type: string
-                    type: array
-                type: object
               conditions:
                 description: Conditions of the resource.
                 items:

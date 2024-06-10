@@ -29,17 +29,14 @@ func (mg *Database) GetDeletionPolicy() xpv1.DeletionPolicy {
 	return mg.Spec.DeletionPolicy
 }
 
+// GetManagementPolicies of this Database.
+func (mg *Database) GetManagementPolicies() xpv1.ManagementPolicies {
+	return mg.Spec.ManagementPolicies
+}
+
 // GetProviderConfigReference of this Database.
 func (mg *Database) GetProviderConfigReference() *xpv1.Reference {
 	return mg.Spec.ProviderConfigReference
-}
-
-/*
-GetProviderReference of this Database.
-Deprecated: Use GetProviderConfigReference.
-*/
-func (mg *Database) GetProviderReference() *xpv1.Reference {
-	return mg.Spec.ProviderReference
 }
 
 // GetPublishConnectionDetailsTo of this Database.
@@ -62,17 +59,14 @@ func (mg *Database) SetDeletionPolicy(r xpv1.DeletionPolicy) {
 	mg.Spec.DeletionPolicy = r
 }
 
+// SetManagementPolicies of this Database.
+func (mg *Database) SetManagementPolicies(r xpv1.ManagementPolicies) {
+	mg.Spec.ManagementPolicies = r
+}
+
 // SetProviderConfigReference of this Database.
 func (mg *Database) SetProviderConfigReference(r *xpv1.Reference) {
 	mg.Spec.ProviderConfigReference = r
-}
-
-/*
-SetProviderReference of this Database.
-Deprecated: Use SetProviderConfigReference.
-*/
-func (mg *Database) SetProviderReference(r *xpv1.Reference) {
-	mg.Spec.ProviderReference = r
 }
 
 // SetPublishConnectionDetailsTo of this Database.
@@ -95,17 +89,14 @@ func (mg *Extension) GetDeletionPolicy() xpv1.DeletionPolicy {
 	return mg.Spec.DeletionPolicy
 }
 
+// GetManagementPolicies of this Extension.
+func (mg *Extension) GetManagementPolicies() xpv1.ManagementPolicies {
+	return mg.Spec.ManagementPolicies
+}
+
 // GetProviderConfigReference of this Extension.
 func (mg *Extension) GetProviderConfigReference() *xpv1.Reference {
 	return mg.Spec.ProviderConfigReference
-}
-
-/*
-GetProviderReference of this Extension.
-Deprecated: Use GetProviderConfigReference.
-*/
-func (mg *Extension) GetProviderReference() *xpv1.Reference {
-	return mg.Spec.ProviderReference
 }
 
 // GetPublishConnectionDetailsTo of this Extension.
@@ -128,17 +119,14 @@ func (mg *Extension) SetDeletionPolicy(r xpv1.DeletionPolicy) {
 	mg.Spec.DeletionPolicy = r
 }
 
+// SetManagementPolicies of this Extension.
+func (mg *Extension) SetManagementPolicies(r xpv1.ManagementPolicies) {
+	mg.Spec.ManagementPolicies = r
+}
+
 // SetProviderConfigReference of this Extension.
 func (mg *Extension) SetProviderConfigReference(r *xpv1.Reference) {
 	mg.Spec.ProviderConfigReference = r
-}
-
-/*
-SetProviderReference of this Extension.
-Deprecated: Use SetProviderConfigReference.
-*/
-func (mg *Extension) SetProviderReference(r *xpv1.Reference) {
-	mg.Spec.ProviderReference = r
 }
 
 // SetPublishConnectionDetailsTo of this Extension.
@@ -161,17 +149,14 @@ func (mg *Grant) GetDeletionPolicy() xpv1.DeletionPolicy {
 	return mg.Spec.DeletionPolicy
 }
 
+// GetManagementPolicies of this Grant.
+func (mg *Grant) GetManagementPolicies() xpv1.ManagementPolicies {
+	return mg.Spec.ManagementPolicies
+}
+
 // GetProviderConfigReference of this Grant.
 func (mg *Grant) GetProviderConfigReference() *xpv1.Reference {
 	return mg.Spec.ProviderConfigReference
-}
-
-/*
-GetProviderReference of this Grant.
-Deprecated: Use GetProviderConfigReference.
-*/
-func (mg *Grant) GetProviderReference() *xpv1.Reference {
-	return mg.Spec.ProviderReference
 }
 
 // GetPublishConnectionDetailsTo of this Grant.
@@ -194,17 +179,14 @@ func (mg *Grant) SetDeletionPolicy(r xpv1.DeletionPolicy) {
 	mg.Spec.DeletionPolicy = r
 }
 
+// SetManagementPolicies of this Grant.
+func (mg *Grant) SetManagementPolicies(r xpv1.ManagementPolicies) {
+	mg.Spec.ManagementPolicies = r
+}
+
 // SetProviderConfigReference of this Grant.
 func (mg *Grant) SetProviderConfigReference(r *xpv1.Reference) {
 	mg.Spec.ProviderConfigReference = r
-}
-
-/*
-SetProviderReference of this Grant.
-Deprecated: Use SetProviderConfigReference.
-*/
-func (mg *Grant) SetProviderReference(r *xpv1.Reference) {
-	mg.Spec.ProviderReference = r
 }
 
 // SetPublishConnectionDetailsTo of this Grant.
@@ -227,17 +209,14 @@ func (mg *Role) GetDeletionPolicy() xpv1.DeletionPolicy {
 	return mg.Spec.DeletionPolicy
 }
 
+// GetManagementPolicies of this Role.
+func (mg *Role) GetManagementPolicies() xpv1.ManagementPolicies {
+	return mg.Spec.ManagementPolicies
+}
+
 // GetProviderConfigReference of this Role.
 func (mg *Role) GetProviderConfigReference() *xpv1.Reference {
 	return mg.Spec.ProviderConfigReference
-}
-
-/*
-GetProviderReference of this Role.
-Deprecated: Use GetProviderConfigReference.
-*/
-func (mg *Role) GetProviderReference() *xpv1.Reference {
-	return mg.Spec.ProviderReference
 }
 
 // GetPublishConnectionDetailsTo of this Role.
@@ -260,17 +239,14 @@ func (mg *Role) SetDeletionPolicy(r xpv1.DeletionPolicy) {
 	mg.Spec.DeletionPolicy = r
 }
 
+// SetManagementPolicies of this Role.
+func (mg *Role) SetManagementPolicies(r xpv1.ManagementPolicies) {
+	mg.Spec.ManagementPolicies = r
+}
+
 // SetProviderConfigReference of this Role.
 func (mg *Role) SetProviderConfigReference(r *xpv1.Reference) {
 	mg.Spec.ProviderConfigReference = r
-}
-
-/*
-SetProviderReference of this Role.
-Deprecated: Use SetProviderConfigReference.
-*/
-func (mg *Role) SetProviderReference(r *xpv1.Reference) {
-	mg.Spec.ProviderReference = r
 }
 
 // SetPublishConnectionDetailsTo of this Role.
@@ -280,5 +256,65 @@ func (mg *Role) SetPublishConnectionDetailsTo(r *xpv1.PublishConnectionDetailsTo
 
 // SetWriteConnectionSecretToReference of this Role.
 func (mg *Role) SetWriteConnectionSecretToReference(r *xpv1.SecretReference) {
+	mg.Spec.WriteConnectionSecretToReference = r
+}
+
+// GetCondition of this Schema.
+func (mg *Schema) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
+	return mg.Status.GetCondition(ct)
+}
+
+// GetDeletionPolicy of this Schema.
+func (mg *Schema) GetDeletionPolicy() xpv1.DeletionPolicy {
+	return mg.Spec.DeletionPolicy
+}
+
+// GetManagementPolicies of this Schema.
+func (mg *Schema) GetManagementPolicies() xpv1.ManagementPolicies {
+	return mg.Spec.ManagementPolicies
+}
+
+// GetProviderConfigReference of this Schema.
+func (mg *Schema) GetProviderConfigReference() *xpv1.Reference {
+	return mg.Spec.ProviderConfigReference
+}
+
+// GetPublishConnectionDetailsTo of this Schema.
+func (mg *Schema) GetPublishConnectionDetailsTo() *xpv1.PublishConnectionDetailsTo {
+	return mg.Spec.PublishConnectionDetailsTo
+}
+
+// GetWriteConnectionSecretToReference of this Schema.
+func (mg *Schema) GetWriteConnectionSecretToReference() *xpv1.SecretReference {
+	return mg.Spec.WriteConnectionSecretToReference
+}
+
+// SetConditions of this Schema.
+func (mg *Schema) SetConditions(c ...xpv1.Condition) {
+	mg.Status.SetConditions(c...)
+}
+
+// SetDeletionPolicy of this Schema.
+func (mg *Schema) SetDeletionPolicy(r xpv1.DeletionPolicy) {
+	mg.Spec.DeletionPolicy = r
+}
+
+// SetManagementPolicies of this Schema.
+func (mg *Schema) SetManagementPolicies(r xpv1.ManagementPolicies) {
+	mg.Spec.ManagementPolicies = r
+}
+
+// SetProviderConfigReference of this Schema.
+func (mg *Schema) SetProviderConfigReference(r *xpv1.Reference) {
+	mg.Spec.ProviderConfigReference = r
+}
+
+// SetPublishConnectionDetailsTo of this Schema.
+func (mg *Schema) SetPublishConnectionDetailsTo(r *xpv1.PublishConnectionDetailsTo) {
+	mg.Spec.PublishConnectionDetailsTo = r
+}
+
+// SetWriteConnectionSecretToReference of this Schema.
+func (mg *Schema) SetWriteConnectionSecretToReference(r *xpv1.SecretReference) {
 	mg.Spec.WriteConnectionSecretToReference = r
 }

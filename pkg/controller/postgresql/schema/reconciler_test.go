@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Crossplane Authors.
+Copyright 2024 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,25 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package grant
+package schema
 
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
@@ -44,7 +41,6 @@ type mockDB struct {
 	MockExec                 func(ctx context.Context, q xsql.Query) error
 	MockExecTx               func(ctx context.Context, ql []xsql.Query) error
 	MockScan                 func(ctx context.Context, q xsql.Query, dest ...interface{}) error
-	MockQuery                func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
 	MockGetConnectionDetails func(username, password string) managed.ConnectionDetails
 }
 
@@ -61,7 +57,7 @@ func (m mockDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) err
 }
 
 func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	return m.MockQuery(ctx, q)
+	return &sql.Rows{}, nil
 }
 
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
@@ -82,18 +78,21 @@ func TestConnect(t *testing.T) {
 		mg  resource.Managed
 	}
 
+	cr := v1alpha1.Schema{}
+	meta.SetExternalName(&cr, "cool")
+
 	cases := map[string]struct {
 		reason string
 		fields fields
 		args   args
 		want   error
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a Schema",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotGrant),
+			want: errors.New(errNotSchema),
 		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
@@ -101,7 +100,7 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{},
+				mg: &v1alpha1.Schema{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
 		},
@@ -114,8 +113,9 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -128,7 +128,7 @@ func TestConnect(t *testing.T) {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
 			fields: fields{
 				kube: &test.MockClient{
-					// We call get to populate the Grant struct, then again
+					// We call get to populate the Database struct, then again
 					// to populate the (empty) ProviderConfig struct, resulting
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
@@ -136,8 +136,9 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -163,8 +164,9 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -188,8 +190,6 @@ func TestConnect(t *testing.T) {
 
 func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
-	goa := v1alpha1.GrantOptionAdmin
-	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
 		db xsql.DB
@@ -205,181 +205,115 @@ func TestObserve(t *testing.T) {
 		err error
 	}
 
+	cr := v1alpha1.Schema{}
+	meta.SetExternalName(&cr, "cool")
+
 	cases := map[string]struct {
 		reason string
 		fields fields
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+		"ErrNotScema": {
+			reason: "An error should be returned if the managed resource is not a Schema",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotGrant),
+				err: errors.New(errNotSchema),
 			},
 		},
-		"SuccessNoGrant": {
-			reason: "We should return ResourceExists: false when no grant is found",
+		"ErrNoSchema": {
+			reason: "We should return ResourceExists: false when no schema is found",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						// Default value is false, so just return
-						bv := dest[0].(*bool)
-						*bv = false
-						return nil
-					},
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-						},
-					},
-				},
+				mg: &v1alpha1.Schema{},
 			},
 			want: want{
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
-		"AllMapsToExpandedPrivileges": {
-			reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
+		"ErrSelectSchema": {
+			reason: "We should return any errors encountered while trying to select the schema",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database: ptr.To("db"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errSelectSchema),
+			},
+		},
+		"Success": {
+			reason: "We should return no error if we can successfully select our schema",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						privileges := q.Parameters[3]
-
-						privs, ok := privileges.(*pq.StringArray)
-						if !ok {
-							return fmt.Errorf("expected Scan parameter to be pq.StringArray, got %T", privileges)
-						}
-
-						// The order is not guaranteed, so sort the slices before comparing
-						sort.Strings(*privs)
-
-						// Return if there's a diff between the expected and actual privileges
-						diff := cmp.Diff(&pq.StringArray{"CONNECT", "CREATE", "TEMPORARY"}, privileges)
-
-						bv := dest[0].(*bool)
-						*bv = diff == ""
-
-						// Extra logging in case this test is going to fail
-						if diff != "" {
-							t.Logf("expected empty diff, got: %s", diff)
-						}
-
+						bv := dest[0].(*string)
+						*bv = "role"
 						return nil
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database: ptr.To("db"),
+							Role:     ptr.To("role"),
 						},
 					},
 				},
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
+					ResourceExists:          true,
+					ResourceUpToDate:        true,
+					ResourceLateInitialized: false,
 				},
 				err: nil,
 			},
 		},
-		"ErrSelectGrant": {
-			reason: "We should return any errors encountered while trying to show the grant",
+		"SuccessLateInit": {
+			reason: "No error should be returned via lateInit when role is provided",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						return errBoom
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
-							WithOption: &gog,
-						},
-					},
-				},
-			},
-			want: want{
-				err: errors.Wrap(errBoom, errSelectGrant),
-			},
-		},
-		"SuccessRoleDb": {
-			reason: "We should return no error if we can find our role-db grant",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
+						bv := dest[0].(*string)
+						*bv = "blah"
 						return nil
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("testdb"),
-							Role:       ptr.To("testrole"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-							WithOption: &gog,
-						},
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{},
 					},
 				},
 			},
 			want: want{
 				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
+					ResourceExists:          true,
+					ResourceUpToDate:        true,
+					ResourceLateInitialized: true,
 				},
-				err: nil,
-			},
-		},
-		"SuccessRoleMembership": {
-			reason: "We should return no error if we can find our role-membership grant",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Role:       ptr.To("testrole"),
-							MemberOf:   ptr.To("parentrole"),
-							WithOption: &goa,
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
 			},
 		},
 	}
@@ -401,6 +335,9 @@ func TestObserve(t *testing.T) {
 func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
 
+	cr := v1alpha1.Schema{}
+	meta.SetExternalName(&cr, "cool")
+
 	type fields struct {
 		db xsql.DB
 	}
@@ -421,51 +358,44 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a Schema",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotGrant),
+				err: errors.New(errNotSchema),
 			},
 		},
 		"ErrExec": {
-			reason: "Any errors encountered while creating the grant should be returned",
+			reason: "Any errors encountered while creating the schema should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-						},
-					},
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateGrant),
+				err: errors.Wrap(errBoom, errCreateSchema),
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we successfully create a grant",
+			reason: "No error should be returned when we successfully create a extension",
 			fields: fields{
 				db: &mockDB{
-					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database: ptr.To("db"),
 						},
 					},
 				},
@@ -491,6 +421,9 @@ func TestCreate(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
+	cr := v1alpha1.Schema{}
+	meta.SetExternalName(&cr, "cool")
+
 	type fields struct {
 		db xsql.DB
 	}
@@ -501,7 +434,7 @@ func TestUpdate(t *testing.T) {
 	}
 
 	type want struct {
-		c   managed.ExternalUpdate
+		u   managed.ExternalUpdate
 		err error
 	}
 
@@ -511,15 +444,28 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNoOp": {
-			reason: "Update is a no-op, make sure we dont throw an error *Grant",
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a Schema",
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotSchema),
+			},
+		},
+		"Success": {
+			reason: "No error should be returned when we successfully update a schema",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database: ptr.To("db"),
 						},
 					},
 				},
@@ -532,21 +478,22 @@ func TestUpdate(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{
-				db: tc.fields.db,
-			}
+			e := external{db: tc.fields.db}
 			got, err := e.Update(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
-				t.Errorf("\n%s\ne.Create(...): -want error, +got error:\n%s\n", tc.reason, diff)
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
-			if diff := cmp.Diff(tc.want.c, got, cmpopts.IgnoreMapEntries(func(key string, _ []byte) bool { return key == "password" })); diff != "" {
-				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			if diff := cmp.Diff(tc.want.u, got); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want, +got:\n%s\n", tc.reason, diff)
 			}
 		})
 	}
 }
 
 func TestDelete(t *testing.T) {
+	cr := v1alpha1.Schema{}
+	meta.SetExternalName(&cr, "cool")
+
 	errBoom := errors.New("boom")
 
 	type fields struct {
@@ -564,15 +511,15 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+		"ErrNotSchema": {
+			reason: "An error should be returned if the managed resource is not a Schema",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotGrant),
+			want: errors.New(errNotSchema),
 		},
-		"ErrDropGrant": {
-			reason: "Errors dropping a grant should be returned",
+		"ErrDropSchema": {
+			reason: "Errors dropping a schema should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
@@ -581,37 +528,16 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database: ptr.To("db"),
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errRevokeGrant),
-		},
-		"Success": {
-			reason: "No error should be returned if the grant was revoked",
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-						},
-					},
-				},
-			},
-			fields: fields{
-				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
-				},
-			},
-			want: nil,
+			want: errors.Wrap(errBoom, errDropSchema),
 		},
 	}
 

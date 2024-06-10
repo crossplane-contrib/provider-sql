@@ -23,7 +23,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -47,10 +47,15 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotUser                 = "managed resource is not a User custom resource"
-	errSelectUser              = "cannot select user"
-	errCreateUser              = "cannot create user"
-	errDropUser                = "cannot drop user"
+	errNotUser                = "managed resource is not a User custom resource"
+	errSelectUser             = "cannot select user"
+	errCreateUser             = "cannot create user %s"
+	errCreateLogin            = "cannot create login %s"
+	errDropUser               = "error dropping user %s"
+	errDropLogin              = "error dropping login %s"
+	errCannotGetLogins        = "cannot get current logins"
+	errCannotKillLoginSession = "error killing session %d for login %s"
+
 	errUpdateUser              = "cannot update user"
 	errGetPasswordSecretFailed = "cannot get password secret"
 
@@ -115,7 +120,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newClient(s.Data, pointer.StringPtrDerefOr(cr.Spec.ForProvider.Database, "")),
+		db:   c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, "")),
 		kube: c.kube,
 	}, nil
 }
@@ -134,8 +139,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	var name string
 
 	query := "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{
-		meta.GetExternalName(cr)},
+	err := c.db.Scan(ctx, xsql.Query{
+		String: query, Parameters: []interface{}{
+			meta.GetExternalName(cr),
+		},
 	}, &name)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -173,11 +180,19 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalCreation{}, err
 		}
 	}
-	query := fmt.Sprintf("CREATE USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+
+	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
 	if err := c.db.Exec(ctx, xsql.Query{
-		String: query,
+		String: loginQuery,
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
+	}
+
+	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: userQuery,
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
 	}
 
 	return managed.ExternalCreation{
@@ -197,7 +212,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if changed {
-		query := fmt.Sprintf("ALTER USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+		query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
@@ -217,10 +232,37 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
+	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
+	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+	if err != nil {
+		return errors.Wrap(err, errCannotGetLogins)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	for rows.Next() {
+		var sessionID int
+		if err := rows.Scan(&sessionID); err != nil {
+			return errors.Wrap(err, errCannotGetLogins)
+		}
+		if err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
+			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return errors.Wrap(err, errCannotGetLogins)
+	}
+
 	if err := c.db.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
-		return errors.Wrap(err, errDropUser)
+		return errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
 	}
+
+	if err := c.db.Exec(ctx, xsql.Query{
+		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
+	}); err != nil {
+		return errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))
+	}
+
 	return nil
 }

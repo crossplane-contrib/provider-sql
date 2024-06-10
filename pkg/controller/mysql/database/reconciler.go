@@ -142,7 +142,6 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-
 	cr, ok := mg.(*v1alpha1.Database)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotDatabase)

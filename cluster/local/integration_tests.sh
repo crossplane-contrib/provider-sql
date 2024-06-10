@@ -66,7 +66,7 @@ echo_step "setting up local package cache"
 CACHE_PATH="${projectdir}/.work/inttest-package-cache"
 mkdir -p "${CACHE_PATH}"
 echo "created cache dir at ${CACHE_PATH}"
-"${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/"${HOSTOS}"_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${CACHE_PATH}/${PACKAGE_NAME}.gz" && chmod 644 "${CACHE_PATH}/${PACKAGE_NAME}.gz"
+"${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${CACHE_PATH}/${PACKAGE_NAME}.gz" && chmod 644 "${CACHE_PATH}/${PACKAGE_NAME}.gz"
 
 # create kind cluster with extra mounts
 KIND_NODE_IMAGE="kindest/node:${KIND_NODE_IMAGE_TAG}"
@@ -84,8 +84,8 @@ EOF
 echo "${KIND_CONFIG}" | "${KIND}" create cluster --name="${K8S_CLUSTER}" --wait=5m --image="${KIND_NODE_IMAGE}" --config=-
 
 # tag controller image and load it into kind cluster
-docker tag "${CONTROLLER_IMAGE}" "${PACKAGE_NAME}"
-"${KIND}" load docker-image "${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
+docker tag "${CONTROLLER_IMAGE}" "xpkg.upbound.io/${PACKAGE_NAME}"
+"${KIND}" load docker-image "xpkg.upbound.io/${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
 
 echo_step "create crossplane-system namespace"
 "${KUBECTL}" create ns crossplane-system
