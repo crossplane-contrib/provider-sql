@@ -17,7 +17,6 @@ import (
 const (
 	errNotSupported = "%s not supported by mysql client"
 	errSetSQLLogBin = "cannot set sql_log_bin = 0"
-	errFlushPriv    = "cannot flush privileges"
 )
 
 type mySQLDB struct {
@@ -145,18 +144,12 @@ type ExecQuery struct {
 type ExecOptions struct {
 	// Binlog defines whether storing binlogs will be disabled before executing the query. Defaults to true
 	Binlog *bool
-	// Flush defines whether privileges will be flushed after executing the query. Defaults to true
-	Flush *bool
 }
 
-// ExecWithBinlogAndFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
-func ExecWithBinlogAndFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
+// ExecWrapper is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWrapper(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
 	if options.Binlog == nil {
 		options.Binlog = ptr.To(true)
-	}
-
-	if options.Flush == nil {
-		options.Flush = ptr.To(true)
 	}
 
 	if !*options.Binlog {
@@ -171,14 +164,6 @@ func ExecWithBinlogAndFlush(ctx context.Context, db xsql.DB, query ExecQuery, op
 		String: query.Query,
 	}); err != nil {
 		return errors.Wrap(err, query.ErrorValue)
-	}
-
-	if *options.Flush {
-		if err := db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return errors.Wrap(err, errFlushPriv)
-		}
 	}
 
 	return nil
