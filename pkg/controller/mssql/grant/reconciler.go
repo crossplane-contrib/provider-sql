@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -114,7 +114,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newClient(s.Data, pointer.StringPtrDerefOr(cr.Spec.ForProvider.Database, "")),
+		db:   c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, "")),
 		kube: c.kube,
 	}, nil
 }

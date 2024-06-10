@@ -8,7 +8,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -152,11 +152,11 @@ type ExecOptions struct {
 // ExecWithBinlogAndFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
 func ExecWithBinlogAndFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
 	if options.Binlog == nil {
-		options.Binlog = pointer.Bool(true)
+		options.Binlog = ptr.To(true)
 	}
 
 	if options.Flush == nil {
-		options.Flush = pointer.Bool(true)
+		options.Flush = ptr.To(true)
 	}
 
 	if !*options.Binlog {
