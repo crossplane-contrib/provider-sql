@@ -3,7 +3,8 @@ kind: User
 metadata:
   name: example-user-ad
   annotations:
-    crossplane.io/external-name: "example-user@example.com"
+    ##change to real user inside your AD
+    crossplane.io/external-name: "example-user@example-domain.com"
 spec:
   forProvider:
     type: AD
