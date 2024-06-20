@@ -104,8 +104,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
+	providerConfigName := cr.GetProviderConfigReference().Name
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -122,12 +123,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	if err := tls.LoadConfig(ctx, c.kube, pc.Spec.TLS, pc.Spec.TLSConfig); err != nil {
+	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig)
+	if err != nil {
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.TLS, cr.Spec.ForProvider.BinLog),
+		db:   c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }

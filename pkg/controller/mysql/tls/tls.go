@@ -15,20 +15,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// LoadConfig loads the TLS configuration when tls mode is set to custom
-func LoadConfig(ctx context.Context, kube client.Client, mode *string, cfg *v1alpha1.TLSConfig) error {
+// LoadConfig loads the TLS configuration when tls mode is set to custom and
+// returns the tls name of registered configuration.
+func LoadConfig(ctx context.Context, kube client.Client, providerConfigName string, mode *string, cfg *v1alpha1.TLSConfig) (*string, error) {
 	if mode == nil || *mode != "custom" {
 		if cfg != nil {
-			return fmt.Errorf("tlsConfig is allowed only when tls=custom")
+			return nil, fmt.Errorf("tlsConfig is allowed only when tls=custom")
 		}
-		return nil
+		return mode, nil
 	}
 
 	if err := validateTLSConfig(cfg); err != nil {
-		return err
+		return nil, err
 	}
 
-	return registerTLS(ctx, kube, cfg)
+	tlsName := fmt.Sprintf("custom-%s", providerConfigName)
+	err := registerTLS(ctx, kube, tlsName, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &tlsName, nil
 }
 
 func validateTLSConfig(cfg *v1alpha1.TLSConfig) error {
@@ -44,7 +50,7 @@ func validateTLSConfig(cfg *v1alpha1.TLSConfig) error {
 	return nil
 }
 
-func registerTLS(ctx context.Context, kube client.Client, cfg *v1alpha1.TLSConfig) error {
+func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *v1alpha1.TLSConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -64,7 +70,7 @@ func registerTLS(ctx context.Context, kube client.Client, cfg *v1alpha1.TLSConfi
 		return err
 	}
 
-	return mysql.RegisterTLSConfig("custom", &tls.Config{
+	return mysql.RegisterTLSConfig(tlsName, &tls.Config{
 		RootCAs:            pool,
 		Certificates:       []tls.Certificate{keyPair},
 		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // This is only required by integration tests and should never be used in production
