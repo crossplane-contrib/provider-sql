@@ -82,7 +82,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, tls *string) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -116,7 +116,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.TLS),
+		db:   c.newDB(s.Data, pc.Spec.TLS, cr.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }
@@ -251,8 +251,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	binlog := cr.Spec.ForProvider.BinLog
-	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw, binlog); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -265,7 +264,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
-func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string, binlog *bool) error {
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string) error {
 	resourceOptions := ""
 	if len(resourceOptionsClauses) != 0 {
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
@@ -279,7 +278,7 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 		resourceOptions,
 	)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{}); err != nil {
 		return err
 	}
 
@@ -303,14 +302,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(rochanged) > 0 {
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
-		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf(
 			"ALTER USER %s@%s %s",
 			mysql.QuoteValue(username),
 			mysql.QuoteValue(host),
 			resourceOptions,
 		)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{}); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 
@@ -336,9 +334,8 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 	}
 
 	if pwchanged {
-		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{}); err != nil {
 			return managed.ConnectionDetails{}, err
 		}
 
@@ -358,9 +355,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
-	binlog := cr.Spec.ForProvider.BinLog
 	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{}); err != nil {
 		return err
 	}
 

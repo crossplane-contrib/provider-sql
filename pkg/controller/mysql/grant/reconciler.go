@@ -87,7 +87,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, tls *string) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -121,7 +121,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.TLS),
+		db:   c.newDB(s.Data, pc.Spec.TLS, cr.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }
@@ -259,10 +259,9 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
-	binlog := cr.Spec.ForProvider.BinLog
 	query := createGrantQuery(privileges, dbname, username, table, grantOption)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}, mysql.ExecOptions{}); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 	return managed.ExternalCreation{}, nil
@@ -277,7 +276,6 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-	binlog := cr.Spec.ForProvider.BinLog
 
 	observed := cr.Status.AtProvider.Privileges
 	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
@@ -287,11 +285,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		sort.Strings(toRevoke)
 		privileges, grantOption := getPrivilegesString(toRevoke)
 		query := createRevokeQuery(privileges, dbname, username, table, grantOption)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+		if err := mysql.ExecWithFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
-			}, mysql.ExecOptions{
-				Binlog: binlog}); err != nil {
+			}, mysql.ExecOptions{}); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 	}
@@ -300,11 +297,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		sort.Strings(toGrant)
 		privileges, grantOption := getPrivilegesString(toGrant)
 		query := createGrantQuery(privileges, dbname, username, table, grantOption)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db,
+		if err := mysql.ExecWithFlush(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
-			}, mysql.ExecOptions{
-				Binlog: binlog}); err != nil {
+			}, mysql.ExecOptions{}); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 	}
@@ -369,12 +365,11 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	username := *cr.Spec.ForProvider.User
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-	binlog := cr.Spec.ForProvider.BinLog
 
 	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
 	query := createRevokeQuery(privileges, dbname, username, table, grantOption)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWithFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}, mysql.ExecOptions{}); err != nil {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
 			// MySQL automatically deletes related grants if the user has been deleted
