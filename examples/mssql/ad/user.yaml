@@ -1,0 +1,12 @@
+apiVersion: mssql.sql.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-user-ad
+  annotations:
+    ##change to real user inside your AD
+    crossplane.io/external-name: "example-user@example-domain.com"
+spec:
+  forProvider:
+    type: AD
+    databaseRef:
+      name: example-db-ad
