@@ -1,0 +1,29 @@
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: MySQLConnectionSecret
+    connectionSecretRef:
+      namespace: default
+      name: credentials
+  # setting tls to custom will configure mysql driver with custom tls configuration specified in tlsConfig
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: default
+        name: tls-creds
+        key: ca-cert.pem
+    clientCert:
+      secretRef:
+        namespace: default
+        name: tls-creds
+        key: client-cert.pem
+    clientKey:
+      secretRef:
+        namespace: default
+        name: tls-creds
+        key: client-key.pem

@@ -85,11 +85,92 @@ spec:
                   or use preferred to use TLS only when advertised by the server. This is similar
                   to skip-verify, but additionally allows a fallback to a connection which is
                   not encrypted. Neither skip-verify nor preferred add any reliable security.
+                  Alternatively, set tls=custom and provide a custom TLS configuration via the tlsConfig field.
                 enum:
                 - "true"
                 - skip-verify
                 - preferred
+                - custom
                 type: string
+              tlsConfig:
+                description: Optional TLS configuration for sql driver. Setting this
+                  field also requires the tls field to be set to custom.
+                properties:
+                  caCert:
+                    description: TLSSecret defines a reference to a K8s secret and
+                      its specific internal key that contains the TLS cert/keys in
+                      PEM format.
+                    properties:
+                      secretRef:
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
+                        properties:
+                          key:
+                            description: The key to select.
+                            type: string
+                          name:
+                            description: Name of the secret.
+                            type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                    type: object
+                  clientCert:
+                    description: TLSSecret defines a reference to a K8s secret and
+                      its specific internal key that contains the TLS cert/keys in
+                      PEM format.
+                    properties:
+                      secretRef:
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
+                        properties:
+                          key:
+                            description: The key to select.
+                            type: string
+                          name:
+                            description: Name of the secret.
+                            type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                    type: object
+                  clientKey:
+                    description: TLSSecret defines a reference to a K8s secret and
+                      its specific internal key that contains the TLS cert/keys in
+                      PEM format.
+                    properties:
+                      secretRef:
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
+                        properties:
+                          key:
+                            description: The key to select.
+                            type: string
+                          name:
+                            description: Name of the secret.
+                            type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                    type: object
+                  insecureSkipVerify:
+                    type: boolean
+                type: object
             required:
             - credentials
             type: object

@@ -9,5 +9,5 @@ spec:
     connectionSecretRef:
       namespace: default
       name: db-conn
-  # tls one of preferred(default), skip-verify, or true
+  # tls one of preferred(default), skip-verify, true, or custom
   tls: preferred
