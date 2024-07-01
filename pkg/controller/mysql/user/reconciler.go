@@ -54,6 +54,7 @@ const (
 	errUpdateUser              = "cannot update user"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errCompareResourceOptions  = "cannot compare desired and observed resource options"
+	errAuthPluginNotSupported  = "auth plugin not supported"
 
 	maxConcurrency = 5
 )
@@ -238,20 +239,39 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	cr.SetConditions(xpv1.Creating())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	pw, _, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ExternalCreation{}, err
-	}
 
-	if pw == "" {
-		pw, err = password.Generate()
+	var auth string
+
+	var authplugin string
+
+	if cr.Spec.ForProvider.AuthPlugin != "" {
+		authplugin = cr.Spec.ForProvider.AuthPlugin
+	}
+	var pw string
+
+	switch authplugin {
+	case "":
+		var err error
+		pw, _, err = c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalCreation{}, err
 		}
+
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalCreation{}, err
+			}
+		}
+		auth = fmt.Sprintf("BY %s", mysql.QuoteValue(pw))
+	case "AWSAuthenticationPlugin":
+		auth = fmt.Sprintf("WITH %s AS %s", authplugin, mysql.QuoteValue("RDS"))
+	default:
+		return managed.ExternalCreation{}, errors.New(errAuthPluginNotSupported)
 	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, auth); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -264,17 +284,17 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
-func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string) error {
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, auth string) error {
 	resourceOptions := ""
 	if len(resourceOptionsClauses) != 0 {
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
 	}
 
 	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s%s",
+		"CREATE USER %s@%s IDENTIFIED %s%s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
-		mysql.QuoteValue(pw),
+		auth,
 		resourceOptions,
 	)
 
