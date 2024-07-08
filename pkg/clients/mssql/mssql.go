@@ -65,14 +65,17 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	if val, ok := creds[fedauth]; ok {
 		authType := string(val)
 		query.Add(fedauth, authType)
+		// var user *url.Userinfo
 		if authType == "ActiveDirectoryServicePrincipal" || authType == "ActiveDirectoryApplication" || authType == "ActiveDirectoryPassword" {
 			query.Add("password", string(creds[xpv1.ResourceCredentialsSecretPasswordKey]))
 		}
 		if val, ok := creds[xpv1.ResourceCredentialsSecretUserKey]; ok {
+			// user = url.User(string(val[:]))
 			query.Add("user id", string(val))
 		}
 		u = &url.URL{
-			Scheme:   schema,
+			Scheme: schema,
+			// User:     user,
 			Host:     host,
 			RawQuery: query.Encode(),
 		}
