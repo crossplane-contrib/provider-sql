@@ -371,7 +371,7 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the schema should be returned",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
@@ -387,7 +387,7 @@ func TestCreate(t *testing.T) {
 			reason: "No error should be returned when we successfully create a extension",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
 				},
 			},
 			args: args{
@@ -457,7 +457,7 @@ func TestUpdate(t *testing.T) {
 			reason: "No error should be returned when we successfully update a schema",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
 				},
 			},
 			args: args{

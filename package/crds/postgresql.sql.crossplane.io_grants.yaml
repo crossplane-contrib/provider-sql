@@ -252,6 +252,11 @@ spec:
                       type: string
                     minItems: 1
                     type: array
+                  revokePublicOnDb:
+                    description: RevokePublicOnDb apply the statement "REVOKE ALL
+                      ON DATABASE %s FROM PUBLIC" to make database unreachable from
+                      public
+                    type: boolean
                   role:
                     description: Role this grant is for.
                     type: string

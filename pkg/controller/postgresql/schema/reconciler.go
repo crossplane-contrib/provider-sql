@@ -167,16 +167,14 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotSchema)
 	}
 
-	var b strings.Builder
-	b.WriteString("CREATE SCHEMA IF NOT EXISTS ")
-	b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(cr)))
+	var queries []xsql.Query
 
-	if cr.Spec.ForProvider.Role != nil {
-		b.WriteString(" AUTHORIZATION ")
-		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Role))
-	}
+	cr.SetConditions(xpv1.Creating())
 
-	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateSchema)
+	createSchemaQueries(cr.Spec.ForProvider, &queries, meta.GetExternalName(cr))
+
+	err := c.db.ExecTx(ctx, queries)
+	return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -189,13 +187,10 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, nil
 	}
 
-	var b strings.Builder
-	b.WriteString("ALTER SCHEMA ")
-	b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(mg)))
-	b.WriteString(" OWNER TO ")
-	b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Role))
+	var queries []xsql.Query
+	updateSchemaQueries(cr.Spec.ForProvider, &queries, meta.GetExternalName(cr))
 
-	err := c.db.Exec(ctx, xsql.Query{String: b.String()})
+	err := c.db.ExecTx(ctx, queries)
 	return managed.ExternalUpdate{}, errors.Wrap(err, errAlterSchema)
 }
 
@@ -225,4 +220,47 @@ func lateInit(observed v1alpha1.SchemaParameters, desired *v1alpha1.SchemaParame
 	}
 
 	return li
+}
+
+func createSchemaQueries(sp v1alpha1.SchemaParameters, ql *[]xsql.Query, en string) { // nolint: gocyclo
+
+	var b strings.Builder
+	b.WriteString("CREATE SCHEMA IF NOT EXISTS ")
+	b.WriteString(pq.QuoteIdentifier(en))
+
+	if sp.Role != nil {
+		b.WriteString(" AUTHORIZATION ")
+		b.WriteString(pq.QuoteIdentifier(*sp.Role))
+		b.WriteString(";")
+	}
+
+	*ql = append(*ql,
+		xsql.Query{String: b.String()},
+	)
+
+	if sp.IsPrivate != nil && *sp.IsPrivate {
+		*ql = append(*ql,
+			xsql.Query{String: "REVOKE ALL ON SCHEMA PUBLIC FROM PUBLIC;"},
+		)
+	}
+
+}
+
+func updateSchemaQueries(sp v1alpha1.SchemaParameters, ql *[]xsql.Query, en string) { // nolint: gocyclo
+
+	var b strings.Builder
+	b.WriteString("ALTER SCHEMA ")
+	b.WriteString(pq.QuoteIdentifier(en))
+	b.WriteString(" OWNER TO ")
+	b.WriteString(pq.QuoteIdentifier(*sp.Role))
+
+	*ql = append(*ql,
+		xsql.Query{String: b.String()},
+	)
+
+	if sp.IsPrivate != nil && *sp.IsPrivate {
+		*ql = append(*ql,
+			xsql.Query{String: "REVOKE ALL ON SCHEMA PUBLIC FROM PUBLIC;"},
+		)
+	}
 }
