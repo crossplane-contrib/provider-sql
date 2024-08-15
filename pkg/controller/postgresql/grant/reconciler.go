@@ -275,6 +275,11 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 				ro,
 				withOption(gp.WithOption),
 			)},
+
+			// REVOKE FROM PUBLIC
+			xsql.Query{String: fmt.Sprintf("REVOKE ALL ON DATABASE %s FROM PUBLIC",
+				db,
+			)},
 		)
 		return nil
 	}
