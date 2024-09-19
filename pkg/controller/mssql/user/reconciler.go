@@ -119,15 +119,23 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	userDB := c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, ""))
+	loginDB := userDB
+	if cr.Spec.ForProvider.LoginDatabase != nil {
+		loginDB = c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.LoginDatabase, ""))
+	}
+
 	return &external{
-		db:   c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, "")),
-		kube: c.kube,
+		userDB:  userDB,
+		loginDB: loginDB,
+		kube:    c.kube,
 	}, nil
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	userDB  xsql.DB
+	loginDB xsql.DB
+	kube    client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -139,7 +147,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	var name string
 
 	query := "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
-	err := c.db.Scan(ctx, xsql.Query{
+	err := c.userDB.Scan(ctx, xsql.Query{
 		String: query, Parameters: []interface{}{
 			meta.GetExternalName(cr),
 		},
@@ -182,21 +190,21 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.loginDB.Exec(ctx, xsql.Query{
 		String: loginQuery,
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
 	}
 
 	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: userQuery,
 	}); err != nil {
 		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
 	}
 
 	return managed.ExternalCreation{
-		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
 	}, nil
 }
 
@@ -213,14 +221,14 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if changed {
 		query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-		if err := c.db.Exec(ctx, xsql.Query{
+		if err := c.loginDB.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 		}
 
 		return managed.ExternalUpdate{
-			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+			ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
 		}, nil
 	}
 	return managed.ExternalUpdate{}, nil
@@ -233,7 +241,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	}
 
 	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
-	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
 	if err != nil {
 		return errors.Wrap(err, errCannotGetLogins)
 	}
@@ -244,7 +252,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		if err := rows.Scan(&sessionID); err != nil {
 			return errors.Wrap(err, errCannotGetLogins)
 		}
-		if err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
+		if err := c.userDB.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
 			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
 		}
 	}
@@ -252,13 +260,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.Wrap(err, errCannotGetLogins)
 	}
 
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
 		return errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
 	}
 
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.loginDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
 		return errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))

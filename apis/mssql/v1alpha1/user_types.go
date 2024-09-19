@@ -36,18 +36,26 @@ type UserStatus struct {
 
 // UserParameters define the desired state of a MSSQL user instance.
 type UserParameters struct {
+	// Database allows you to specify the name of the Database the USER is created for.
 	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
-	// DatabaseRef allows you to specify custom resource name of the Database
+	// DatabaseRef allows you to specify custom resource name of the Database the USER is created for.
 	// to fill Database field.
 	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
-	// DatabaseSelector allows you to use selector constraints to select a
-	// Database.
+	// DatabaseSelector allows you to use selector constraints to select a Database the USER is created for.
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
 	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	// LoginDatabase allows you to specify the name of the Database to be used to create the user LOGIN in (normally master).
+	// +crossplane:generate:reference:type=Database
+	LoginDatabase *string `json:"loginDatabase,omitempty"`
+	// DatabaseRef allows you to specify custom resource name of the Database to be used to create the user LOGIN in (normally master).
+	// to fill Database field.
+	LoginDatabaseRef *xpv1.Reference `json:"loginDatabaseRef,omitempty"`
+	// DatabaseSelector allows you to use selector constraints to select a Database to be used to create the user LOGIN in (normally master).
+	LoginDatabaseSelector *xpv1.Selector `json:"loginDatabaseSelector,omitempty"`
 }
 
 // A UserObservation represents the observed state of a MSSQL user.
