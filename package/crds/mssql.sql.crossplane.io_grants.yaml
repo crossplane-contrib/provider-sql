@@ -34,6 +34,9 @@ spec:
     - jsonPath: .spec.forProvider.database
       name: DATABASE
       type: string
+    - jsonPath: .spec.forProvider.schema
+      name: SCHEMA
+      type: string
     - jsonPath: .spec.forProvider.permissions
       name: PERMISSIONS
       type: string
@@ -170,6 +173,9 @@ spec:
                       type: string
                     minItems: 1
                     type: array
+                  schema:
+                    description: Schema for the permissions to be granted for.
+                    type: string
                   user:
                     description: User this grant is for.
                     type: string
