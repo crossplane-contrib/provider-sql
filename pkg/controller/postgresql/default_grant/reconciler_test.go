@@ -318,7 +318,7 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errSelectGrant),
+				err: errors.Wrap(errBoom, errSelectDefaultGrant),
 			},
 		},
 		"SuccessRoleDb": {
@@ -449,7 +449,7 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateGrant),
+				err: errors.Wrap(errBoom, errCreateDefaultGrant),
 			},
 		},
 		"Success": {
@@ -591,7 +591,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errRevokeGrant),
+			want: errors.Wrap(errBoom, errRevokeDefaultGrant),
 		},
 		"Success": {
 			reason: "No error should be returned if the grant was revoked",

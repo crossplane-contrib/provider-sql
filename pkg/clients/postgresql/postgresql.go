@@ -77,11 +77,12 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	// sure the connection is always closed.
 	defer func() {
 		defer d.Close() //nolint:errcheck
-		if err != nil {
-			tx.Rollback() //nolint:errcheck
-			return
+		// We always rollback, it's a no-op if the tx was already committed.
+		defer tx.Rollback() //nolint:errcheck
+
+		if err == nil {
+			err = tx.Commit()
 		}
-		err = tx.Commit()
 	}()
 
 	for _, q := range ql {

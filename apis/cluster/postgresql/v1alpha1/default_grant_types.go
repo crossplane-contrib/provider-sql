@@ -1,8 +1,13 @@
 package v1alpha1
 
 import (
+	"context"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/reference"
+	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // +kubebuilder:object:root=true
@@ -43,6 +48,16 @@ type DefaultGrantParameters struct {
 	// +optional
 	Privileges GrantPrivileges `json:"privileges,omitempty"`
 
+	// TargetRole is the role who owns objects on which the default privileges are granted.
+	// See https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html
+	// +required
+	TargetRole string `json:"targetRole"`
+
+	// ObjectType to which the privileges are granted.
+	// +kubebuilder:validation:Enum=table;sequence;function;schema
+	// +required
+	ObjectType *string `json:"objectType,omitempty"`
+
 	// WithOption allows an option to be set on the grant.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available
 	// options for each grant type, and the effects of applying the option.
@@ -58,6 +73,11 @@ type DefaultGrantParameters struct {
 	// +immutable
 	// +optional
 	RoleRef *xpv1.Reference `json:"roleRef,omitempty"`
+
+	// RoleSelector selects a reference to a Role this default grant is for.
+	// +immutable
+	// +optional
+	RoleSelector *xpv1.Selector `json:"roleSelector,omitempty"`
 
 	// Database in which the default privileges are applied
 	// +optional
@@ -95,4 +115,53 @@ type DefaultGrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DefaultGrant `json:"items"`
+}
+
+// ResolveReferences of this DefaultGrant.
+func (mg *DefaultGrant) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
+
+	// Resolve spec.forProvider.database
+	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.database")
+	}
+	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.role
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
+		Reference:    mg.Spec.ForProvider.RoleRef,
+		Selector:     mg.Spec.ForProvider.RoleSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.role")
+	}
+	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.schema
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
+		Reference:    mg.Spec.ForProvider.SchemaRef,
+		Selector:     mg.Spec.ForProvider.SchemaSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.schema")
+	}
+	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
+
+	return nil
 }
