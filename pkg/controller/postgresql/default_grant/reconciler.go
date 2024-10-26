@@ -59,10 +59,6 @@ const (
 	errNoPrivileges       = "privileges not passed"
 	errUnknownGrant       = "cannot identify grant type based on passed params"
 
-	errInvalidParams = "invalid parameters for grant type %s"
-
-	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
-
 	maxConcurrency = 5
 )
 
@@ -133,13 +129,6 @@ type external struct {
 	kube client.Client
 }
 
-type grantType string
-
-const (
-	roleMember   grantType = "ROLE_MEMBER"
-	roleDatabase grantType = "ROLE_DATABASE"
-)
-
 var (
 	objectTypes = map[string]string{
 		"table":    "r",
@@ -150,8 +139,7 @@ var (
 	}
 )
 
-func selectDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) error {
-
+func selectDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) {
 	sqlString := `
 	select distinct(default_acl.privilege_type)
 	from pg_roles r
@@ -166,7 +154,6 @@ func selectDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) 
 		*gp.Role,
 	}
 
-	return nil
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
@@ -220,7 +207,7 @@ func deleteDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) 
 	))
 
 	q.String = query
-	return
+
 }
 
 func matchingGrants(currentGrants []string, specGrants []string) bool {
@@ -259,9 +246,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	gp := cr.Spec.ForProvider
 	var query xsql.Query
-	if err := selectDefaultGrantQuery(gp, &query); err != nil {
-		return managed.ExternalObservation{}, err
-	}
+	selectDefaultGrantQuery(gp, &query)
 
 	var grants []string
 	err := c.db.Scan(ctx, query, &grants)
