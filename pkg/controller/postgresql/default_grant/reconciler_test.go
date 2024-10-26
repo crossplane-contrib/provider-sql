@@ -19,14 +19,11 @@ package default_grant
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -89,11 +86,11 @@ func TestConnect(t *testing.T) {
 		want   error
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotGrant),
+			want: errors.New(errNotDefaultGrant),
 		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
@@ -101,7 +98,7 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{},
+				mg: &v1alpha1.DefaultGrant{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
 		},
@@ -114,8 +111,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -136,8 +133,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -163,8 +160,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -188,7 +185,7 @@ func TestConnect(t *testing.T) {
 
 func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
-	goa := v1alpha1.GrantOptionAdmin
+	// goa := v1alpha1.GrantOptionAdmin
 	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
@@ -212,32 +209,32 @@ func TestObserve(t *testing.T) {
 		want   want
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotGrant),
+				err: errors.New(errNotDefaultGrant),
 			},
 		},
 		"SuccessNoGrant": {
-			reason: "We should return ResourceExists: false when no grant is found",
+			reason: "We should return ResourceExists: false when no default grant is found",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						// Default value is false, so just return
-						bv := dest[0].(*bool)
-						*bv = false
+						// Default value is empty, so we don't need to do anything here
 						return nil
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
@@ -247,57 +244,57 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
-		"AllMapsToExpandedPrivileges": {
-			reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						privileges := q.Parameters[3]
+		// "AllMapsToExpandedPrivileges": {
+		// 	reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
+		// 	fields: fields{
+		// 		db: mockDB{
+		// 			MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+		// 				privileges := q.Parameters[3]
 
-						privs, ok := privileges.(*pq.StringArray)
-						if !ok {
-							return fmt.Errorf("expected Scan parameter to be pq.StringArray, got %T", privileges)
-						}
+		// 				privs, ok := privileges.(*pq.StringArray)
+		// 				if !ok {
+		// 					return fmt.Errorf("expected Scan parameter to be pq.StringArray, got %T", privileges)
+		// 				}
 
-						// The order is not guaranteed, so sort the slices before comparing
-						sort.Strings(*privs)
+		// 				// The order is not guaranteed, so sort the slices before comparing
+		// 				sort.Strings(*privs)
 
-						// Return if there's a diff between the expected and actual privileges
-						diff := cmp.Diff(&pq.StringArray{"CONNECT", "CREATE", "TEMPORARY"}, privileges)
+		// 				// Return if there's a diff between the expected and actual privileges
+		// 				diff := cmp.Diff(&pq.StringArray{"CONNECT", "CREATE", "TEMPORARY"}, privileges)
 
-						bv := dest[0].(*bool)
-						*bv = diff == ""
+		// 				bv := dest[0].(*bool)
+		// 				*bv = diff == ""
 
-						// Extra logging in case this test is going to fail
-						if diff != "" {
-							t.Logf("expected empty diff, got: %s", diff)
-						}
+		// 				// Extra logging in case this test is going to fail
+		// 				if diff != "" {
+		// 					t.Logf("expected empty diff, got: %s", diff)
+		// 				}
 
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
-			},
-		},
+		// 				return nil
+		// 			},
+		// 		},
+		// 	},
+		// 	args: args{
+		// 		mg: &v1alpha1.DefaultGrant{
+		// 			Spec: v1alpha1.DefaultGrantSpec{
+		// 				ForProvider: v1alpha1.DefaultGrantParameters{
+		// 					Database:   ptr.To("test-example"),
+		// 					Role:       ptr.To("test-example"),
+		// 					Privileges: v1alpha1.GrantPrivileges{"ALL"},
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	want: want{
+		// 		o: managed.ExternalObservation{
+		// 			ResourceExists:   true,
+		// 			ResourceUpToDate: true,
+		// 		},
+		// 		err: nil,
+		// 	},
+		// },
 		"ErrSelectGrant": {
-			reason: "We should return any errors encountered while trying to show the grant",
+			reason: "We should return any errors encountered while trying to show the default grant",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
@@ -306,11 +303,13 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
 							WithOption: &gog,
 						},
@@ -321,24 +320,26 @@ func TestObserve(t *testing.T) {
 				err: errors.Wrap(errBoom, errSelectDefaultGrant),
 			},
 		},
-		"SuccessRoleDb": {
-			reason: "We should return no error if we can find our role-db grant",
+		"DefaultGrantFound": {
+			reason: "We should return no error if we can find the right permissions in the default grant",
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
+						bv := dest[0].(*[]string)
+						*bv = []string{"SELECT", "UPDATE"}
 						return nil
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
+							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
 							WithOption: &gog,
 						},
 					},
@@ -352,36 +353,35 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
-		"SuccessRoleMembership": {
-			reason: "We should return no error if we can find our role-membership grant",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Role:       ptr.To("testrole"),
-							MemberOf:   ptr.To("parentrole"),
-							WithOption: &goa,
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
-			},
-		},
+		// "SuccessRoleMembership": {
+		// 	reason: "We should return no error if we can find our role-membership grant",
+		// 	fields: fields{
+		// 		db: mockDB{
+		// 			MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+		// 				bv := dest[0].(*bool)
+		// 				*bv = true
+		// 				return nil
+		// 			},
+		// 		},
+		// 	},
+		// 	args: args{
+		// 		mg: &v1alpha1.DefaultGrant{
+		// 			Spec: v1alpha1.DefaultGrantSpec{
+		// 				ForProvider: v1alpha1.DefaultGrantParameters{
+		// 					Role:       ptr.To("testrole"),
+		// 					WithOption: &goa,
+		// 				},
+		// 			},
+		// 		},
+		// 	},
+		// 	want: want{
+		// 		o: managed.ExternalObservation{
+		// 			ResourceExists:   true,
+		// 			ResourceUpToDate: true,
+		// 		},
+		// 		err: nil,
+		// 	},
+		// },
 	}
 
 	for name, tc := range cases {
@@ -422,27 +422,29 @@ func TestCreate(t *testing.T) {
 		want   want
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotGrant),
+				err: errors.New(errNotDefaultGrant),
 			},
 		},
 		"ErrExec": {
-			reason: "Any errors encountered while creating the grant should be returned",
+			reason: "Any errors encountered while creating the default grant should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
@@ -453,19 +455,21 @@ func TestCreate(t *testing.T) {
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we successfully create a grant",
+			reason: "No error should be returned when we successfully create a default grant",
 			fields: fields{
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							ObjectType: ptr.To("TABLE"),
 						},
 					},
 				},
@@ -512,11 +516,11 @@ func TestUpdate(t *testing.T) {
 		want   want
 	}{
 		"ErrNoOp": {
-			reason: "Update is a no-op, make sure we dont throw an error *Grant",
+			reason: "Update is a no-op, make sure we dont throw an error *DefaultGrant",
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
@@ -564,15 +568,15 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *Grant",
+		"ErrNotDefaultGrant": {
+			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotGrant),
+			want: errors.New(errNotDefaultGrant),
 		},
-		"ErrDropGrant": {
-			reason: "Errors dropping a grant should be returned",
+		"ErrDropDefaultGrant": {
+			reason: "Errors dropping a default grant should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
@@ -581,12 +585,14 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							ObjectType: ptr.To("SEQUENCE"),
+							TargetRole: ptr.To("target-role"),
 						},
 					},
 				},
@@ -594,14 +600,16 @@ func TestDelete(t *testing.T) {
 			want: errors.Wrap(errBoom, errRevokeDefaultGrant),
 		},
 		"Success": {
-			reason: "No error should be returned if the grant was revoked",
+			reason: "No error should be returned if the default grant was revoked",
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultGrant{
+					Spec: v1alpha1.DefaultGrantSpec{
+						ForProvider: v1alpha1.DefaultGrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							ObjectType: ptr.To("SEQUENCE"),
+							TargetRole: ptr.To("target-role"),
 						},
 					},
 				},

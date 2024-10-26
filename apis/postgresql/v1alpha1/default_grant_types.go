@@ -51,7 +51,7 @@ type DefaultGrantParameters struct {
 	// TargetRole is the role who owns objects on which the default privileges are granted.
 	// See https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html
 	// +required
-	TargetRole string `json:"targetRole"`
+	TargetRole *string `json:"targetRole"`
 
 	// ObjectType to which the privileges are granted.
 	// +kubebuilder:validation:Enum=table;sequence;function;schema
