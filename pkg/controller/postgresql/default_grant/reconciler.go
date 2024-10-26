@@ -48,11 +48,13 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotGrant           = "managed resource is not a Grant custom resource"
+	errNotDefaultGrant    = "managed resource is not a Grant custom resource"
 	errSelectDefaultGrant = "cannot select default grant"
 	errCreateDefaultGrant = "cannot create default grant"
 	errRevokeDefaultGrant = "cannot revoke default grant"
 	errNoRole             = "role not passed or could not be resolved"
+	errNoTargetRole       = "target role not passed or could not be resolved"
+	errNoObjectType       = "object type not passed"
 	errNoDatabase         = "database not passed or could not be resolved"
 	errNoPrivileges       = "privileges not passed"
 	errUnknownGrant       = "cannot identify grant type based on passed params"
@@ -94,7 +96,7 @@ type connector struct {
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
 	cr, ok := mg.(*v1alpha1.DefaultGrant)
 	if !ok {
-		return nil, errors.New(errNotGrant)
+		return nil, errors.New(errNotDefaultGrant)
 	}
 
 	if err := c.usage.Track(ctx, mg); err != nil {
@@ -181,10 +183,12 @@ func inSchema(params *v1alpha1.DefaultGrantParameters) string {
 	return ""
 }
 
-func createDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) error { // nolint: gocyclo
+func createDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) { // nolint: gocyclo
 
 	roleName := pq.QuoteIdentifier(*gp.Role)
-	targetRoleName := pq.QuoteIdentifier(gp.TargetRole)
+
+	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
+
 	objectType := objectTypes[*gp.ObjectType]
 
 	query := strings.TrimSpace(fmt.Sprintf(
@@ -198,12 +202,11 @@ func createDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) 
 	))
 
 	q.String = query
-	return nil
 }
 
-func deleteDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) error {
+func deleteDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) {
 	roleName := pq.QuoteIdentifier(*gp.Role)
-	targetRoleName := pq.QuoteIdentifier(gp.TargetRole)
+	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
 	objectType := objectTypes[*gp.ObjectType]
 
 	query := strings.TrimSpace(fmt.Sprintf(
@@ -217,12 +220,12 @@ func deleteDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) 
 	))
 
 	q.String = query
-	return nil
+	return
 }
 
-func haveToUpdate(currentGrants []string, specGrants []string) bool {
+func matchingGrants(currentGrants []string, specGrants []string) bool {
 	if len(currentGrants) != len(specGrants) {
-		return true
+		return false
 	}
 
 	sort.Strings(currentGrants)
@@ -230,20 +233,28 @@ func haveToUpdate(currentGrants []string, specGrants []string) bool {
 
 	for i, g := range currentGrants {
 		if g != specGrants[i] {
-			return true
+			return false
 		}
 	}
 
-	return false
+	return true
 }
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.DefaultGrant)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotGrant)
+		return managed.ExternalObservation{}, errors.New(errNotDefaultGrant)
 	}
 
 	if cr.Spec.ForProvider.Role == nil {
 		return managed.ExternalObservation{}, errors.New(errNoRole)
+	}
+
+	if cr.Spec.ForProvider.TargetRole == nil {
+		return managed.ExternalObservation{}, errors.New(errNoTargetRole)
+	}
+
+	if cr.Spec.ForProvider.ObjectType == nil {
+		return managed.ExternalObservation{}, errors.New(errNoObjectType)
 	}
 
 	gp := cr.Spec.ForProvider
@@ -254,40 +265,41 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	var grants []string
 	err := c.db.Scan(ctx, query, &grants)
-	if xsql.IsNoRows(err) || len(grants) == 0 {
+	if err != nil && !xsql.IsNoRows(err) {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultGrant)
+	}
+	if len(grants) == 0 {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
 	// Grants have no way of being 'not up to date' - if they exist, they are up to date
 	cr.SetConditions(xpv1.Available())
 
+	resourceMatches := matchingGrants(grants, gp.Privileges.ToStringSlice())
 	return managed.ExternalObservation{
 		ResourceLateInitialized: false,
 		// check that the list of grants matches the expected grants
 		// if not, the resource is not up to date.
-		// Becase create first revokes all grants and then grants them again,
+		// Because create first revokes all grants and then grants them again,
 		// we can assume that if the grants are present, they are up to date.
-		ResourceExists: haveToUpdate(grants, gp.Privileges.ToStringSlice()),
+		ResourceExists:   resourceMatches,
+		ResourceUpToDate: resourceMatches,
 	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
 	cr, ok := mg.(*v1alpha1.DefaultGrant)
 	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotGrant)
+		return managed.ExternalCreation{}, errors.New(errNotDefaultGrant)
 	}
-
-	var createQuery xsql.Query
 
 	cr.SetConditions(xpv1.Creating())
-	if err := createDefaultGrantQuery(cr.Spec.ForProvider, &createQuery); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateDefaultGrant)
-	}
+
+	var createQuery xsql.Query
+	createDefaultGrantQuery(cr.Spec.ForProvider, &createQuery)
 
 	var deleteQuery xsql.Query
-	if err := deleteDefaultGrantQuery(cr.Spec.ForProvider, &deleteQuery); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateDefaultGrant)
-	}
+	deleteDefaultGrantQuery(cr.Spec.ForProvider, &deleteQuery)
 
 	err := c.db.ExecTx(ctx, []xsql.Query{
 		deleteQuery, createQuery,
@@ -305,16 +317,13 @@ func (c *external) Update(
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	cr, ok := mg.(*v1alpha1.DefaultGrant)
 	if !ok {
-		return errors.New(errNotGrant)
+		return errors.New(errNotDefaultGrant)
 	}
 	var query xsql.Query
 
 	cr.SetConditions(xpv1.Deleting())
 
-	err := deleteDefaultGrantQuery(cr.Spec.ForProvider, &query)
-	if err != nil {
-		return errors.Wrap(err, errRevokeDefaultGrant)
-	}
+	deleteDefaultGrantQuery(cr.Spec.ForProvider, &query)
 
 	return errors.Wrap(c.db.Exec(ctx, query), errRevokeDefaultGrant)
 }
