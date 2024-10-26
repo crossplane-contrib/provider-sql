@@ -90,6 +90,14 @@ var (
 	GrantGroupVersionKind = SchemeGroupVersion.WithKind(GrantKind)
 )
 
+// DefaultGrant type metadata.
+var (
+	DefaultGrantKind             = reflect.TypeOf(DefaultGrant{}).Name()
+	DefaultGrantGroupKind        = schema.GroupKind{Group: Group, Kind: DefaultGrantKind}.String()
+	DefaultGrantKindAPIVersion   = DefaultGrantKind + "." + SchemeGroupVersion.String()
+	DefaultGrantGroupVersionKind = SchemeGroupVersion.WithKind(DefaultGrantKind)
+)
+
 // Schema type metadata.
 var (
 	SchemaKind             = reflect.TypeOf(Schema{}).Name()
