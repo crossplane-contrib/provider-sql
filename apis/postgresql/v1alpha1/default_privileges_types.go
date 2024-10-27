@@ -1,13 +1,8 @@
 package v1alpha1
 
 import (
-	"context"
-
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/pkg/reference"
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // +kubebuilder:object:root=true
@@ -18,31 +13,31 @@ import (
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.role"
-// +kubebuilder:printcolumn:name="MEMBER OF",type="string",JSONPath=".spec.forProvider.memberOf"
+// +kubebuilder:printcolumn:name="SCHEMA",type="string",JSONPath=".spec.forProvider.schema"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
-type DefaultGrant struct {
+type DefaultPrivileges struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DefaultGrantSpec   `json:"spec"`
-	Status DefaultGrantStatus `json:"status,omitempty"`
+	Spec   DefaultPrivilegesSpec   `json:"spec"`
+	Status DefaultPrivilegesStatus `json:"status,omitempty"`
 }
 
-// A DefaultGrantSpec defines the desired state of a Default Grant.
-type DefaultGrantSpec struct {
+// A DefaultPrivilegesSpec defines the desired state of a Default Grant.
+type DefaultPrivilegesSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DefaultGrantParameters `json:"forProvider"`
+	ForProvider       DefaultPrivilegesParameters `json:"forProvider"`
 }
 
-// A DefaultGrantStatus represents the observed state of a Grant.
-type DefaultGrantStatus struct {
+// A DefaultPrivilegesStatus represents the observed state of a Grant.
+type DefaultPrivilegesStatus struct {
 	xpv1.ResourceStatus `json:",inline"`
 }
 
-// DefaultGrantParameters defines the desired state of a Default Grant.
-type DefaultGrantParameters struct {
+// DefaultPrivilegesParameters defines the desired state of a Default Grant.
+type DefaultPrivilegesParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
 	// +optional
@@ -110,58 +105,58 @@ type DefaultGrantParameters struct {
 
 // +kubebuilder:object:root=true
 
-// DefaultGrantList contains a list of DefaultGrant.
-type DefaultGrantList struct {
+// DefaultPrivilegesList contains a list of DefaultPrivileges.
+type DefaultPrivilegesList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []DefaultGrant `json:"items"`
+	Items           []DefaultPrivileges `json:"items"`
 }
 
-// ResolveReferences of this DefaultGrant.
-func (mg *DefaultGrant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
+// ResolveReferences of this DefaultPrivileges.
+// func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
+// 	r := reference.NewAPIResolver(c, mg)
 
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+// 	// Resolve spec.forProvider.database
+// 	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+// 		Reference:    mg.Spec.ForProvider.DatabaseRef,
+// 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+// 		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+// 		Extract:      reference.ExternalName(),
+// 	})
+// 	if err != nil {
+// 		return errors.Wrap(err, "spec.forProvider.database")
+// 	}
+// 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+// 	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
-	// Resolve spec.forProvider.role
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
-		Reference:    mg.Spec.ForProvider.RoleRef,
-		Selector:     mg.Spec.ForProvider.RoleSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.role")
-	}
-	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
+// 	// Resolve spec.forProvider.role
+// 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
+// 		Reference:    mg.Spec.ForProvider.RoleRef,
+// 		Selector:     mg.Spec.ForProvider.RoleSelector,
+// 		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+// 		Extract:      reference.ExternalName(),
+// 	})
+// 	if err != nil {
+// 		return errors.Wrap(err, "spec.forProvider.role")
+// 	}
+// 	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+// 	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
 
-	// Resolve spec.forProvider.schema
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
-		Reference:    mg.Spec.ForProvider.SchemaRef,
-		Selector:     mg.Spec.ForProvider.SchemaSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.schema")
-	}
-	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
+// 	// Resolve spec.forProvider.schema
+// 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
+// 		Reference:    mg.Spec.ForProvider.SchemaRef,
+// 		Selector:     mg.Spec.ForProvider.SchemaSelector,
+// 		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+// 		Extract:      reference.ExternalName(),
+// 	})
+// 	if err != nil {
+// 		return errors.Wrap(err, "spec.forProvider.schema")
+// 	}
+// 	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
+// 	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
 
-	return nil
-}
+// 	return nil
+// }

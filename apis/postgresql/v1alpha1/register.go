@@ -90,12 +90,12 @@ var (
 	GrantGroupVersionKind = SchemeGroupVersion.WithKind(GrantKind)
 )
 
-// DefaultGrant type metadata.
+// DefaultPrivileges type metadata.
 var (
-	DefaultGrantKind             = reflect.TypeOf(DefaultGrant{}).Name()
-	DefaultGrantGroupKind        = schema.GroupKind{Group: Group, Kind: DefaultGrantKind}.String()
-	DefaultGrantKindAPIVersion   = DefaultGrantKind + "." + SchemeGroupVersion.String()
-	DefaultGrantGroupVersionKind = SchemeGroupVersion.WithKind(DefaultGrantKind)
+	DefaultPrivilegesKind             = reflect.TypeOf(DefaultPrivileges{}).Name()
+	DefaultPrivilegesGroupKind        = schema.GroupKind{Group: Group, Kind: DefaultPrivilegesKind}.String()
+	DefaultPrivilegesKindAPIVersion   = DefaultPrivilegesKind + "." + SchemeGroupVersion.String()
+	DefaultPrivilegesGroupVersionKind = SchemeGroupVersion.WithKind(DefaultPrivilegesKind)
 )
 
 // Schema type metadata.

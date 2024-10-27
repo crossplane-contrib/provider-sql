@@ -4,7 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: defaultgrants.postgresql.sql.crossplane.io
+  name: defaultprivileges.postgresql.sql.crossplane.io
 spec:
   group: postgresql.sql.crossplane.io
   names:
@@ -12,10 +12,10 @@ spec:
     - crossplane
     - managed
     - sql
-    kind: DefaultGrant
-    listKind: DefaultGrantList
-    plural: defaultgrants
-    singular: defaultgrant
+    kind: DefaultPrivileges
+    listKind: DefaultPrivilegesList
+    plural: defaultprivileges
+    singular: defaultprivileges
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -31,8 +31,8 @@ spec:
     - jsonPath: .spec.forProvider.role
       name: ROLE
       type: string
-    - jsonPath: .spec.forProvider.memberOf
-      name: MEMBER OF
+    - jsonPath: .spec.forProvider.schema
+      name: SCHEMA
       type: string
     - jsonPath: .spec.forProvider.database
       name: DATABASE
@@ -63,7 +63,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: A DefaultGrantSpec defines the desired state of a Default
+            description: A DefaultPrivilegesSpec defines the desired state of a Default
               Grant.
             properties:
               deletionPolicy:
@@ -81,8 +81,8 @@ spec:
                 - Delete
                 type: string
               forProvider:
-                description: DefaultGrantParameters defines the desired state of a
-                  Default Grant.
+                description: DefaultPrivilegesParameters defines the desired state
+                  of a Default Grant.
                 properties:
                   database:
                     description: Database in which the default privileges are applied
@@ -523,7 +523,8 @@ spec:
             - forProvider
             type: object
           status:
-            description: A DefaultGrantStatus represents the observed state of a Grant.
+            description: A DefaultPrivilegesStatus represents the observed state of
+              a Grant.
             properties:
               conditions:
                 description: Conditions of the resource.

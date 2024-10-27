@@ -79,63 +79,63 @@ func (mg *Database) SetWriteConnectionSecretToReference(r *xpv1.SecretReference)
 	mg.Spec.WriteConnectionSecretToReference = r
 }
 
-// GetCondition of this DefaultGrant.
-func (mg *DefaultGrant) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
+// GetCondition of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetCondition(ct xpv1.ConditionType) xpv1.Condition {
 	return mg.Status.GetCondition(ct)
 }
 
-// GetDeletionPolicy of this DefaultGrant.
-func (mg *DefaultGrant) GetDeletionPolicy() xpv1.DeletionPolicy {
+// GetDeletionPolicy of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetDeletionPolicy() xpv1.DeletionPolicy {
 	return mg.Spec.DeletionPolicy
 }
 
-// GetManagementPolicies of this DefaultGrant.
-func (mg *DefaultGrant) GetManagementPolicies() xpv1.ManagementPolicies {
+// GetManagementPolicies of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetManagementPolicies() xpv1.ManagementPolicies {
 	return mg.Spec.ManagementPolicies
 }
 
-// GetProviderConfigReference of this DefaultGrant.
-func (mg *DefaultGrant) GetProviderConfigReference() *xpv1.Reference {
+// GetProviderConfigReference of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetProviderConfigReference() *xpv1.Reference {
 	return mg.Spec.ProviderConfigReference
 }
 
-// GetPublishConnectionDetailsTo of this DefaultGrant.
-func (mg *DefaultGrant) GetPublishConnectionDetailsTo() *xpv1.PublishConnectionDetailsTo {
+// GetPublishConnectionDetailsTo of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetPublishConnectionDetailsTo() *xpv1.PublishConnectionDetailsTo {
 	return mg.Spec.PublishConnectionDetailsTo
 }
 
-// GetWriteConnectionSecretToReference of this DefaultGrant.
-func (mg *DefaultGrant) GetWriteConnectionSecretToReference() *xpv1.SecretReference {
+// GetWriteConnectionSecretToReference of this DefaultPrivileges.
+func (mg *DefaultPrivileges) GetWriteConnectionSecretToReference() *xpv1.SecretReference {
 	return mg.Spec.WriteConnectionSecretToReference
 }
 
-// SetConditions of this DefaultGrant.
-func (mg *DefaultGrant) SetConditions(c ...xpv1.Condition) {
+// SetConditions of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetConditions(c ...xpv1.Condition) {
 	mg.Status.SetConditions(c...)
 }
 
-// SetDeletionPolicy of this DefaultGrant.
-func (mg *DefaultGrant) SetDeletionPolicy(r xpv1.DeletionPolicy) {
+// SetDeletionPolicy of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetDeletionPolicy(r xpv1.DeletionPolicy) {
 	mg.Spec.DeletionPolicy = r
 }
 
-// SetManagementPolicies of this DefaultGrant.
-func (mg *DefaultGrant) SetManagementPolicies(r xpv1.ManagementPolicies) {
+// SetManagementPolicies of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetManagementPolicies(r xpv1.ManagementPolicies) {
 	mg.Spec.ManagementPolicies = r
 }
 
-// SetProviderConfigReference of this DefaultGrant.
-func (mg *DefaultGrant) SetProviderConfigReference(r *xpv1.Reference) {
+// SetProviderConfigReference of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetProviderConfigReference(r *xpv1.Reference) {
 	mg.Spec.ProviderConfigReference = r
 }
 
-// SetPublishConnectionDetailsTo of this DefaultGrant.
-func (mg *DefaultGrant) SetPublishConnectionDetailsTo(r *xpv1.PublishConnectionDetailsTo) {
+// SetPublishConnectionDetailsTo of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetPublishConnectionDetailsTo(r *xpv1.PublishConnectionDetailsTo) {
 	mg.Spec.PublishConnectionDetailsTo = r
 }
 
-// SetWriteConnectionSecretToReference of this DefaultGrant.
-func (mg *DefaultGrant) SetWriteConnectionSecretToReference(r *xpv1.SecretReference) {
+// SetWriteConnectionSecretToReference of this DefaultPrivileges.
+func (mg *DefaultPrivileges) SetWriteConnectionSecretToReference(r *xpv1.SecretReference) {
 	mg.Spec.WriteConnectionSecretToReference = r
 }
 
