@@ -12,7 +12,7 @@ import (
 
 // +kubebuilder:object:root=true
 
-// A Grant represents the declarative state of a PostgreSQL grant.
+// A DefaultPrivileges represents the declarative state of a PostgreSQL DefaultPrivileges.
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
