@@ -31,6 +31,9 @@ spec:
     - jsonPath: .spec.forProvider.role
       name: ROLE
       type: string
+    - jsonPath: .spec.forProvider.targetRole
+      name: TARGET_ROLE
+      type: string
     - jsonPath: .spec.forProvider.schema
       name: SCHEMA
       type: string
@@ -170,6 +173,7 @@ spec:
                     - sequence
                     - function
                     - schema
+                    - type
                     type: string
                   privileges:
                     description: |-
