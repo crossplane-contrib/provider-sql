@@ -95,18 +95,8 @@ type DefaultPrivilegesParameters struct {
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
 	// Schema in which the default privileges are applied
-	// +optional
+	// +required
 	Schema *string `json:"schema,omitempty"`
-
-	// SchemaRef references the database object this default grant it for.
-	// +immutable
-	// +optional
-	SchemaRef *xpv1.Reference `json:"schemaRef,omitempty"`
-
-	// SchemaSelector selects a reference to a Database this grant is for.
-	// +immutable
-	// +optional
-	SchemaSelector *xpv1.Selector `json:"schemaSelector,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -122,22 +112,22 @@ type DefaultPrivilegesList struct {
 func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
 	r := reference.NewAPIResolver(c, mg)
 
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+	// // Resolve spec.forProvider.database
+	// rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+	// 	CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+	// 	Reference:    mg.Spec.ForProvider.DatabaseRef,
+	// 	Selector:     mg.Spec.ForProvider.DatabaseSelector,
+	// 	To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+	// 	Extract:      reference.ExternalName(),
+	// })
+	// if err != nil {
+	// 	return errors.Wrap(err, "spec.forProvider.database")
+	// }
+	// mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	// mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
 	// Resolve spec.forProvider.role
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
 		Reference:    mg.Spec.ForProvider.RoleRef,
 		Selector:     mg.Spec.ForProvider.RoleSelector,
@@ -149,20 +139,6 @@ func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Rea
 	}
 	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
 	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.schema
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
-		Reference:    mg.Spec.ForProvider.SchemaRef,
-		Selector:     mg.Spec.ForProvider.SchemaSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.schema")
-	}
-	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
 
 	return nil
 }
