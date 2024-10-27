@@ -29,3 +29,4 @@ metadata:
     friendly-kind-name.meta.crossplane.io/grant.postgresql.sql.crossplane.io: Grant
     friendly-kind-name.meta.crossplane.io/role.postgresql.sql.crossplane.io: Role
     friendly-kind-name.meta.crossplane.io/user.mysql.sql.crossplane.io: User
+    friendly-kind-name.meta.crossplane.io/defaultgrant.postgresql.sql.crossplane.io: DefaultGrant
