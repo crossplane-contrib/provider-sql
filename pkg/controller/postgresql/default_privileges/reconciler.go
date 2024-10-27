@@ -245,19 +245,39 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	var query xsql.Query
 	selectDefaultPrivilegesQuery(gp, &query)
 
-	var grants []string
-	err := c.db.Scan(ctx, query, &grants)
-	if err != nil && !xsql.IsNoRows(err) {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrivileges)
-	}
-	if len(grants) == 0 {
+	var defaultPrivileges []string
+
+	rows, err := c.db.Query(ctx, query)
+	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
-	// Grants have no way of being 'not up to date' - if they exist, they are up to date
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrivileges)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var privilege string
+		if err := rows.Scan(&privilege); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrivileges)
+		}
+		defaultPrivileges = append(defaultPrivileges, privilege)
+	}
+
+	// Check for any errors encountered during iteration
+	if err := rows.Err(); err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrivileges)
+	}
+
+	// If no default privileges are found, the resource does not exist.
+	// Maybe this is covered by the xsql.IsNoRows(err) check above?
+	if len(defaultPrivileges) == 0 {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+
 	cr.SetConditions(xpv1.Available())
 
-	resourceMatches := matchingGrants(grants, gp.Privileges.ToStringSlice())
+	resourceMatches := matchingGrants(defaultPrivileges, gp.Privileges.ToStringSlice())
 	return managed.ExternalObservation{
 		ResourceLateInitialized: false,
 		// check that the list of grants matches the expected grants
@@ -286,15 +306,8 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	err := c.db.ExecTx(ctx, []xsql.Query{
 		deleteQuery, createQuery,
 	})
-	errString := errCreateDefaultPrivileges
-	if err != nil {
-		errString = fmt.Sprintf(`
-		%s
-		delete: |%s|
-		create: |%s|
-		`, errString, deleteQuery.String, createQuery.String)
-	}
-	return managed.ExternalCreation{}, errors.Wrap(err, errString)
+
+	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDefaultPrivileges)
 }
 
 func (c *external) Update(

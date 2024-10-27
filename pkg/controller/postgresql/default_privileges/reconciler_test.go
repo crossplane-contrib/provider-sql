@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -221,6 +222,9 @@ func TestObserve(t *testing.T) {
 			reason: "We should return ResourceExists: false when no default grant is found",
 			fields: fields{
 				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						// Default value is empty, so we don't need to do anything here
 						return nil
@@ -248,6 +252,12 @@ func TestObserve(t *testing.T) {
 			reason: "We should return any errors encountered while trying to show the default grant",
 			fields: fields{
 				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						r := sqlmock.NewRows([]string{"PRIVILEGE"}).
+							AddRow("UPDATE").
+							AddRow("SELECT")
+						return mockRowsToSQLRows(r), errBoom
+					},
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						return errBoom
 					},
@@ -275,11 +285,22 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can find the right permissions in the default grant",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*[]string)
-						*bv = []string{"SELECT", "UPDATE"}
-						return nil
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						r := sqlmock.NewRows([]string{"PRIVILEGE"}).
+							AddRow("UPDATE").
+							AddRow("SELECT")
+						return mockRowsToSQLRows(r), nil
 					},
+					// MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+					// 	if len(dest) == 0 {
+					// 		runtime.Breakpoint()
+					// 		return nil
+					// 	}
+					// 	// populate the dest slice with the expected values
+					// 	// so we can compare them in the test
+					// 	*dest[0].(*string) = "SELECT"
+					// 	return nil
+					// },
 				},
 			},
 			args: args{
@@ -318,6 +339,17 @@ func TestObserve(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
+	db, mock, _ := sqlmock.New()
+	mock.ExpectQuery("select").WillReturnRows(mockRows)
+	rows, err := db.Query("select")
+	if err != nil {
+		println("%v", err)
+		return nil
+	}
+	return rows
 }
 
 func TestCreate(t *testing.T) {
