@@ -1,8 +1,13 @@
 package v1alpha1
 
 import (
+	"context"
+
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/pkg/reference"
+	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // +kubebuilder:object:root=true
@@ -13,6 +18,7 @@ import (
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.role"
+// +kubebuilder:printcolumn:name="TARGET_ROLE",type="string",JSONPath=".spec.forProvider.targetRole"
 // +kubebuilder:printcolumn:name="SCHEMA",type="string",JSONPath=".spec.forProvider.schema"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
@@ -49,7 +55,7 @@ type DefaultPrivilegesParameters struct {
 	TargetRole *string `json:"targetRole"`
 
 	// ObjectType to which the privileges are granted.
-	// +kubebuilder:validation:Enum=table;sequence;function;schema
+	// +kubebuilder:validation:Enum=table;sequence;function;schema;type
 	// +required
 	ObjectType *string `json:"objectType,omitempty"`
 
@@ -113,50 +119,50 @@ type DefaultPrivilegesList struct {
 }
 
 // ResolveReferences of this DefaultPrivileges.
-// func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
-// 	r := reference.NewAPIResolver(c, mg)
+func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
 
-// 	// Resolve spec.forProvider.database
-// 	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-// 		Reference:    mg.Spec.ForProvider.DatabaseRef,
-// 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-// 		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-// 		Extract:      reference.ExternalName(),
-// 	})
-// 	if err != nil {
-// 		return errors.Wrap(err, "spec.forProvider.database")
-// 	}
-// 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-// 	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+	// Resolve spec.forProvider.database
+	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.database")
+	}
+	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
-// 	// Resolve spec.forProvider.role
-// 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
-// 		Reference:    mg.Spec.ForProvider.RoleRef,
-// 		Selector:     mg.Spec.ForProvider.RoleSelector,
-// 		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-// 		Extract:      reference.ExternalName(),
-// 	})
-// 	if err != nil {
-// 		return errors.Wrap(err, "spec.forProvider.role")
-// 	}
-// 	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
-// 	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
+	// Resolve spec.forProvider.role
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
+		Reference:    mg.Spec.ForProvider.RoleRef,
+		Selector:     mg.Spec.ForProvider.RoleSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.role")
+	}
+	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
 
-// 	// Resolve spec.forProvider.schema
-// 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-// 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
-// 		Reference:    mg.Spec.ForProvider.SchemaRef,
-// 		Selector:     mg.Spec.ForProvider.SchemaSelector,
-// 		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-// 		Extract:      reference.ExternalName(),
-// 	})
-// 	if err != nil {
-// 		return errors.Wrap(err, "spec.forProvider.schema")
-// 	}
-// 	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
-// 	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
+	// Resolve spec.forProvider.schema
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
+		Reference:    mg.Spec.ForProvider.SchemaRef,
+		Selector:     mg.Spec.ForProvider.SchemaSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.schema")
+	}
+	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
 
-// 	return nil
-// }
+	return nil
+}
