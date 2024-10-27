@@ -14,4 +14,3 @@ spec:
       name: example
     databaseRef:
       name: example
----
