@@ -114,4 +114,5 @@ func init() {
 	SchemeBuilder.Register(&Grant{}, &GrantList{})
 	SchemeBuilder.Register(&Extension{}, &ExtensionList{})
 	SchemeBuilder.Register(&Schema{}, &SchemaList{})
+	SchemeBuilder.Register(&DefaultPrivileges{}, &DefaultPrivilegesList{})
 }
