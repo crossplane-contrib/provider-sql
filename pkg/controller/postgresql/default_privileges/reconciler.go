@@ -170,20 +170,18 @@ func inSchema(params *v1alpha1.DefaultPrivilegesParameters) string {
 	return ""
 }
 
-func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) { // nolint: gocyclo
+func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
 
 	roleName := pq.QuoteIdentifier(*gp.Role)
 
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
 
-	objectType := objectTypes[*gp.ObjectType]
-
 	query := strings.TrimSpace(fmt.Sprintf(
-		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s GRANT %s ON %s TO %s %s",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s GRANT %s ON %sS TO %s %s",
 		targetRoleName,
 		inSchema(&gp),
 		strings.Join(gp.Privileges.ToStringSlice(), ","),
-		objectType,
+		*gp.ObjectType,
 		roleName,
 		withOption(gp.WithOption),
 	))
@@ -197,10 +195,9 @@ func deleteDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 	objectType := objectTypes[*gp.ObjectType]
 
 	query := strings.TrimSpace(fmt.Sprintf(
-		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE %s ON %s TO %s %s",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %s TO %s %s",
 		targetRoleName,
 		inSchema(&gp),
-		strings.Join(gp.Privileges.ToStringSlice(), ","),
 		objectType,
 		roleName,
 		withOption(gp.WithOption),
