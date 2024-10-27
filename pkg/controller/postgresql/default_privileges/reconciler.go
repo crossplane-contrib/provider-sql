@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package default_grant
+package default_privileges
 
 import (
 	"context"
@@ -48,16 +48,16 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotDefaultGrant    = "managed resource is not a Grant custom resource"
-	errSelectDefaultGrant = "cannot select default grant"
-	errCreateDefaultGrant = "cannot create default grant"
-	errRevokeDefaultGrant = "cannot revoke default grant"
-	errNoRole             = "role not passed or could not be resolved"
-	errNoTargetRole       = "target role not passed or could not be resolved"
-	errNoObjectType       = "object type not passed"
-	errNoDatabase         = "database not passed or could not be resolved"
-	errNoPrivileges       = "privileges not passed"
-	errUnknownGrant       = "cannot identify grant type based on passed params"
+	errNotDefaultPrileges    = "managed resource is not a Grant custom resource"
+	errSelectDefaultPrileges = "cannot select default grant"
+	errCreateDefaultPrileges = "cannot create default grant"
+	errRevokeDefaultPrileges = "cannot revoke default grant"
+	errNoRole                = "role not passed or could not be resolved"
+	errNoTargetRole          = "target role not passed or could not be resolved"
+	errNoObjectType          = "object type not passed"
+	errNoDatabase            = "database not passed or could not be resolved"
+	errNoPrivileges          = "privileges not passed"
+	errUnknownGrant          = "cannot identify grant type based on passed params"
 
 	maxConcurrency = 5
 )
@@ -76,7 +76,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
-		For(&v1alpha1.DefaultGrant{}).
+		For(&v1alpha1.DefaultPrivileges{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrency,
 		}).
@@ -90,9 +90,9 @@ type connector struct {
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.DefaultGrant)
+	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
 	if !ok {
-		return nil, errors.New(errNotDefaultGrant)
+		return nil, errors.New(errNotDefaultPrileges)
 	}
 
 	if err := c.usage.Track(ctx, mg); err != nil {
@@ -139,7 +139,7 @@ var (
 	}
 )
 
-func selectDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) {
+func selectDefaultPrilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
 	sqlString := `
 	select distinct(default_acl.privilege_type)
 	from pg_roles r
@@ -163,14 +163,14 @@ func withOption(option *v1alpha1.GrantOption) string {
 	return ""
 }
 
-func inSchema(params *v1alpha1.DefaultGrantParameters) string {
+func inSchema(params *v1alpha1.DefaultPrivilegesParameters) string {
 	if params.Schema != nil {
 		return fmt.Sprintf("IN SCHEMA %s", pq.QuoteIdentifier(*params.Schema))
 	}
 	return ""
 }
 
-func createDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) { // nolint: gocyclo
+func createDefaultPrilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) { // nolint: gocyclo
 
 	roleName := pq.QuoteIdentifier(*gp.Role)
 
@@ -191,7 +191,7 @@ func createDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) 
 	q.String = query
 }
 
-func deleteDefaultGrantQuery(gp v1alpha1.DefaultGrantParameters, q *xsql.Query) {
+func deleteDefaultPrilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
 	roleName := pq.QuoteIdentifier(*gp.Role)
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
 	objectType := objectTypes[*gp.ObjectType]
@@ -227,9 +227,9 @@ func matchingGrants(currentGrants []string, specGrants []string) bool {
 	return true
 }
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.DefaultGrant)
+	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDefaultGrant)
+		return managed.ExternalObservation{}, errors.New(errNotDefaultPrileges)
 	}
 
 	if cr.Spec.ForProvider.Role == nil {
@@ -246,12 +246,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	gp := cr.Spec.ForProvider
 	var query xsql.Query
-	selectDefaultGrantQuery(gp, &query)
+	selectDefaultPrilegesQuery(gp, &query)
 
 	var grants []string
 	err := c.db.Scan(ctx, query, &grants)
 	if err != nil && !xsql.IsNoRows(err) {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultGrant)
+		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrileges)
 	}
 	if len(grants) == 0 {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -273,23 +273,23 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.DefaultGrant)
+	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
 	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDefaultGrant)
+		return managed.ExternalCreation{}, errors.New(errNotDefaultPrileges)
 	}
 
 	cr.SetConditions(xpv1.Creating())
 
 	var createQuery xsql.Query
-	createDefaultGrantQuery(cr.Spec.ForProvider, &createQuery)
+	createDefaultPrilegesQuery(cr.Spec.ForProvider, &createQuery)
 
 	var deleteQuery xsql.Query
-	deleteDefaultGrantQuery(cr.Spec.ForProvider, &deleteQuery)
+	deleteDefaultPrilegesQuery(cr.Spec.ForProvider, &deleteQuery)
 
 	err := c.db.ExecTx(ctx, []xsql.Query{
 		deleteQuery, createQuery,
 	})
-	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDefaultGrant)
+	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDefaultPrileges)
 }
 
 func (c *external) Update(
@@ -300,15 +300,15 @@ func (c *external) Update(
 }
 
 func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.DefaultGrant)
+	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
 	if !ok {
-		return errors.New(errNotDefaultGrant)
+		return errors.New(errNotDefaultPrileges)
 	}
 	var query xsql.Query
 
 	cr.SetConditions(xpv1.Deleting())
 
-	deleteDefaultGrantQuery(cr.Spec.ForProvider, &query)
+	deleteDefaultPrilegesQuery(cr.Spec.ForProvider, &query)
 
-	return errors.Wrap(c.db.Exec(ctx, query), errRevokeDefaultGrant)
+	return errors.Wrap(c.db.Exec(ctx, query), errRevokeDefaultPrileges)
 }

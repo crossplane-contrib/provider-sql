@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package default_grant
+package default_privileges
 
 import (
 	"context"
@@ -86,11 +86,11 @@ func TestConnect(t *testing.T) {
 		want   error
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotDefaultGrant),
+			want: errors.New(errNotDefaultPrivileges),
 		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
@@ -98,7 +98,7 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{},
+				mg: &v1alpha1.DefaultPrivileges{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
 		},
@@ -111,8 +111,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -133,8 +133,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -160,8 +160,8 @@ func TestConnect(t *testing.T) {
 				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ResourceSpec: xpv1.ResourceSpec{
 							ProviderConfigReference: &xpv1.Reference{},
 						},
@@ -209,12 +209,12 @@ func TestObserve(t *testing.T) {
 		want   want
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotDefaultGrant),
+				err: errors.New(errNotDefaultPrivileges),
 			},
 		},
 		"SuccessNoGrant": {
@@ -228,9 +228,9 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
@@ -275,9 +275,9 @@ func TestObserve(t *testing.T) {
 		// 		},
 		// 	},
 		// 	args: args{
-		// 		mg: &v1alpha1.DefaultGrant{
-		// 			Spec: v1alpha1.DefaultGrantSpec{
-		// 				ForProvider: v1alpha1.DefaultGrantParameters{
+		// 		mg: &v1alpha1.DefaultPrivileges{
+		// 			Spec: v1alpha1.DefaultPrivilegesSpec{
+		// 				ForProvider: v1alpha1.DefaultPrivilegesParameters{
 		// 					Database:   ptr.To("test-example"),
 		// 					Role:       ptr.To("test-example"),
 		// 					Privileges: v1alpha1.GrantPrivileges{"ALL"},
@@ -303,9 +303,9 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
@@ -317,10 +317,10 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errSelectDefaultGrant),
+				err: errors.Wrap(errBoom, errSelectDefaultPrivileges),
 			},
 		},
-		"DefaultGrantFound": {
+		"DefaultPrivilegesFound": {
 			reason: "We should return no error if we can find the right permissions in the default grant",
 			fields: fields{
 				db: mockDB{
@@ -332,9 +332,9 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
 							TargetRole: ptr.To("target-role"),
@@ -365,9 +365,9 @@ func TestObserve(t *testing.T) {
 		// 		},
 		// 	},
 		// 	args: args{
-		// 		mg: &v1alpha1.DefaultGrant{
-		// 			Spec: v1alpha1.DefaultGrantSpec{
-		// 				ForProvider: v1alpha1.DefaultGrantParameters{
+		// 		mg: &v1alpha1.DefaultPrivileges{
+		// 			Spec: v1alpha1.DefaultPrivilegesSpec{
+		// 				ForProvider: v1alpha1.DefaultPrivilegesParameters{
 		// 					Role:       ptr.To("testrole"),
 		// 					WithOption: &goa,
 		// 				},
@@ -422,12 +422,12 @@ func TestCreate(t *testing.T) {
 		want   want
 	}{
 		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
 			args: args{
 				mg: nil,
 			},
 			want: want{
-				err: errors.New(errNotDefaultGrant),
+				err: errors.New(errNotDefaultPrivileges),
 			},
 		},
 		"ErrExec": {
@@ -438,9 +438,9 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
@@ -451,7 +451,7 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateDefaultGrant),
+				err: errors.Wrap(errBoom, errCreateDefaultPrivileges),
 			},
 		},
 		"Success": {
@@ -462,9 +462,9 @@ func TestCreate(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
@@ -516,11 +516,11 @@ func TestUpdate(t *testing.T) {
 		want   want
 	}{
 		"ErrNoOp": {
-			reason: "Update is a no-op, make sure we dont throw an error *DefaultGrant",
+			reason: "Update is a no-op, make sure we dont throw an error *DefaultPrivileges",
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
@@ -568,15 +568,15 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotDefaultGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultGrant",
+		"ErrNotDefaultPrivileges": {
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotDefaultGrant),
+			want: errors.New(errNotDefaultPrivileges),
 		},
-		"ErrDropDefaultGrant": {
-			reason: "Errors dropping a default grant should be returned",
+		"ErrDropDefaultPrivileges": {
+			reason: "Errors dropping default privileges should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
@@ -585,9 +585,9 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
@@ -597,14 +597,14 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errRevokeDefaultGrant),
+			want: errors.Wrap(errBoom, errRevokeDefaultPrivileges),
 		},
 		"Success": {
 			reason: "No error should be returned if the default grant was revoked",
 			args: args{
-				mg: &v1alpha1.DefaultGrant{
-					Spec: v1alpha1.DefaultGrantSpec{
-						ForProvider: v1alpha1.DefaultGrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},

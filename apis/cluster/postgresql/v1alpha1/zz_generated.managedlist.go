@@ -17,8 +17,8 @@ func (l *DatabaseList) GetItems() []resource.Managed {
 	return items
 }
 
-// GetItems of this DefaultGrantList.
-func (l *DefaultGrantList) GetItems() []resource.Managed {
+// GetItems of this DefaultPrivilegesList.
+func (l *DefaultPrivilegesList) GetItems() []resource.Managed {
 	items := make([]resource.Managed, len(l.Items))
 	for i := range l.Items {
 		items[i] = &l.Items[i]
