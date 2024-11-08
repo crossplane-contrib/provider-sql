@@ -24,5 +24,5 @@ spec:
 # stringData:
 #   username: postgres
 #   password: pass
-#   host: localhost
+#   endpoint: localhost
 #   port: "5432"
