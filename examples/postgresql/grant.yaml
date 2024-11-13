@@ -47,7 +47,7 @@ spec:
   forProvider:
     role: "postgres"
     memberOfRef:
-      name: "owner-role"
+      name: "ownerrole"
 ---
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Grant
@@ -60,6 +60,7 @@ spec:
     privileges:
       - CONNECT
     roleRef:
-      name: "owner-role"
+      name: "ownerrole"
     databaseRef:
       name: "db1"
+    revokePublicOnDb: true

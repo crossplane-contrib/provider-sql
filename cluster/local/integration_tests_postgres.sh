@@ -54,25 +54,32 @@ echo_step "creating PostgresDB Grant resource"
 # create grant
 "${KUBECTL}" apply -f ${projectdir}/examples/postgresql/grant.yaml
 
-echo_step "check if is ready"
+echo_step "creating PostgresDB Schema resources"
+# create grant
+"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/schema.yaml
+
+echo_step "check if Role is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/role.yaml
 echo_step_completed
 
-echo_step "check if is ready"
+echo_step "check if database is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/database.yaml
 echo_step_completed
 
-echo_step "check if is ready"
+echo_step "check if grant is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/grant.yaml
+echo_step_completed
+
+echo_step "check if schema is ready"
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
 echo_step_completed
 
 # check if granting mechanism is working properly
 
 echo_step "check if grant mechanism is working"
 
-#MASTER_PASSWORD=$(kubectl get secret --namespace default postgresdb-creds -o jsonpath="{.data.postgres-password}" | base64 -d)
 TARGET_DB='db1'
-OWNER_ROLE='owner-role'
+OWNER_ROLE='ownerrole'
 USER_ROLE='example-role'
 
 # Define roles and their expected privileges
@@ -87,6 +94,24 @@ for role in $roles; do
     role_index=$((role_index + 1))
 done
 
+echo_step_completed
+
+
+# check if schema privileges are set properly
+echo_step "check if schema privileges are set properly"
+
+TARGET_DB='db1'
+
+nspacl=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "SELECT nspacl FROM pg_namespace WHERE nspname = 'public';")
+nspacl=$(echo "$nspacl" | xargs)
+
+if [[ "$nspacl" == "{ownerrole=UC/ownerrole}" ]]; then
+    echo "Privileges on schema public are as expected: $nspacl"
+    echo_info "OK"
+else
+    echo "Privileges on schema public are NOT as expected: $nspacl"
+    echo_error "Not OK"
+fi
 
 echo_step_completed
 
@@ -95,6 +120,7 @@ echo_step "uninstalling ${PROJECT_NAME}"
 "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/grant.yaml
 "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/database.yaml
 "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/role.yaml
+"${KUBECTL}" delete -f ${projectdir}/examples/postgresql/schema.yaml
 echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
 # ----------- cleaning postgres related resources
@@ -102,7 +128,7 @@ echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 echo_step "kill port-forwarding"
 kill $PORT_FORWARD_PID
 
-echo_step "uninstalling secret and provider config for mysql"
+echo_step "uninstalling secret and provider config for postgres"
 "${KUBECTL}" delete secret postgresdb-creds
 
 echo_step "Uninstalling PostgresDB Helm chart from default namespace"
