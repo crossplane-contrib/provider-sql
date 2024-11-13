@@ -31,11 +31,11 @@ spec:
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Role
 metadata:
-  name: owner-role
+  name: ownerrole
 spec:
   deletionPolicy:  Orphan
   writeConnectionSecretToRef:
-    name: owner-role-secret
+    name: ownerrole-secret
     namespace: default
   forProvider:
     privileges:

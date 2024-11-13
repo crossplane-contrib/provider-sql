@@ -154,6 +154,10 @@ type GrantParameters struct {
 	// +immutable
 	// +optional
 	MemberOfSelector *xpv1.Selector `json:"memberOfSelector,omitempty"`
+
+	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
+	// +optional
+	RevokePublicOnDb *bool `json:"revokePublicOnDb,omitempty" default:"false"`
 }
 
 // A GrantStatus represents the observed state of a Grant.

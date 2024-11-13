@@ -13,4 +13,4 @@ spec:
   deletionPolicy: Orphan
   forProvider:
     allowConnections: true
-    owner: "owner-role"
+    owner: "ownerrole"

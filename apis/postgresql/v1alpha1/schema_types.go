@@ -59,6 +59,10 @@ type SchemaParameters struct {
 	// +immutable
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+
+	// IsPrivate apply a "REVOKE ALL ON SCHEMA public FROM public" statement
+	// +optional
+	IsPrivate *bool `json:"isPrivate,omitempty" default:"false"`
 }
 
 // A SchemaStatus represents the observed state of a Schema.
