@@ -38,11 +38,7 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
-	if binlog == nil {
-		defaultBinlog := true
-		binlog = &defaultBinlog
-	}
-	dsn := DSN(username, password, endpoint, port, *tls, *binlog)
+	dsn := DSN(username, password, endpoint, port, *tls, binlog)
 
 	return mySQLDB{
 		dsn:      dsn,
@@ -53,17 +49,25 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string, binlog bool) string {
+func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
+	if binlog != nil {
+		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
+			username,
+			password,
+			endpoint,
+			port,
+			tls,
+			strconv.FormatBool(*binlog))
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
 		username,
 		password,
 		endpoint,
 		port,
-		tls,
-		strconv.FormatBool(binlog))
+		tls)
 }
 
 // ExecTx is unsupported in MySQL.
