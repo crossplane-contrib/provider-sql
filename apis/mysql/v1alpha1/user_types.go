@@ -49,6 +49,11 @@ type UserParameters struct {
 	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"binlog,omitempty" default:"true"`
+
+	// AuthPlugin defines the MySQL auth plugin (ie. AWSAuthenticationPlugin for AWS IAM authentication when using AWS RDS )
+	// See https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.DBAccounts.html
+	// +optional
+	AuthPlugin string `json:"authPlugin,omitempty" default:"mysql_native_password"`
 }
 
 // ResourceOptions define the account specific resource limits.
