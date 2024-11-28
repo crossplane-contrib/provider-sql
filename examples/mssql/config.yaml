@@ -1,4 +1,3 @@
----
 apiVersion: mssql.sql.crossplane.io/v1alpha1
 kind: ProviderConfig
 metadata:
