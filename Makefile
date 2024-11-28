@@ -124,7 +124,7 @@ dev: $(KIND) $(KUBECTL)
 	@$(KIND) create cluster --name=$(PROJECT_NAME)-dev
 	@$(KUBECTL) cluster-info --context kind-$(PROJECT_NAME)-dev
 	@$(INFO) Installing Crossplane CRDs
-	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
+	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=release-1.16 --server-side
 	@$(INFO) Installing Provider SQL CRDs
 	@$(KUBECTL) apply -R -f package/crds
 	@$(INFO) Starting Provider SQL controllers
