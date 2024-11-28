@@ -39,6 +39,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/tls"
 )
 
 const (
@@ -46,6 +47,7 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+	errTLSConfig    = "cannot load TLS config"
 
 	errNotUser                 = "managed resource is not a User custom resource"
 	errSelectUser              = "cannot select user"
@@ -97,8 +99,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
+	providerConfigName := cr.GetProviderConfigReference().Name
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -115,8 +118,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, errTLSConfig)
+	}
+
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.TLS, cr.Spec.ForProvider.BinLog),
+		db:   c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }
