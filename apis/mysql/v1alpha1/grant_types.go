@@ -95,7 +95,7 @@ type GrantParameters struct {
 
 	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
 	// +optional
-	BinLog *bool `json:"binlog,omitempty" default:"true"`
+	BinLog *bool `json:"binlog,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
