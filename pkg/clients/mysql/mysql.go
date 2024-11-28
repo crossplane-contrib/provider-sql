@@ -9,7 +9,6 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
-	"k8s.io/utils/ptr"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -17,7 +16,6 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
-	errFlushPriv    = "cannot flush privileges"
 )
 
 type mySQLDB struct {
@@ -150,30 +148,12 @@ type ExecQuery struct {
 	ErrorValue string
 }
 
-// ExecOptions parametrizes which optional statements will be executed before or after ExecQuery.Query
-type ExecOptions struct {
-	// Flush defines whether privileges will be flushed after executing the query. Defaults to true
-	Flush *bool
-}
-
-// ExecWithFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
-func ExecWithFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
-	if options.Flush == nil {
-		options.Flush = ptr.To(true)
-	}
-
+// ExecWrapper is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWrapper(ctx context.Context, db xsql.DB, query ExecQuery) error {
 	if err := db.Exec(ctx, xsql.Query{
 		String: query.Query,
 	}); err != nil {
 		return errors.Wrap(err, query.ErrorValue)
-	}
-
-	if *options.Flush {
-		if err := db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return errors.Wrap(err, errFlushPriv)
-		}
 	}
 
 	return nil
