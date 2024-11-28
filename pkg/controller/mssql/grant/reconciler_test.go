@@ -266,6 +266,9 @@ func TestObserve(t *testing.T) {
 			fields: fields{
 				db: mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						if strings.Contains(q.String, "sys.schemas") {
+							return nil, errBoom
+						}
 						return mockRowsToSQLRows(
 							sqlmock.NewRows(
 								[]string{"Grants"},
@@ -281,6 +284,42 @@ func TestObserve(t *testing.T) {
 							Database:    ptr.To("success-db"),
 							User:        ptr.To("success-user"),
 							Permissions: v1alpha1.GrantPermissions{"CREATE TABLE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessSchema": {
+			reason: "We should return no error if we can successfully get our permissions",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						if !strings.Contains(q.String, "sys.schemas") {
+							return nil, errBoom
+						}
+						return mockRowsToSQLRows(
+							sqlmock.NewRows(
+								[]string{"Grants"},
+							).AddRow("ALTER"),
+						), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:    ptr.To("success-db"),
+							User:        ptr.To("success-user"),
+							Schema:      ptr.To("success-schema"),
+							Permissions: v1alpha1.GrantPermissions{"ALTER"},
 						},
 					},
 				},
@@ -430,7 +469,12 @@ func TestCreate(t *testing.T) {
 			reason: "No error should be returned when we successfully create a grant",
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -440,6 +484,34 @@ func TestCreate(t *testing.T) {
 							Database:    ptr.To("test-example"),
 							User:        ptr.To("test-example"),
 							Permissions: v1alpha1.GrantPermissions{"DELETE", "CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessSchema": {
+			reason: "No error should be returned when we successfully create a grant",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:    ptr.To("test-example"),
+							User:        ptr.To("test-example"),
+							Schema:      ptr.To("success-schema"),
+							Permissions: v1alpha1.GrantPermissions{"ALTER"},
 						},
 					},
 				},
@@ -529,6 +601,9 @@ func TestUpdate(t *testing.T) {
 						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
 					},
 					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
 						if strings.Contains(q.String, "CREATE, DELETE") {
 							return nil
 						}
@@ -543,6 +618,41 @@ func TestUpdate(t *testing.T) {
 							Database:    ptr.To("test-example"),
 							User:        ptr.To("test-example"),
 							Permissions: v1alpha1.GrantPermissions{"CREATE", "DELETE"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SuccessSchema": {
+			reason: "No error should be returned when we update a grant",
+			fields: fields{
+				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						if strings.Contains(q.String, "ALTER") {
+							return nil
+						}
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:    ptr.To("test-example"),
+							User:        ptr.To("test-example"),
+							Schema:      ptr.To("success-schema"),
+							Permissions: v1alpha1.GrantPermissions{"ALTER"},
 						},
 					},
 				},
@@ -630,7 +740,37 @@ func TestDelete(t *testing.T) {
 			},
 			fields: fields{
 				db: &mockDB{
-					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			want: nil,
+		},
+		"SuccessSchema": {
+			reason: "No error should be returned if the grant was revoked",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
+							Schema:   ptr.To("success-schema"),
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						return nil
+					},
 				},
 			},
 			want: nil,

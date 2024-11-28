@@ -55,6 +55,11 @@ type GrantParameters struct {
 	// for available privileges.
 	Permissions GrantPermissions `json:"permissions"`
 
+	// Schema for the permissions to be granted for.
+	// +immutable
+	// +optional
+	Schema *string `json:"schema,omitempty"`
+
 	// User this grant is for.
 	// +optional
 	// +crossplane:generate:reference:type=User
@@ -100,6 +105,7 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
+// +kubebuilder:printcolumn:name="SCHEMA",type="string",JSONPath=".spec.forProvider.schema"
 // +kubebuilder:printcolumn:name="PERMISSIONS",type="string",JSONPath=".spec.forProvider.permissions"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
 type Grant struct {
