@@ -89,5 +89,21 @@ func (mg *User) ResolveReferences(ctx context.Context, c client.Reader) error {
 	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
 	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
 
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.LoginDatabase),
+		Extract:      reference.ExternalName(),
+		Reference:    mg.Spec.ForProvider.LoginDatabaseRef,
+		Selector:     mg.Spec.ForProvider.LoginDatabaseSelector,
+		To: reference.To{
+			List:    &DatabaseList{},
+			Managed: &Database{},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "mg.Spec.ForProvider.LoginDatabase")
+	}
+	mg.Spec.ForProvider.LoginDatabase = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.LoginDatabaseRef = rsp.ResolvedReference
+
 	return nil
 }
