@@ -145,11 +145,11 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
-	observedPrivileges, result, err := c.getPrivileges(ctx, username, dbname, table)
+	observedPrivileges, result, err := c.getPrivileges(ctx, username, host, dbname, table)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -193,9 +193,7 @@ func parseGrant(grant, dbname string, table string) (privileges []string) {
 	return nil
 }
 
-func (c *external) getPrivileges(ctx context.Context, username, dbname string, table string) ([]string, *managed.ExternalObservation, error) {
-	username, host := mysql.SplitUserHost(username)
-
+func (c *external) getPrivileges(ctx context.Context, username, host, dbname, table string) ([]string, *managed.ExternalObservation, error) {
 	privileges, err := c.parseGrantRows(ctx, username, host, dbname, table)
 	if err != nil {
 		var myErr *mysqldriver.MySQLError
@@ -225,7 +223,7 @@ func (c *external) getPrivileges(ctx context.Context, username, dbname string, t
 	return ret, nil, nil
 }
 
-func (c *external) parseGrantRows(ctx context.Context, username string, host string, dbname string, table string) ([]string, error) {
+func (c *external) parseGrantRows(ctx context.Context, username, host, dbname, table string) ([]string, error) {
 	query := fmt.Sprintf("SHOW GRANTS FOR %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
 
@@ -262,12 +260,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
-	query := createGrantQuery(privileges, dbname, username, table, grantOption)
+	query := createGrantQuery(privileges, dbname, username, host, table, grantOption)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}); err != nil {
 		return managed.ExternalCreation{}, err
@@ -281,7 +279,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
@@ -292,7 +290,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
 		privileges, grantOption := getPrivilegesString(toRevoke)
-		query := createRevokeQuery(privileges, dbname, username, table, grantOption)
+		query := createRevokeQuery(privileges, dbname, username, host, table, grantOption)
 		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errRevokeGrant,
@@ -304,7 +302,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
 		privileges, grantOption := getPrivilegesString(toGrant)
-		query := createGrantQuery(privileges, dbname, username, table, grantOption)
+		query := createGrantQuery(privileges, dbname, username, host, table, grantOption)
 		if err := mysql.ExecWrapper(ctx, c.db,
 			mysql.ExecQuery{
 				Query: query, ErrorValue: errCreateGrant,
@@ -330,8 +328,7 @@ func getPrivilegesString(privileges []string) (string, bool) {
 	return out, grantOption
 }
 
-func createRevokeQuery(privileges, dbname, username string, table string, grantOption bool) string {
-	username, host := mysql.SplitUserHost(username)
+func createRevokeQuery(privileges, dbname, username, host, table string, grantOption bool) string {
 	result := fmt.Sprintf("REVOKE %s ON %s.%s FROM %s@%s",
 		privileges,
 		dbname,
@@ -347,8 +344,7 @@ func createRevokeQuery(privileges, dbname, username string, table string, grantO
 	return result
 }
 
-func createGrantQuery(privileges, dbname, username string, table string, grantOption bool) string {
-	username, host := mysql.SplitUserHost(username)
+func createGrantQuery(privileges, dbname, username, host, table string, grantOption bool) string {
 	result := fmt.Sprintf("GRANT %s ON %s.%s TO %s@%s",
 		privileges,
 		dbname,
@@ -370,12 +366,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotGrant)
 	}
 
-	username := *cr.Spec.ForProvider.User
+	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
 	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
 	table := defaultIdentifier(cr.Spec.ForProvider.Table)
 
 	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
-	query := createRevokeQuery(privileges, dbname, username, table, grantOption)
+	query := createRevokeQuery(privileges, dbname, username, host, table, grantOption)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}); err != nil {
 		var myErr *mysqldriver.MySQLError
