@@ -26,7 +26,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql"
 )
 
-// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// Setup creates all controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, l controller.Options) error {
 	for _, setup := range []func(ctrl.Manager, controller.Options) error{

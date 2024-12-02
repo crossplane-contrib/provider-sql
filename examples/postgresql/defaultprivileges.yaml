@@ -1,0 +1,16 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: default-grant-role-1-on-database
+spec:
+  forProvider:
+    privileges:
+      - SELECT
+    roleRef:
+      name: reader-role
+    targetRoleRef:
+      name: example-role
+    schemaRef:
+      name: example
+    databaseRef:
+      name: example
