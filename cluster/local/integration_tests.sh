@@ -146,33 +146,40 @@ cleanup_cluster() {
 setup_crossplane() {
   echo_step "installing crossplane from stable channel"
 
-  "${HELM3}" repo add crossplane-stable https://charts.crossplane.io/stable/ --force-update
-  local chart_version="$("${HELM3}" search repo crossplane-stable/crossplane | awk 'FNR == 2 {print $2}')"
+  "${HELM}" repo add crossplane-stable https://charts.crossplane.io/stable/ --force-update
+  local chart_version="$("${HELM}" search repo crossplane-stable/crossplane | awk 'FNR == 2 {print $2}')"
   echo_info "using crossplane version ${chart_version}"
   echo
   # we replace empty dir with our PVC so that the /cache dir in the kind node
   # container is exposed to the crossplane pod
-  "${HELM3}" install crossplane --namespace crossplane-system crossplane-stable/crossplane --version ${chart_version} --wait --set packageCache.pvc=package-cache
+  "${HELM}" install crossplane --namespace crossplane-system crossplane-stable/crossplane --version ${chart_version} --wait --set packageCache.pvc=package-cache
 }
 
 setup_provider() {
   echo_step "installing provider"
 
   local yaml="$( cat <<EOF
-apiVersion: pkg.crossplane.io/v1alpha1
-kind: ControllerConfig
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
 metadata:
   name: debug-config
 spec:
-  args:
-  - --debug
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              args:
+                - --debug
 ---
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: "${PACKAGE_NAME}"
 spec:
-  controllerConfigRef:
+  runtimeConfigRef:
     name: debug-config
   package: "${PACKAGE_NAME}"
   packagePullPolicy: Never
@@ -193,7 +200,7 @@ cleanup_provider() {
   echo_step "uninstalling provider"
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
-  "${KUBECTL}" delete controllerconfig.pkg.crossplane.io debug-config
+  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io debug-config
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
@@ -315,8 +322,8 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${HELM3}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM3}" install mariadb bitnami/mariadb \
+  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
+  "${HELM}" install mariadb bitnami/mariadb \
       --version 11.3.0 \
       --set auth.rootPassword="${MARIADB_ROOT_PW}" \
       --wait
@@ -355,8 +362,8 @@ initdbScripts:
 EOF
   )
 
-  "${HELM3}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM3}" install mariadb bitnami/mariadb \
+  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
+  "${HELM}" install mariadb bitnami/mariadb \
       --version 11.3.0 \
       --values <(echo "$values") \
       --wait
@@ -364,7 +371,7 @@ EOF
 
 cleanup_mariadb() {
   echo_step "uninstalling MariaDB"
-  "${HELM3}" uninstall mariadb
+  "${HELM}" uninstall mariadb
   "${KUBECTL}" delete secret mariadb-creds
 }
 
