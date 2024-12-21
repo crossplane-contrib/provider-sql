@@ -8,8 +8,8 @@ source "$SCRIPT_DIR/common_functions.sh"
 echo_step "Installing PostgresDB Helm chart into default namespace"
 postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 
-"${HELM3}" repo update
-"${HELM3}" install postgresdb bitnami/postgresql \
+"${HELM}" repo update
+"${HELM}" install postgresdb bitnami/postgresql \
     --version 11.1.9 \
     --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
     --wait
@@ -132,7 +132,7 @@ echo_step "uninstalling secret and provider config for postgres"
 "${KUBECTL}" delete secret postgresdb-creds
 
 echo_step "Uninstalling PostgresDB Helm chart from default namespace"
-"${HELM3}" uninstall postgresdb
+"${HELM}" uninstall postgresdb
 
 # ----------- success
 echo_success "PostgresDB Integration tests succeeded!"

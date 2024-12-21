@@ -8,15 +8,15 @@ source "$SCRIPT_DIR/common_functions.sh"
 echo_step "installing MariaDB Helm chart into default namespace"
 mariadb_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 
-if ${HELM3} repo list | grep -q "https://charts.bitnami.com/bitnami"; then
+if ${HELM} repo list | grep -q "https://charts.bitnami.com/bitnami"; then
   echo "Bitnami repository already exists, updating it..."
-  ${HELM3} repo update
+  ${HELM} repo update
 else
   echo "Adding Bitnami repository..."
-  ${HELM3} repo add bitnami https://charts.bitnami.com/bitnami
+  ${HELM} repo add bitnami https://charts.bitnami.com/bitnami
 fi
 
-"${HELM3}" install mariadb bitnami/mariadb \
+"${HELM}" install mariadb bitnami/mariadb \
     --version 11.0.9 \
     --set auth.rootPassword="${mariadb_root_pw}" \
     --wait
@@ -102,7 +102,7 @@ echo_step "uninstalling secret and provider config for mysql"
 "${KUBECTL}" delete secret mariadb-creds
 
 echo_step "uninstalling MariaDB Helm chart from default namespace"
-"${HELM3}" uninstall mariadb
+"${HELM}" uninstall mariadb
 
 # ----------- success
 echo_success "Mysql Integration tests succeeded!"
