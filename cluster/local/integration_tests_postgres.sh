@@ -4,6 +4,8 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 source "$SCRIPT_DIR/common_functions.sh"
 
+echo_step "--- INTEGRATION TESTS FOR Postgres ---"
+
 # install postgres and master secret
 echo_step "Installing PostgresDB Helm chart into default namespace"
 postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
