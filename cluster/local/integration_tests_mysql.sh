@@ -17,7 +17,7 @@ else
 fi
 
 "${HELM}" install mariadb bitnami/mariadb \
-    --version 11.0.9 \
+    --version 11.3.0 \
     --set auth.rootPassword="${mariadb_root_pw}" \
     --wait
 

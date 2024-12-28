@@ -10,7 +10,7 @@ postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 
 "${HELM}" repo update
 "${HELM}" install postgresdb bitnami/postgresql \
-    --version 11.1.9 \
+    --version 11.9.1 \
     --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
     --wait
 
