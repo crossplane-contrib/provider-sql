@@ -156,8 +156,8 @@ spec:
                             type: string
                         type: object
                     type: object
-                  isPrivate:
-                    description: IsPrivate apply a "REVOKE ALL ON SCHEMA public FROM
+                  revokePublicOnSchema:
+                    description: RevokePublicOnSchema apply a "REVOKE ALL ON SCHEMA public FROM
                       public" statement
                     type: boolean
                   role:

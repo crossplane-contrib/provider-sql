@@ -238,7 +238,7 @@ func createSchemaQueries(sp v1alpha1.SchemaParameters, ql *[]xsql.Query, en stri
 		xsql.Query{String: b.String()},
 	)
 
-	if sp.IsPrivate != nil && *sp.IsPrivate {
+	if sp.RevokePublicOnSchema != nil && *sp.RevokePublicOnSchema {
 		*ql = append(*ql,
 			xsql.Query{String: "REVOKE ALL ON SCHEMA PUBLIC FROM PUBLIC;"},
 		)
@@ -258,7 +258,7 @@ func updateSchemaQueries(sp v1alpha1.SchemaParameters, ql *[]xsql.Query, en stri
 		xsql.Query{String: b.String()},
 	)
 
-	if sp.IsPrivate != nil && *sp.IsPrivate {
+	if sp.RevokePublicOnSchema != nil && *sp.RevokePublicOnSchema {
 		*ql = append(*ql,
 			xsql.Query{String: "REVOKE ALL ON SCHEMA PUBLIC FROM PUBLIC;"},
 		)

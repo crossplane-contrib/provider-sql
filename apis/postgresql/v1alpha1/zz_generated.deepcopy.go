@@ -983,8 +983,8 @@ func (in *SchemaParameters) DeepCopyInto(out *SchemaParameters) {
 		*out = new(v1.Selector)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.IsPrivate != nil {
-		in, out := &in.IsPrivate, &out.IsPrivate
+	if in.RevokePublicOnSchema != nil {
+		in, out := &in.RevokePublicOnSchema, &out.RevokePublicOnSchema
 		*out = new(bool)
 		**out = **in
 	}
