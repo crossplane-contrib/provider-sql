@@ -62,6 +62,20 @@ if [ "$skipcleanup" != true ]; then
   trap cleanup EXIT
 fi
 
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+# shellcheck source="$SCRIPT_DIR/postgresdb_functions.sh"
+source "$SCRIPT_DIR/postgresdb_functions.sh"
+if [ $? -ne 0 ]; then
+  echo "postgresdb_functions.sh failed. Exiting."
+  exit 1
+fi
+
+integration_tests_end() {
+  echo_step "--- CLEAN-UP ---"
+  cleanup_provider
+  echo_success " All integration tests succeeded!"
+}
+
 setup_cluster() {
   echo_step "setting up local package cache"
 
@@ -469,7 +483,10 @@ cleanup_provider_config
 cleanup_mariadb
 cleanup_tls_certs
 
-echo_step "--- CLEAN-UP ---"
-cleanup_provider
+echo_step "--- INTEGRATION TESTS FOR MySQL ACCOMPLISHED SUCCESSFULLY ---"
 
-echo_success "Integration tests succeeded!"
+echo_step "--- TESTING POSTGRESDB ---"
+integration_tests_postgres
+echo_step "--- INTEGRATION TESTS FOR POSTGRESDB ACCOMPLISHED SUCCESSFULLY ---"
+
+integration_tests_end
