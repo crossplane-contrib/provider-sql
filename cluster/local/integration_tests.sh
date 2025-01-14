@@ -337,6 +337,7 @@ setup_mariadb_no_tls() {
       --from-literal port="3306"
 
   "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
+  "${HELM}" repo update
   "${HELM}" install mariadb bitnami/mariadb \
       --version 11.3.0 \
       --set auth.rootPassword="${MARIADB_ROOT_PW}" \
@@ -377,6 +378,7 @@ EOF
   )
 
   "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
+  "${HELM}" repo update
   "${HELM}" install mariadb bitnami/mariadb \
       --version 11.3.0 \
       --values <(echo "$values") \
