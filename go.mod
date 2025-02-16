@@ -6,6 +6,7 @@ toolchain go1.21.11
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
+	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/crossplane/crossplane-runtime v1.16.0
 	github.com/crossplane/crossplane-tools v0.0.0-20240522174801-1ad3d4c87f21
 	github.com/denisenkom/go-mssqldb v0.11.0
@@ -13,9 +14,9 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/lib/pq v1.8.0
 	github.com/pkg/errors v0.9.1
-	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
+	k8s.io/client-go v0.29.1
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 	sigs.k8s.io/controller-runtime v0.17.0
 	sigs.k8s.io/controller-tools v0.14.0
@@ -23,8 +24,6 @@ require (
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
-	github.com/alecthomas/kingpin/v2 v2.4.0 // indirect
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -87,7 +86,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.29.1 // indirect
-	k8s.io/client-go v0.29.1 // indirect
 	k8s.io/component-base v0.29.1 // indirect
 	k8s.io/klog/v2 v2.110.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20231010175941-2dd684a91f00 // indirect
