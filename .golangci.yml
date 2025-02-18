@@ -1,12 +1,10 @@
 run:
-  deadline: 2m
-
-  skip-files:
-  - "zz_generated\\..+\\.go$"
+  timeout: 2m
 
 output:
-  # colored-line-number|line-number|json|tab|checkstyle|code-climate, default is "colored-line-number"
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
+      path: stdout
 
 linters-settings:
   errcheck:
@@ -21,15 +19,14 @@ linters-settings:
     # [deprecated] comma-separated list of pairs of the form pkg:regex
     # the regex is used to ignore names within pkg. (default "fmt:.*").
     # see https://github.com/kisielk/errcheck#the-deprecated-method for details
-    ignore: fmt:.*,io/ioutil:^Read.*
+    exclude-functions:
+      - fmt:.*
+      - io/ioutil:^Read.*
 
   govet:
     # report about shadowed variables
-    check-shadowing: false
-
-  golint:
-    # minimal confidence for issues, default is 0.8
-    min-confidence: 0.8
+    disable:
+    - shadow
 
   gofmt:
     # simplify code: gofmt with `-s` option, true by default
@@ -38,15 +35,11 @@ linters-settings:
   goimports:
     # put imports beginning with prefix after 3rd-party packages;
     # it's a comma-separated list of prefixes
-    local-prefixes: github.com/crossplane/provider-sql
+    local-prefixes: github.com/crossplane-contrib/provider-sql/*
 
   gocyclo:
     # minimal code complexity to report, 30 by default (but we recommend 10-20)
     min-complexity: 10
-
-  maligned:
-    # print struct with more effective memory layout or not, false by default
-    suggest-new: true
 
   dupl:
     # tokens count to trigger issue, 150 by default
@@ -67,7 +60,7 @@ linters-settings:
     # XXX: if you enable this setting, unused will report a lot of false-positives in text editors:
     # if it's called for subdir of a project it can't find funcs usages. All text editor integrations
     # with golangci-lint call it on a directory with the changed file.
-    check-exported: false
+    exported-fields-are-used: false
 
   unparam:
     # Inspect exported functions, default is false. Set to true if no external program/library imports your code.
@@ -104,20 +97,22 @@ linters-settings:
 
 linters:
   enable:
-    - megacheck
+    - gosimple
+    - staticcheck
+    - unused
     - govet
     - gocyclo
     - gocritic
-    - interfacer
     - goconst
     - goimports
     - gofmt  # We enable this as well as goimports for its simplify mode.
     - prealloc
-    - golint
     - unconvert
     - misspell
     - nakedret
-
+  disable:  # Disable those until runtime upgrade
+    - recvcheck
+    - sqlclosecheck
   presets:
     - bugs
     - unused
@@ -125,6 +120,9 @@ linters:
 
 
 issues:
+  exclude-files:
+  - "zz_generated\\..+\\.go$"
+
   # Excluding configuration per-path and per-linter
   exclude-rules:
     # Exclude some linters from running on tests files.
@@ -174,6 +172,10 @@ issues:
       - gosec
       - gas
 
+    # - text: "G115:"
+    #   linters:
+    #   - gosec
+
   # Independently from option `exclude` we use default exclude patterns,
   # it can be disabled by this option. To list all
   # excluded by default patterns execute `golangci-lint run --help`.
@@ -189,7 +191,7 @@ issues:
   new: false
 
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
-  max-per-linter: 0
+  max-issues-per-linter: 0
 
   # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
