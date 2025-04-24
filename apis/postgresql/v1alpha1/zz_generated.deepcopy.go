@@ -411,6 +411,21 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = new(v1.Selector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Schema != nil {
+		in, out := &in.Schema, &out.Schema
+		*out = new(string)
+		**out = **in
+	}
+	if in.SchemaRef != nil {
+		in, out := &in.SchemaRef, &out.SchemaRef
+		*out = new(v1.Reference)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.SchemaSelector != nil {
+		in, out := &in.SchemaSelector, &out.SchemaSelector
+		*out = new(v1.Selector)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.MemberOf != nil {
 		in, out := &in.MemberOf, &out.MemberOf
 		*out = new(string)
@@ -430,6 +445,16 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		in, out := &in.RevokePublicOnDb, &out.RevokePublicOnDb
 		*out = new(bool)
 		**out = **in
+	}
+	if in.Objects != nil {
+		in, out := &in.Objects, &out.Objects
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Columns != nil {
+		in, out := &in.Columns, &out.Columns
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 
