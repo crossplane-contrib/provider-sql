@@ -27,6 +27,12 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/reference"
 )
 
+const (
+	errNoPrivileges           = "privileges not passed"
+	errUnknownGrant           = "cannot identify grant type based on passed params"
+	errMemberOfWithPrivileges = "cannot set privileges in the same grant as memberOf"
+)
+
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
@@ -43,25 +49,152 @@ type GrantPrivilege string
 // +kubebuilder:validation:MinItems:=1
 type GrantPrivileges []GrantPrivilege
 
+type GrantType string
+
+// GrantType is the list of the possible grant types represented by a GrantParameters
+const (
+	RoleMember             GrantType = "ROLE_MEMBER"
+	RoleDatabase           GrantType = "ROLE_DATABASE"
+	RoleSchema             GrantType = "ROLE_SCHEMA"
+	RoleTable              GrantType = "ROLE_TABLE"
+	RoleSequence           GrantType = "ROLE_SEQUENCE"
+	RoleFunction           GrantType = "ROLE_FUNCTION"
+	RoleProcedure          GrantType = "ROLE_PROCEDURE"
+	RoleRoutine            GrantType = "ROLE_ROUTE"
+	RoleColumn             GrantType = "ROLE_COLUMN"
+	RoleForeignDataWrapper GrantType = "ROLE_FOREIGN_DATA_WRAPPER"
+	RoleForeignServer      GrantType = "ROLE_FOREIGN_SERVER"
+)
+
+type marker struct{}
+type stringSet struct {
+	elements map[string]marker
+}
+
+func newStringSet() *stringSet {
+	return &stringSet{
+		elements: make(map[string]marker),
+	}
+}
+
+func (s *stringSet) add(element string) {
+	s.elements[element] = marker{}
+}
+
+func (s *stringSet) contains(element string) bool {
+	_, exists := s.elements[element]
+	return exists
+}
+
+func (s *stringSet) containsExactly(elements ...string) bool {
+	if len(s.elements) != len(elements) {
+		return false
+	}
+	for _, elem := range elements {
+		if !s.contains(elem) {
+			return false
+		}
+	}
+	return true
+}
+
+func (gp *GrantParameters) filledInFields() *stringSet {
+	fields := map[string]bool{
+		"MemberOf":            gp.MemberOf != nil,
+		"Database":            gp.Database != nil,
+		"Schema":              gp.Schema != nil,
+		"Tables":              len(gp.Tables) > 0,
+		"Columns":             len(gp.Columns) > 0,
+		"Sequences":           len(gp.Sequences) > 0,
+		"Functions":           len(gp.Functions) > 0,
+		"Procedures":          len(gp.Procedures) > 0,
+		"Routines":            len(gp.Routines) > 0,
+		"ForeignServers":      len(gp.ForeignServers) > 0,
+		"ForeignDataWrappers": len(gp.ForeignDataWrappers) > 0,
+	}
+	set := newStringSet()
+
+	for key, hasField := range fields {
+		if hasField {
+			set.add(key)
+		}
+	}
+	return set
+}
+
+// IdentifyGrantType return the deduced GrantType from the filled in fields.
+func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
+	fields := gp.filledInFields()
+	pc := len(gp.Privileges)
+
+	grantTypeFields := map[GrantType][]string{
+		RoleMember:             {"MemberOf"},
+		RoleDatabase:           {"Database"},
+		RoleSchema:             {"Database", "Schema"},
+		RoleTable:              {"Database", "Schema", "Tables"},
+		RoleColumn:             {"Database", "Schema", "Tables", "Columns"},
+		RoleSequence:           {"Database", "Schema", "Sequences"},
+		RoleFunction:           {"Database", "Schema", "Functions"},
+		RoleProcedure:          {"Database", "Schema", "Procedures"},
+		RoleRoutine:            {"Database", "Schema", "Routines"},
+		RoleForeignServer:      {"Database", "ForeignServers"},
+		RoleForeignDataWrapper: {"Database", "ForeignDataWrappers"},
+	}
+
+	var role *GrantType
+
+	for key, expectedFields := range grantTypeFields {
+		if fields.containsExactly(expectedFields...) {
+			role = &key
+			break
+		}
+	}
+	if role == nil {
+		return "", errors.New(errUnknownGrant)
+	}
+	if *role == RoleMember && pc > 0 {
+		return "", errors.New(errMemberOfWithPrivileges)
+	}
+	if *role != RoleMember && pc < 1 {
+		return "", errors.New(errNoPrivileges)
+	}
+	return *role, nil
+}
+
 // Some privileges are shorthands for multiple privileges. These translations
 // happen internally inside postgresql when making grants. When we query the
 // privileges back, we need to look for the expanded set.
 // https://www.postgresql.org/docs/15/ddl-priv.html
 // TODO: Grand ALL ON SCHEMA should be expanded to GRANT USAGE, CREATE ON SCHEMA
-var grantReplacements = map[GrantPrivilege]GrantPrivileges{
-	"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
-	"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
-	"TEMP":           {"TEMPORARY"},
+var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
+	RoleDatabase: {
+		"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
+		"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
+		"TEMP":           {"TEMPORARY"},
+	},
+	RoleSchema: {
+		"ALL":            {"CREATE", "USAGE"},
+		"ALL PRIVILEGES": {"CREATE", "USAGE"},
+	},
 }
 
 // ExpandPrivileges expands any shorthand privileges to their full equivalents.
-func (gp *GrantPrivileges) ExpandPrivileges() GrantPrivileges {
+func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
+	grantType, err := gp.IdentifyGrantType()
+	if err != nil {
+		return gp.Privileges
+	}
+	replacements, hasReplacements := grantReplacements[grantType]
+	if !hasReplacements {
+		return gp.Privileges
+	}
+
 	privilegeSet := make(map[GrantPrivilege]struct{})
 
 	// Replace any shorthand privileges with their full equivalents
-	for _, p := range *gp {
-		if _, ok := grantReplacements[p]; ok {
-			for _, rp := range grantReplacements[p] {
+	for _, p := range gp.Privileges {
+		if _, ok := replacements[p]; ok {
+			for _, rp := range replacements[p] {
 				privilegeSet[rp] = struct{}{}
 			}
 		} else {
@@ -174,21 +307,37 @@ type GrantParameters struct {
 	// +optional
 	RevokePublicOnDb *bool `json:"revokePublicOnDb,omitempty" default:"false"`
 
-	// ObjectType is the PostgreSQL object type to grant the privileges on.
-	// +kubebuilder:validation:Enum=database;schema;table;sequence;function;procedure;routine;foreign_data_wrapper;foreign_server;column
-	ObjectType string `json:"objectType" default:"database"`
-
-	// Objects are the objects upon which to grant the privileges.
-	// An empty list (the default) means to grant permissions on all objects of the specified type.
-	// You cannot specify this option if the objectType is database or schema.
-	// When objectType is column, only one value is allowed.
-	// +optional
-	Objects []string `json:"objects,omitempty"`
-
 	// The columns upon which to grant the privileges.
-	// Required when object_type is column. You cannot specify this option if the object_type is not column
 	// +optional
 	Columns []string `json:"columns,omitempty"`
+
+	// The tables upon which to grant the privileges.
+	// +optional
+	Tables []string `json:"tables,omitempty"`
+
+	// The sequences upon which to grant the privileges.
+	// +optional
+	Sequences []string `json:"sequences,omitempty"`
+
+	// The functions upon which to grant the privileges.
+	// +optional
+	Functions []string `json:"functions,omitempty"`
+
+	// The procedures upon which to grant the privileges.
+	// +optional
+	Procedures []string `json:"procedures,omitempty"`
+
+	// The routines upon which to grant the privileges.
+	// +optional
+	Routines []string `json:"routines,omitempty"`
+
+	// The foreign data wrappers upon which to grant the privileges.
+	// +optional
+	ForeignDataWrappers []string `json:"foreignDataWrappers,omitempty"`
+
+	// The foreign servers upon which to grant the privileges.
+	// +optional
+	ForeignServers []string `json:"foreignServers,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.

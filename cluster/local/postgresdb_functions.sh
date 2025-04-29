@@ -66,12 +66,12 @@ echo_step "check if database is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/database.yaml
 echo_step_completed
 
-echo_step "check if grant is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/grant.yaml
-echo_step_completed
-
 echo_step "check if schema is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
+echo_step_completed
+
+echo_step "check if grant is ready"
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/grant.yaml
 echo_step_completed
 }
 
@@ -116,24 +116,50 @@ check_role_privileges() {
     fi
 }
 
-check_schema_privileges(){
+check_all_schema_privileges() {
   # check if schema privileges are set properly
   echo_step "check if schema privileges are set properly"
 
-  TARGET_DB='db1'
+  OWNER_ROLE='ownerrole'
+  USER_ROLE='no-grants-role'
 
-  nspacl=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "SELECT nspacl FROM pg_namespace WHERE nspname = 'public';")
-  nspacl=$(echo "$nspacl" | xargs)
+  # Define roles and their expected privileges
+  roles="$OWNER_ROLE $USER_ROLE"
+  dbs="db1 example"
+  schemas="public my-schema"
+  privileges="USAGE|f,CREATE|f USAGE|t,CREATE|t"
 
-  if [[ "$nspacl" == "{ownerrole=UC/ownerrole}" ]]; then
-      echo "Privileges on schema public are as expected: $nspacl"
-      echo_info "OK"
-  else
-      echo "Privileges on schema public are NOT as expected: $nspacl"
-      echo_error "Not OK"
-  fi
+  # Iterate over roles and expected privileges
+  role_index=1
+  for role in $roles; do
+      expected_privileges=$(echo "$privileges" | cut -d ' ' -f $role_index)
+      target_db=$(echo "$dbs" | cut -d ' ' -f $role_index)
+      target_schema=$(echo "$schemas" | cut -d ' ' -f $role_index)
+      check_schema_privileges "$role" "$expected_privileges" "${postgres_root_pw}" "$target_db" "$target_schema"
+      role_index=$((role_index + 1))
+  done
 
   echo_step_completed
+}
+
+check_schema_privileges(){
+    local role=$1
+    local expected_privileges=$2
+    local target_db=$4
+    local target_schema=$5
+
+    request="select acl.privilege_type, acl.is_grantable from pg_namespace n, aclexplode(n.nspacl) acl INNER JOIN pg_roles s ON acl.grantee = s.oid where n.nspname = '$target_schema' and s.rolname='$role'"
+
+    nspacl=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc "$request")
+    nspacl=$(echo "$nspacl" | xargs | tr ' ' ',')
+
+    if [[ "$nspacl" == "$expected_privileges" ]]; then
+        echo "Privileges on schema $target_db.$target_schema for role $role are as expected: $nspacl"
+        echo_info "OK"
+    else
+        echo "Privileges on schema $target_db.$target_schema for role $role are NOT as expected: $nspacl"
+        echo_error "Not OK"
+    fi
 }
 
 setup_observe_only_database(){
@@ -196,6 +222,6 @@ integration_tests_postgres() {
   setup_postgresdb_tests
   check_observe_only_database
   check_all_roles_privileges
-  check_schema_privileges
+  check_all_schema_privileges
   delete_postgresdb_resources
 }

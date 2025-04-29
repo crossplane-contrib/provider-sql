@@ -34,6 +34,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/pkg/reference"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
@@ -48,19 +49,15 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotGrant     = "managed resource is not a Grant custom resource"
-	errSelectGrant  = "cannot select grant"
-	errCreateGrant  = "cannot create grant"
-	errRevokeGrant  = "cannot revoke grant"
-	errNoSchema     = "schema not passed or could not be resolved"
-	errNoRole       = "role not passed or could not be resolved"
-	errNoDatabase   = "database not passed or could not be resolved"
-	errNoPrivileges = "privileges not passed"
-	errUnknownGrant = "cannot identify grant type based on passed params"
+	errNotGrant    = "managed resource is not a Grant custom resource"
+	errSelectGrant = "cannot select grant"
+	errCreateGrant = "cannot create grant"
+	errRevokeGrant = "cannot revoke grant"
+	errNoRole      = "role not passed or could not be resolved"
 
-	errInvalidParams = "invalid parameters for grant type %s"
-
-	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
+	errUnknownGrant     = "cannot identify grant type based on passed params"
+	errUnsupportedGrant = "identified grant type is not supported"
+	errInvalidParams    = "invalid parameters for grant type %s"
 
 	maxConcurrency = 5
 )
@@ -127,8 +124,12 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
 		return nil, errors.Wrap(err, errGetSecret)
 	}
+	database := reference.FromPtrValue(cr.Spec.ForProvider.Database)
+	if database == "" {
+		database = pc.Spec.DefaultDatabase
+	}
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
+		db:   c.newDB(s.Data, database, clients.ToString(pc.Spec.SSLMode)),
 		kube: c.kube,
 	}, nil
 }
@@ -138,81 +139,14 @@ type external struct {
 	kube client.Client
 }
 
-type grantType string
-
-const (
-	roleMember   grantType = "ROLE_MEMBER"
-	roleDatabase grantType = "ROLE_DATABASE"
-)
-
-// sliceContainsStr checks if a slice contains a specific string.
-func sliceContainsStr(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func validateGrantParams(gp v1alpha1.GrantParameters) error {
-	if gp.Schema == nil && !sliceContainsStr([]string{"database", "foreign_data_wrapper", "foreign_server"}, gp.ObjectType) {
-		return fmt.Errorf("parameter 'schema' is mandatory for grant resource")
-	}
-	if len(gp.Objects) > 0 && (gp.ObjectType == "database" || gp.ObjectType == "schema") {
-		return fmt.Errorf("cannot specify `objects` when `object_type` is `database` or `schema`")
-	}
-	if len(gp.Columns) > 0 && gp.ObjectType != "column" {
-		return fmt.Errorf("cannot specify `columns` when `object_type` is not `column`")
-	}
-	if len(gp.Columns) == 0 && gp.ObjectType == "column" {
-		return fmt.Errorf("must specify `columns` when `object_type` is `column`")
-	}
-	if len(gp.Privileges) != 1 && gp.ObjectType == "column" {
-		return fmt.Errorf("must specify exactly 1 `privileges` when `object_type` is `column`")
-	}
-	if len(gp.Objects) != 1 && gp.ObjectType == "column" {
-		return fmt.Errorf("must specify exactly 1 table in the `objects` field when `object_type` is `column`")
-	}
-	if len(gp.Objects) != 1 && (gp.ObjectType == "foreign_data_wrapper" || gp.ObjectType == "foreign_server") {
-		return fmt.Errorf("one element must be specified in `objects` when `object_type` is `foreign_data_wrapper` or `foreign_server`")
-	}
-	return nil
-}
-
-func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
-	pc := len(gp.Privileges)
-
-	// If memberOf is specified, this is ROLE_MEMBER
-	// NOTE: If any of these are set, even if the lookup by ref or selector fails,
-	// then this is still a roleMember grant type.
-	if gp.MemberOfRef != nil || gp.MemberOfSelector != nil || gp.MemberOf != nil {
-		if gp.Database != nil || pc > 0 {
-			return "", errors.New(errMemberOfWithDatabaseOrPrivileges)
-		}
-		return roleMember, nil
-	}
-
-	if gp.Database == nil {
-		return "", errors.New(errNoDatabase)
-	}
-
-	if pc < 1 {
-		return "", errors.New(errNoPrivileges)
-	}
-
-	// This is ROLE_DATABASE
-	return roleDatabase, nil
-}
-
 func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
-	gt, err := identifyGrantType(gp)
+	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return err
 	}
 
 	switch gt {
-	case roleMember:
+	case v1alpha1.RoleMember:
 		ao := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionAdmin
 
 		// Always returns a row with a true or false value
@@ -232,46 +166,65 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 			ao,
 		}
 		return nil
-	case roleDatabase:
+	case v1alpha1.RoleDatabase:
 		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
 
-		ep := gp.Privileges.ExpandPrivileges()
+		ep := gp.ExpandPrivileges()
 		sp := ep.ToStringSlice()
-
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
 		// permissions.
 		q.String = "SELECT EXISTS(SELECT 1 " +
-			"FROM pg_database db " +
-			"JOIN pg_namespace nsp ON db.datname = $1 " +
-			"JOIN LATERAL aclexplode(nsp.nspacl) acl ON true " +
-			"JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by role, schema and grantable setting
-			"WHERE nsp.nspname = $2 " +
-			"AND s.rolname = $3 " +
-			"AND acl.is_grantable = $6 " +
-			"GROUP BY db.datname, nsp.nspname, s.rolname, acl.is_grantable " +
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) = " +
-			"(SELECT array(SELECT unnest($7::text[]) ORDER BY 1)))"
+			"FROM pg_database db, " +
+			"aclexplode(datacl) as acl " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+			// Filter by database, role and grantable setting
+			"WHERE db.datname=$1 " +
+			"AND s.rolname=$2 " +
+			"AND acl.is_grantable=$3 " +
+			"GROUP BY db.datname, s.rolname, acl.is_grantable " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
 
 		q.Parameters = []interface{}{
 			gp.Database,
-			gp.Schema,
 			gp.Role,
-			gp.ObjectType,
-			gp.Objects,
 			gro,
 			pq.Array(sp),
 		}
-	}
-	return errors.New(errUnknownGrant)
-}
+		return nil
+	case v1alpha1.RoleSchema:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
 
-func withSchema(schema *string) string {
-	if schema != nil {
-		return fmt.Sprintf("IN SCHEMA %s", *schema)
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+		// Join grantee. Filter by schema name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT EXISTS(SELECT 1 " +
+			"FROM pg_namespace n, " +
+			"aclexplode(nspacl) as acl " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+			// Filter by schema, role and grantable setting
+			"WHERE n.nspname=$1 " +
+			"AND s.rolname=$2 " +
+			"AND acl.is_grantable=$3 " +
+			"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
+		q.Parameters = []interface{}{
+			gp.Schema,
+			gp.Role,
+			gro,
+			pq.Array(sp),
+		}
+		return nil
 	}
-	return ""
+	return errors.New(errUnsupportedGrant)
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
@@ -282,7 +235,7 @@ func withOption(option *v1alpha1.GrantOption) string {
 }
 
 func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { // nolint: gocyclo
-	gt, err := identifyGrantType(gp)
+	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return err
 	}
@@ -290,61 +243,96 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 	ro := pq.QuoteIdentifier(*gp.Role)
 
 	switch gt {
-	case roleMember:
-		if gp.MemberOf == nil || gp.Role == nil {
-			return errors.Errorf(errInvalidParams, roleMember)
-		}
-
-		mo := pq.QuoteIdentifier(*gp.MemberOf)
-
-		*ql = append(*ql,
-			xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
-			xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
-				withOption(gp.WithOption),
-			)},
-		)
-		return nil
-	case roleDatabase:
-		if gp.Database == nil || gp.Role == nil || len(gp.Privileges) < 1 {
-			return errors.Errorf(errInvalidParams, roleDatabase)
-		}
-
-		db := pq.QuoteIdentifier(*gp.Database)
-		sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
-
-		*ql = append(*ql,
-			// REVOKE ANY MATCHING EXISTING PERMISSIONS
-			xsql.Query{String: fmt.Sprintf("REVOKE %s ON DATABASE %s %s FROM %s",
-				sp,
-				db,
-				withSchema(gp.Schema),
-				ro,
-			)},
-
-			// GRANT REQUESTED PERMISSIONS
-			xsql.Query{String: fmt.Sprintf("GRANT %s ON DATABASE %s TO %s %s %s",
-				sp,
-				db,
-				ro,
-				withSchema(gp.Schema),
-				withOption(gp.WithOption),
-			)},
-		)
-		if gp.RevokePublicOnDb != nil && *gp.RevokePublicOnDb {
-			*ql = append(*ql,
-				// REVOKE FROM PUBLIC
-				xsql.Query{String: fmt.Sprintf("REVOKE ALL ON DATABASE %s FROM PUBLIC",
-					db,
-				)},
-			)
-		}
-		return nil
+	case v1alpha1.RoleMember:
+		return createRoleMember(gp, ql, ro)
+	case v1alpha1.RoleDatabase:
+		return createRoleDatabase(gp, ql, ro)
+	case v1alpha1.RoleSchema:
+		return createRoleSchema(gp, ql, ro)
 	}
-	return errors.New(errUnknownGrant)
+	return errors.New(errUnsupportedGrant)
+}
+
+func createRoleMember(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.MemberOf == nil || gp.Role == nil {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleMember)
+	}
+
+	mo := pq.QuoteIdentifier(*gp.MemberOf)
+
+	*ql = append(*ql,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
+		xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
+}
+
+func createRoleDatabase(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleDatabase)
+	}
+
+	db := pq.QuoteIdentifier(*gp.Database)
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
+			sp,
+			db,
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON DATABASE %s TO %s %s",
+			sp,
+			db,
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	if gp.RevokePublicOnDb != nil && *gp.RevokePublicOnDb {
+		*ql = append(*ql,
+			// REVOKE FROM PUBLIC
+			xsql.Query{String: fmt.Sprintf("REVOKE ALL ON DATABASE %s FROM PUBLIC",
+				db,
+			)},
+		)
+	}
+	return nil
+}
+
+func createRoleSchema(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || gp.Schema == nil || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleDatabase)
+	}
+
+	sh := pq.QuoteIdentifier(*gp.Schema)
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON SCHEMA %s FROM %s",
+			sp,
+			sh,
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON SCHEMA %s TO %s %s",
+			sp,
+			sh,
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
 }
 
 func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
-	gt, err := identifyGrantType(gp)
+	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return err
 	}
@@ -352,22 +340,28 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	ro := pq.QuoteIdentifier(*gp.Role)
 
 	switch gt {
-	case roleMember:
+	case v1alpha1.RoleMember:
 		q.String = fmt.Sprintf("REVOKE %s FROM %s",
 			pq.QuoteIdentifier(*gp.MemberOf),
 			ro,
 		)
 		return nil
-	case roleDatabase:
-		q.String = fmt.Sprintf("REVOKE %s ON DATABASE %s %s FROM %s",
+	case v1alpha1.RoleDatabase:
+		q.String = fmt.Sprintf("REVOKE %s ON DATABASE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			pq.QuoteIdentifier(*gp.Database),
-			withSchema(gp.Schema),
+			ro,
+		)
+		return nil
+	case v1alpha1.RoleSchema:
+		q.String = fmt.Sprintf("REVOKE %s ON SCHEMA %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			pq.QuoteIdentifier(*gp.Schema),
 			ro,
 		)
 		return nil
 	}
-	return errors.New(errUnknownGrant)
+	return errors.New(errUnsupportedGrant)
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -382,7 +376,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	gp := cr.Spec.ForProvider
 	var query xsql.Query
-	if err := selectGrantQuery(gp, &query); err != nil {
+
+	err := selectGrantQuery(gp, &query)
+
+	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
@@ -412,11 +409,6 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotGrant)
 	}
 
-	// Validate grant specs
-	if err := validateGrantParams(cr.Spec.ForProvider); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errInvalidParams)
-	}
-
 	var queries []xsql.Query
 
 	cr.SetConditions(xpv1.Creating())
@@ -424,9 +416,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if err := createGrantQueries(cr.Spec.ForProvider, &queries); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
-
-	err := c.db.ExecTx(ctx, queries)
-	return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
+	return managed.ExternalCreation{}, errors.Wrap(c.db.ExecTx(ctx, queries), errCreateGrant)
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -440,12 +430,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	if !ok {
 		return errors.New(errNotGrant)
 	}
+
 	var query xsql.Query
 
 	cr.SetConditions(xpv1.Deleting())
 
-	err := deleteGrantQuery(cr.Spec.ForProvider, &query)
-	if err != nil {
+	if err := deleteGrantQuery(cr.Spec.ForProvider, &query); err != nil {
 		return errors.Wrap(err, errRevokeGrant)
 	}
 

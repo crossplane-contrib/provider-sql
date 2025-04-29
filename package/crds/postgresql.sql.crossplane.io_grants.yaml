@@ -84,9 +84,7 @@ spec:
                   grant instance.
                 properties:
                   columns:
-                    description: |-
-                      The columns upon which to grant the privileges.
-                      Required when object_type is column. You cannot specify this option if the object_type is not column
+                    description: The columns upon which to grant the privileges.
                     items:
                       type: string
                     type: array
@@ -169,6 +167,22 @@ spec:
                             type: string
                         type: object
                     type: object
+                  foreignDataWrappers:
+                    description: The foreign data wrappers upon which to grant the
+                      privileges.
+                    items:
+                      type: string
+                    type: array
+                  foreignServers:
+                    description: The foreign servers upon which to grant the privileges.
+                    items:
+                      type: string
+                    type: array
+                  functions:
+                    description: The functions upon which to grant the privileges.
+                    items:
+                      type: string
+                    type: array
                   memberOf:
                     description: MemberOf is the Role that this grant makes Role a
                       member of.
@@ -249,30 +263,6 @@ spec:
                             type: string
                         type: object
                     type: object
-                  objectType:
-                    description: ObjectType is the PostgreSQL object type to grant
-                      the privileges on.
-                    enum:
-                    - database
-                    - schema
-                    - table
-                    - sequence
-                    - function
-                    - procedure
-                    - routine
-                    - foreign_data_wrapper
-                    - foreign_server
-                    - column
-                    type: string
-                  objects:
-                    description: |-
-                      Objects are the objects upon which to grant the privileges.
-                      An empty list (the default) means to grant permissions on all objects of the specified type.
-                      You cannot specify this option if the objectType is database or schema.
-                      When objectType is column, only one value is allowed.
-                    items:
-                      type: string
-                    type: array
                   privileges:
                     description: |-
                       Privileges to be granted.
@@ -282,6 +272,11 @@ spec:
                       pattern: ^[A-Z]+$
                       type: string
                     minItems: 1
+                    type: array
+                  procedures:
+                    description: The procedures upon which to grant the privileges.
+                    items:
+                      type: string
                     type: array
                   revokePublicOnDb:
                     description: RevokePublicOnDb apply the statement "REVOKE ALL
@@ -367,6 +362,11 @@ spec:
                             type: string
                         type: object
                     type: object
+                  routines:
+                    description: The routines upon which to grant the privileges.
+                    items:
+                      type: string
+                    type: array
                   schema:
                     description: Schema this grant is for.
                     type: string
@@ -446,6 +446,16 @@ spec:
                             type: string
                         type: object
                     type: object
+                  sequences:
+                    description: The sequences upon which to grant the privileges.
+                    items:
+                      type: string
+                    type: array
+                  tables:
+                    description: The tables upon which to grant the privileges.
+                    items:
+                      type: string
+                    type: array
                   withOption:
                     description: |-
                       WithOption allows an option to be set on the grant.
@@ -455,8 +465,6 @@ spec:
                     - ADMIN
                     - GRANT
                     type: string
-                required:
-                - objectType
                 type: object
               managementPolicies:
                 default:

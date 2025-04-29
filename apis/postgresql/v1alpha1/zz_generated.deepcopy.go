@@ -446,13 +446,43 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = new(bool)
 		**out = **in
 	}
-	if in.Objects != nil {
-		in, out := &in.Objects, &out.Objects
+	if in.Columns != nil {
+		in, out := &in.Columns, &out.Columns
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.Columns != nil {
-		in, out := &in.Columns, &out.Columns
+	if in.Tables != nil {
+		in, out := &in.Tables, &out.Tables
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Sequences != nil {
+		in, out := &in.Sequences, &out.Sequences
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Functions != nil {
+		in, out := &in.Functions, &out.Functions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Procedures != nil {
+		in, out := &in.Procedures, &out.Procedures
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Routines != nil {
+		in, out := &in.Routines, &out.Routines
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.ForeignDataWrappers != nil {
+		in, out := &in.ForeignDataWrappers, &out.ForeignDataWrappers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.ForeignServers != nil {
+		in, out := &in.ForeignServers, &out.ForeignServers
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

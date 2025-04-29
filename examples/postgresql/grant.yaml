@@ -64,3 +64,19 @@ spec:
     databaseRef:
       name: "db1"
     revokePublicOnDb: true
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-schema
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    withOption: GRANT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: example
+    schemaRef:
+      name: my-schema
