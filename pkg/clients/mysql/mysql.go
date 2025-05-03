@@ -9,7 +9,6 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
-	"k8s.io/utils/ptr"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -17,7 +16,6 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
-	errFlushPriv    = "cannot flush privileges"
 )
 
 type mySQLDB struct {
@@ -38,11 +36,7 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
-	if binlog == nil {
-		defaultBinlog := true
-		binlog = &defaultBinlog
-	}
-	dsn := DSN(username, password, endpoint, port, *tls, *binlog)
+	dsn := DSN(username, password, endpoint, port, *tls, binlog)
 
 	return mySQLDB{
 		dsn:      dsn,
@@ -53,17 +47,25 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string, binlog bool) string {
+func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
+	if binlog != nil {
+		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
+			username,
+			password,
+			endpoint,
+			port,
+			tls,
+			strconv.FormatBool(*binlog))
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
 		username,
 		password,
 		endpoint,
 		port,
-		tls,
-		strconv.FormatBool(binlog))
+		tls)
 }
 
 // ExecTx is unsupported in MySQL.
@@ -146,30 +148,12 @@ type ExecQuery struct {
 	ErrorValue string
 }
 
-// ExecOptions parametrizes which optional statements will be executed before or after ExecQuery.Query
-type ExecOptions struct {
-	// Flush defines whether privileges will be flushed after executing the query. Defaults to true
-	Flush *bool
-}
-
-// ExecWithFlush is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
-func ExecWithFlush(ctx context.Context, db xsql.DB, query ExecQuery, options ExecOptions) error {
-	if options.Flush == nil {
-		options.Flush = ptr.To(true)
-	}
-
+// ExecWrapper is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWrapper(ctx context.Context, db xsql.DB, query ExecQuery) error {
 	if err := db.Exec(ctx, xsql.Query{
 		String: query.Query,
 	}); err != nil {
 		return errors.Wrap(err, query.ErrorValue)
-	}
-
-	if *options.Flush {
-		if err := db.Exec(ctx, xsql.Query{
-			String: "FLUSH PRIVILEGES",
-		}); err != nil {
-			return errors.Wrap(err, errFlushPriv)
-		}
 	}
 
 	return nil

@@ -37,7 +37,7 @@ type DatabaseStatus struct {
 type DatabaseParameters struct {
 	// BinLog defines whether the create, delete, update operations of this database are propagated to replicas. Defaults to true
 	// +optional
-	BinLog *bool `json:"binlog,omitempty" default:"true"`
+	BinLog *bool `json:"binlog,omitempty"`
 }
 
 // +kubebuilder:object:root=true

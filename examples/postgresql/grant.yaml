@@ -37,3 +37,30 @@ spec:
       name: example-role
     memberOfRef:
       name: parent-role
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: grant-postgres-an-owner-role
+spec:
+  deletionPolicy:  Orphan
+  forProvider:
+    role: "postgres"
+    memberOfRef:
+      name: "ownerrole"
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: grant-owner-role-privilege-connect
+spec:
+  deletionPolicy:  Orphan
+  forProvider:
+    withOption: "GRANT"
+    privileges:
+      - CONNECT
+    roleRef:
+      name: "ownerrole"
+    databaseRef:
+      name: "db1"
+    revokePublicOnDb: true

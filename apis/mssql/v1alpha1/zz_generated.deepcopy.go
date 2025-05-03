@@ -183,6 +183,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = make(GrantPermissions, len(*in))
 		copy(*out, *in)
 	}
+	if in.Schema != nil {
+		in, out := &in.Schema, &out.Schema
+		*out = new(string)
+		**out = **in
+	}
 	if in.User != nil {
 		in, out := &in.User, &out.User
 		*out = new(string)
@@ -542,6 +547,21 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 		in, out := &in.PasswordSecretRef, &out.PasswordSecretRef
 		*out = new(v1.SecretKeySelector)
 		**out = **in
+	}
+	if in.LoginDatabase != nil {
+		in, out := &in.LoginDatabase, &out.LoginDatabase
+		*out = new(string)
+		**out = **in
+	}
+	if in.LoginDatabaseRef != nil {
+		in, out := &in.LoginDatabaseRef, &out.LoginDatabaseRef
+		*out = new(v1.Reference)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.LoginDatabaseSelector != nil {
+		in, out := &in.LoginDatabaseSelector, &out.LoginDatabaseSelector
+		*out = new(v1.Selector)
+		(*in).DeepCopyInto(*out)
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -40,6 +41,7 @@ import (
 )
 
 type mockDB struct {
+	database   string
 	MockExec   func(ctx context.Context, q xsql.Query) error
 	MockExecTx func(ctx context.Context, ql []xsql.Query) error
 	MockScan   func(ctx context.Context, q xsql.Query, dest ...interface{}) error
@@ -92,18 +94,25 @@ func TestConnect(t *testing.T) {
 		mg  resource.Managed
 	}
 
+	type want struct {
+		sameClient *bool
+		err        error
+	}
+
 	cases := map[string]struct {
 		reason string
 		fields fields
 		args   args
-		want   error
+		want   want
 	}{
 		"ErrNotUser": {
 			reason: "An error should be returned if the managed resource is not a *User",
 			args: args{
 				mg: nil,
 			},
-			want: errors.New(errNotUser),
+			want: want{
+				err: errors.New(errNotUser),
+			},
 		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
@@ -113,7 +122,9 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{},
 			},
-			want: errors.Wrap(errBoom, errTrackPCUsage),
+			want: want{
+				err: errors.Wrap(errBoom, errTrackPCUsage),
+			},
 		},
 		"ErrGetProviderConfig": {
 			reason: "An error should be returned if we can't get our ProviderConfig",
@@ -132,7 +143,9 @@ func TestConnect(t *testing.T) {
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetPC),
+			want: want{
+				err: errors.Wrap(errBoom, errGetPC),
+			},
 		},
 		"ErrMissingConnectionSecret": {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
@@ -154,7 +167,9 @@ func TestConnect(t *testing.T) {
 					},
 				},
 			},
-			want: errors.New(errNoSecretRef),
+			want: want{
+				err: errors.New(errNoSecretRef),
+			},
 		},
 		"ErrGetConnectionSecret": {
 			reason: "An error should be returned if we can't get our ProviderConfig's connection secret",
@@ -181,16 +196,105 @@ func TestConnect(t *testing.T) {
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetSecret),
+			want: want{
+				err: errors.Wrap(errBoom, errGetSecret),
+			},
+		},
+		"Success": {
+			reason: "With NO login database defined, the clients should be the same",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+						case *corev1.Secret:
+							secret := corev1.Secret{
+								Data: map[string][]byte{},
+							}
+							secret.DeepCopyInto(obj.(*corev1.Secret))
+						}
+						return nil
+					}),
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
+						},
+						ForProvider: v1alpha1.UserParameters{
+							Database: ptr.To("success-database"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:        nil,
+				sameClient: ptr.To(true),
+			},
+		},
+		"SuccessLoginDB": {
+			reason: "With the login database defined, the clients should differ",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+						case *corev1.Secret:
+							secret := corev1.Secret{
+								Data: map[string][]byte{},
+							}
+							secret.DeepCopyInto(obj.(*corev1.Secret))
+						}
+						return nil
+					}),
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
+						},
+						ForProvider: v1alpha1.UserParameters{
+							Database:      ptr.To("success-database"),
+							LoginDatabase: ptr.To("success-login-database"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:        nil,
+				sameClient: ptr.To(false),
+			},
 		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage, newClient: tc.fields.newDB}
-			_, err := e.Connect(tc.args.ctx, tc.args.mg)
-			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
+			ec, err := e.Connect(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.sameClient != nil {
+				ext := ec.(*external)
+				db1 := ext.userDB.(mockDB).database
+				db2 := ext.loginDB.(mockDB).database
+				if *tc.want.sameClient && db1 != db2 {
+					t.Errorf("\n%s\ne.Connect(...): want clients to be on the same database\n%s / %s\n",
+						tc.reason, db1, db2)
+				} else if !*tc.want.sameClient && db1 == db2 {
+					t.Errorf("\n%s\ne.Connect(...): want clients NOT to be the same instance\n%s\n",
+						tc.reason, db1)
+				}
 			}
 		})
 	}
@@ -325,8 +429,9 @@ func TestObserve(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := external{
-				db:   tc.fields.db,
-				kube: tc.fields.kube,
+				userDB:  tc.fields.db,
+				loginDB: tc.fields.db,
+				kube:    tc.fields.kube,
 			}
 			got, err := e.Observe(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
@@ -474,8 +579,9 @@ func TestCreate(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := external{
-				db:   tc.fields.db,
-				kube: tc.fields.kube,
+				userDB:  tc.fields.db,
+				loginDB: tc.fields.db,
+				kube:    tc.fields.kube,
 			}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
@@ -692,8 +798,9 @@ func TestUpdate(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := external{
-				db:   tc.fields.db,
-				kube: tc.args.kube,
+				userDB:  tc.fields.db,
+				loginDB: tc.fields.db,
+				kube:    tc.args.kube,
 			}
 			got, err := e.Update(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
@@ -710,7 +817,8 @@ func TestDelete(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	type fields struct {
-		db xsql.DB
+		userDB  xsql.DB
+		loginDB xsql.DB
 	}
 
 	type args struct {
@@ -734,7 +842,7 @@ func TestDelete(t *testing.T) {
 		"ErrDropDB": {
 			reason: "Errors dropping a user should be returned",
 			fields: fields{
-				db: &mockDB{
+				userDB: &mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
 					},
@@ -742,6 +850,7 @@ func TestDelete(t *testing.T) {
 						return errBoom
 					},
 				},
+				loginDB: &mockDB{},
 			},
 			args: args{
 				mg: &v1alpha1.User{},
@@ -751,10 +860,16 @@ func TestDelete(t *testing.T) {
 		"Success": {
 			reason: "No error should be returned",
 			fields: fields{
-				db: &mockDB{
+				userDB: &mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
 					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+				loginDB: &mockDB{
+
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return nil
 					},
@@ -768,7 +883,7 @@ func TestDelete(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			e := external{userDB: tc.fields.userDB, loginDB: tc.fields.loginDB}
 			err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)

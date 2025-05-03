@@ -156,6 +156,10 @@ spec:
                             type: string
                         type: object
                     type: object
+                  revokePublicOnSchema:
+                    description: RevokePublicOnSchema apply a "REVOKE ALL ON SCHEMA
+                      public FROM public" statement
+                    type: boolean
                   role:
                     description: Role for ownership of this schema.
                     type: string
