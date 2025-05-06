@@ -1,8 +1,6 @@
 module github.com/crossplane-contrib/provider-sql
 
-go 1.21
-
-toolchain go1.21.11
+go 1.23.9
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
