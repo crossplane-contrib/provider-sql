@@ -19,12 +19,10 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"time"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/alecthomas/kingpin/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,7 +43,7 @@ func main() {
 		app                      = kingpin.New(filepath.Base(os.Args[0]), "SQL support for Crossplane.").DefaultEnvars()
 		debug                    = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
 		pollInterval             = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
-		syncInterval             = app.Flag("sync", "How often all resources will be double-checked for drift from the desired state.").Short('s').Default("1h").Duration()
+		syncPeriod               = app.Flag("sync", "How often all resources will be double-checked for drift from the desired state.").Short('s').Default("1h").Duration()
 		leaderElection           = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 		maxReconcileRate         = app.Flag("max-reconcile-rate", "The global maximum rate per second at which resources may checked for drift from the desired state.").Default("10").Int()
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable/disable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
@@ -61,30 +59,17 @@ func main() {
 		ctrl.SetLogger(zl)
 	}
 
-	log.Debug("Starting", "sync-period", syncInterval.String())
+	log.Debug("Starting", "sync-period", syncPeriod.String())
 
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
-	mgr, err := ctrl.NewManager(ratelimiter.LimitRESTConfig(cfg, *maxReconcileRate), ctrl.Options{
-		// SyncPeriod in ctrl.Options has been removed since controller-runtime v0.16.0
-		// The recommended way is to move it to cache.Options instead
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		LeaderElection:   *leaderElection,
+		LeaderElectionID: "crossplane-leader-election-provider-sql",
 		Cache: cache.Options{
-			SyncPeriod: syncInterval,
+			SyncPeriod: syncPeriod,
 		},
-
-		// controller-runtime uses both ConfigMaps and Leases for leader
-		// election by default. Leases expire after 15 seconds, with a
-		// 10 second renewal deadline. We've observed leader loss due to
-		// renewal deadlines being exceeded when under high load - i.e.
-		// hundreds of reconciles per second and ~200rps to the API
-		// server. Switching to Leases only and longer leases appears to
-		// alleviate this.
-		LeaderElection:             *leaderElection,
-		LeaderElectionID:           "crossplane-leader-election-provider-sql",
-		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
-		LeaseDuration:              func() *time.Duration { d := 60 * time.Second; return &d }(),
-		RenewDeadline:              func() *time.Duration { d := 50 * time.Second; return &d }(),
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
 	kingpin.FatalIfError(apis.AddToScheme(mgr.GetScheme()), "Cannot add SQL APIs to scheme")
