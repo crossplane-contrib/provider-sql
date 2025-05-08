@@ -136,13 +136,45 @@ check_schema_privileges(){
   echo_step_completed
 }
 
+setup_observe_only_database(){
+  echo_step "create pre-existing database for observe only"
+
+  local datname
+  datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "CREATE DATABASE \"db-observe\";")"
+
+  echo_step_completed
+}
+
+check_observe_only_database(){
+  echo_step "check if observe only database is preserved after deletion"
+
+  # Delete the database kubernetes object, it should not delete the database
+  kubectl delete database.postgresql.sql.crossplane.io db-observe
+
+  local datname
+  datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
+
+  if [[ "$datname" == "db-observe" ]]; then
+      echo "Database db-observe is still present"
+      echo_info "OK"
+  else
+      echo "Database db-observe was NOT preserved"
+      echo_error "Not OK"
+  fi
+
+  # Clean up
+  PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "DROP DATABASE \"db-observe\";"
+
+  echo_step_completed
+}
+
 delete_postgresdb_resources(){
   # uninstall
   echo_step "uninstalling ${PROJECT_NAME}"
-  "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/grant.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/role.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/postgresql/schema.yaml
+  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/grant.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/postgresql/database.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/role.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
   # ----------- cleaning postgres related resources
@@ -160,7 +192,9 @@ delete_postgresdb_resources(){
 integration_tests_postgres() {
   setup_postgresdb_no_tls
   setup_provider_config_postgres_no_tls
+  setup_observe_only_database
   setup_postgresdb_tests
+  check_observe_only_database
   check_all_roles_privileges
   check_schema_privileges
   delete_postgresdb_resources
