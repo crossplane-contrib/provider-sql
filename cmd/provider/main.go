@@ -42,7 +42,7 @@ func main() {
 		debug          = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
 		pollInterval   = app.Flag("poll", "Poll interval controls how often an individual resource should be checked for drift.").Default("10m").Duration()
 		syncPeriod     = app.Flag("sync", "Controller manager sync period such as 300ms, 1.5h, or 2h45m").Short('s').Default("1h").Duration()
-		leaderElection = app.Flag("leader-election", "Use leader election for the conroller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
+		leaderElection = app.Flag("leader-election", "Use leader election for the controller manager.").Short('l').Default("false").Envar("LEADER_ELECTION").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
