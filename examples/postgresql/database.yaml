@@ -14,3 +14,12 @@ spec:
   forProvider:
     allowConnections: true
     owner: "ownerrole"
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: db-observe
+spec:
+  managementPolicies:
+  - Observe
+  forProvider: {}
