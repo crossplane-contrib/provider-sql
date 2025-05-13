@@ -88,7 +88,8 @@ metadata:
 spec:
   forProvider:
     privileges:
-      - ALL
+      - SELECT
+      - INSERT
     roleRef:
       name: no-grants-role
     databaseRef:
@@ -97,4 +98,20 @@ spec:
       name: public
     tables:
       - test_table
-
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-sequence
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    sequences:
+      - test_sequence

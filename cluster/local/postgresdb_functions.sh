@@ -17,7 +17,7 @@ setup_postgresdb_no_tls() {
       --from-literal endpoint="postgresdb-postgresql.default.svc.cluster.local" \
       --from-literal port="5432"
 
-  "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 &
+  "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 | grep -v "Handling connection for" &
   PORT_FORWARD_PID=$!
 }
 
@@ -43,24 +43,26 @@ EOF
 create_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
-  request="CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL)"
-  create_table=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
+  request="CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL);
+  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;"
+  create_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
-    echo_info "PostgresDB test_table created in schema public"
+    echo_info "PostgresDB objects created in schema public"
   else
-    echo_error "ERROR: could not create grantable objects: $create_table"
+    echo_error "ERROR: could not create grantable objects: $create_objects"
   fi
 }
 
 delete_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
-  request="DROP TABLE \"$TARGE_SCHEMA\".test_table"
-  drop_table=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
+  request="DROP TABLE \"$TARGE_SCHEMA\".test_table;
+  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;"
+  drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
-    echo_info "PostgresDB test_table dropped from schema public"
+    echo_info "PostgresDB objects dropped from schema public"
   else
-    echo_error "ERROR: could not delete grantable objects: $drop_table"
+    echo_error "ERROR: could not delete grantable objects: $drop_objects"
   fi
 }
 
@@ -131,14 +133,14 @@ check_role_privileges() {
     local expected_privileges=$2
     local target_db=$4
 
-    echo_info "Checking privileges for role: $role (expected: $expected_privileges)"
-    echo ""
+    echo -n "Privileges for role: $role (expected: $expected_privileges)"
+
     result=$(PGPASSWORD="$3" psql -h localhost -p 5432 -U postgres -d postgres -wtAc" SELECT CASE WHEN has_database_privilege('$role', '$target_db', 'CONNECT') THEN 'CONNECT' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'CREATE') THEN 'CREATE' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'TEMP') THEN 'TEMP' ELSE NULL END " | tr '\n' ',' | sed 's/,$//')
 
     if [ "$result" = "$expected_privileges" ]; then
-        echo_info "Privileges for $role are as expected: $result"
-        echo ""
+        echo " condition met"
     else
+        echo ""
         echo_error "ERROR: Privileges for $role do not match expected. Found: $result, Expected: $expected_privileges"
         echo ""
     fi
@@ -160,35 +162,71 @@ check_all_schema_privileges() {
   # Iterate over roles and expected privileges
   role_index=1
   for role in $roles; do
-      expected_privileges=$(echo "$privileges" | cut -d ' ' -f $role_index)
-      target_db=$(echo "$dbs" | cut -d ' ' -f $role_index)
-      target_schema=$(echo "$schemas" | cut -d ' ' -f $role_index)
-      check_schema_privileges "$role" "$expected_privileges" "${postgres_root_pw}" "$target_db" "$target_schema"
-      role_index=$((role_index + 1))
+    expected_privileges=$(echo "$privileges" | cut -d ' ' -f $role_index)
+    target_db=$(echo "$dbs" | cut -d ' ' -f $role_index)
+    target_schema=$(echo "$schemas" | cut -d ' ' -f $role_index)
+    check_schema_privileges "$role" "$expected_privileges" "${postgres_root_pw}" "$target_db" "$target_schema"
+    role_index=$((role_index + 1))
   done
 
   echo_step_completed
 }
 
-check_schema_privileges(){
-    local role=$1
-    local expected_privileges=$2
-    local target_db=$4
-    local target_schema=$5
+check_privileges(){
+  local target_db=$1
+  local object=$2
+  local role=$3
+  local expected=$4
+  local request=$5
+  echo -n "Privileges on $object for role: $role (expected: $expected)"
 
-    request="select acl.privilege_type, acl.is_grantable from pg_namespace n, aclexplode(n.nspacl) acl INNER JOIN pg_roles s ON acl.grantee = s.oid where n.nspname = '$target_schema' and s.rolname='$role'"
+  response=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc "$request")
+  response=$(echo "$response" | xargs | tr ' ' ',')
 
-    nspacl=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc "$request")
-    nspacl=$(echo "$nspacl" | xargs | tr ' ' ',')
-
-    if [[ "$nspacl" == "$expected_privileges" ]]; then
-        echo "Privileges on schema $target_db.$target_schema for role $role are as expected: $nspacl"
-        echo_info "OK"
-    else
-        echo "Privileges on schema $target_db.$target_schema for role $role are NOT as expected: $nspacl"
-        echo_error "Not OK"
-    fi
+  if [[ "$response" == "$expected" ]]; then
+    echo " condition met"
+  else
+    echo ""
+    echo_error "Found unexpected privileges: $response"
+    echo ""
+  fi
 }
+
+check_schema_privileges(){
+  local role=$1
+  local expected_privileges=$2
+  local target_db=$4
+  local target_schema=$5
+
+  request="select acl.privilege_type, acl.is_grantable from pg_namespace n, aclexplode(n.nspacl) acl INNER JOIN pg_roles s ON acl.grantee = s.oid where n.nspname = '$target_schema' and s.rolname='$role'"
+
+  check_privileges $target_db "schema $target_db.$target_schema" $role $expected_privileges "$request"
+}
+
+check_table_privileges(){
+  target_db="db1"
+  schema="public"
+  table="test_table"
+  role='no-grants-role'
+  expected_privileges='INSERT|NO,SELECT|NO'
+
+  request="select privilege_type, is_grantable from information_schema.role_table_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' order by privilege_type asc"
+
+  check_privileges $target_db "table $schema.$table" $role $expected_privileges "$request"
+}
+
+check_sequence_privileges(){
+  target_db="db1"
+  schema="public"
+  sequence="test_sequence"
+  role='no-grants-role'
+  expected_privileges='SELECT|f,UPDATE|f,USAGE|f'
+
+  request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
+
+  check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
+}
+
 
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
@@ -223,7 +261,12 @@ check_observe_only_database(){
 }
 
 check_custom_object_privileges(){
-  echo_info "nop"
+  echo_step "check if custom_object_privileges privileges are set properly"
+
+  check_table_privileges
+  check_sequence_privileges
+
+  echo_step_completed
 }
 
 delete_postgresdb_resources(){

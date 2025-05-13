@@ -139,6 +139,14 @@ type external struct {
 	kube client.Client
 }
 
+func yesOrNo(b bool) string {
+	if b {
+		return "YES"
+	} else {
+		return "NO"
+	}
+}
+
 func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	gt, err := gp.IdentifyGrantType()
 	if err != nil {
@@ -229,7 +237,7 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		ep := gp.ExpandPrivileges()
 		sp := ep.ToStringSlice()
 
-		// Join grantee. Filter by schema name and grantee name.
+		// Join grantee. Filter by schema name, table name and grantee name.
 		// Finally, perform a permission comparison against expected
 		// permissions.
 		q.String = "SELECT COUNT(*) = $1 AS ct " +
@@ -251,9 +259,45 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 			gp.Schema,
 			pq.Array(gp.Tables),
 			gp.Role,
+			yesOrNo(gro),
+			pq.Array(sp),
+		}
+
+		return nil
+	case v1alpha1.RoleSequence:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+		// Join grantee. Filter by sequence name, schema name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT COUNT(*) = $1 AS ct " +
+			"FROM (SELECT 1 FROM pg_class c " +
+			"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
+			"aclexplode(c.relacl) as acl " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+			"WHERE c.relkind = 'S' " +
+			// Filter by sequence, schema, role and grantable setting
+			"AND n.nspname=$2 " +
+			"AND s.rolname=$3 " +
+			"AND c.relname = ANY($4) " +
+			"AND acl.is_grantable=$5 " +
+			"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
+			") sub"
+		q.Parameters = []interface{}{
+			len(gp.Sequences),
+			gp.Schema,
+			gp.Role,
+			pq.Array(gp.Sequences),
 			gro,
 			pq.Array(sp),
 		}
+
 		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
@@ -372,24 +416,21 @@ func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) e
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
 	}
 
-	sh := pq.QuoteIdentifier(*gp.Schema)
-	tb := strings.Join(gp.Tables, ",")
+	tb := strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s ON TABLE %s IN SCHEMA %s FROM %s",
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
 			sp,
 			tb,
-			sh,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s ON TABLE %s IN SCHEMA %s TO %s %s",
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON TABLE %s TO %s %s",
 			sp,
 			tb,
-			sh,
 			ro,
 			withOption(gp.WithOption),
 		)},
@@ -402,24 +443,21 @@ func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
 	}
 
-	sh := pq.QuoteIdentifier(*gp.Schema)
-	sq := strings.Join(gp.Sequences, ",")
+	sq := strings.Join(prefixWithSchema(*gp.Schema, gp.Sequences), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s ON SEQUENCE %s IN SCHEMA %s FROM %s",
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON SEQUENCE %s FROM %s",
 			sp,
 			sq,
-			sh,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s ON SEQUENCE %s IN SCHEMA %s TO %s %s",
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON SEQUENCE %s TO %s %s",
 			sp,
 			sq,
-			sh,
 			ro,
 			withOption(gp.WithOption),
 		)},
@@ -457,23 +495,30 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		)
 		return nil
 	case v1alpha1.RoleTable:
-		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s IN SCHEMA %s FROM %s",
+		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(gp.Tables, ","),
-			pq.QuoteIdentifier(*gp.Schema),
+			strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ","),
 			ro,
 		)
 		return nil
 	case v1alpha1.RoleSequence:
-		q.String = fmt.Sprintf("REVOKE %s ON SEQUENCE %s IN SCHEMA %s FROM %s",
+		q.String = fmt.Sprintf("REVOKE %s ON SEQUENCE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(gp.Sequences, ","),
-			pq.QuoteIdentifier(*gp.Schema),
+			strings.Join(prefixWithSchema(*gp.Schema, gp.Sequences), ","),
 			ro,
 		)
 		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
+}
+
+func prefixWithSchema(schema string, objects []string) []string {
+	sh := pq.QuoteIdentifier(schema)
+	objectsWithSchema := make([]string, len(objects))
+	for i, object := range objects {
+		objectsWithSchema[i] = sh + "." + pq.QuoteIdentifier(object)
+	}
+	return objectsWithSchema
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
