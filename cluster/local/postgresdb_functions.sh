@@ -40,6 +40,30 @@ EOF
   echo "${yaml}" | "${KUBECTL}" apply -f -
 }
 
+create_grantable_objects() {
+  TARGET_DB='db1'
+  TARGE_SCHEMA='public'
+  request="CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL)"
+  create_table=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
+  if [ $? -eq 0 ]; then
+    echo_info "PostgresDB test_table created in schema public"
+  else
+    echo_error "ERROR: could not create grantable objects: $create_table"
+  fi
+}
+
+delete_grantable_objects() {
+  TARGET_DB='db1'
+  TARGE_SCHEMA='public'
+  request="DROP TABLE \"$TARGE_SCHEMA\".test_table"
+  drop_table=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
+  if [ $? -eq 0 ]; then
+    echo_info "PostgresDB test_table dropped from schema public"
+  else
+    echo_error "ERROR: could not delete grantable objects: $drop_table"
+  fi
+}
+
 setup_postgresdb_tests(){
 # install provider resources
 echo_step "creating PostgresDB Database resource"
@@ -68,6 +92,10 @@ echo_step_completed
 
 echo_step "check if schema is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
+echo_step_completed
+
+echo_step "create grantable objects"
+create_grantable_objects
 echo_step_completed
 
 echo_step "check if grant is ready"
@@ -194,7 +222,14 @@ check_observe_only_database(){
   echo_step_completed
 }
 
+check_custom_object_privileges(){
+  echo_info "nop"
+}
+
 delete_postgresdb_resources(){
+  echo_step "deleting grantable resources"
+  delete_grantable_objects
+
   # uninstall
   echo_step "uninstalling ${PROJECT_NAME}"
   "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/grant.yaml"
@@ -223,5 +258,6 @@ integration_tests_postgres() {
   check_observe_only_database
   check_all_roles_privileges
   check_all_schema_privileges
+  check_custom_object_privileges
   delete_postgresdb_resources
 }

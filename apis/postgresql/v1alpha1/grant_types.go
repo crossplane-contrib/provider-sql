@@ -176,6 +176,14 @@ var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
 		"ALL":            {"CREATE", "USAGE"},
 		"ALL PRIVILEGES": {"CREATE", "USAGE"},
 	},
+	RoleTable: {
+		"ALL":            {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
+		"ALL PRIVILEGES": {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
+	},
+	RoleSequence: {
+		"ALL":            {"USAGE", "SELECT", "UPDATE"},
+		"ALL PRIVILEGES": {"USAGE", "SELECT", "UPDATE"},
+	},
 }
 
 // ExpandPrivileges expands any shorthand privileges to their full equivalents.
