@@ -299,6 +299,51 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		}
 
 		return nil
+	case v1alpha1.RoleRoutine:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+
+		routinesSignatures := make([]string, len(gp.Routines))
+		for i, routine := range gp.Routines {
+			routinesSignatures[i] = signature(routine)
+		}
+
+		// Join grantee. Filter by routine name and signature, schema name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT COUNT(*) = $1 AS ct " +
+			"FROM (SELECT " +
+			// format routine args
+			"p.proname || '(' || coalesce(array_to_string(array_agg(pg_catalog.format_type(t, NULL) ORDER BY args.ord), ',')) || ')' " +
+			"AS signature " +
+			"FROM pg_proc p " +
+			"LEFT JOIN unnest(p.proargtypes) WITH ORDINALITY AS args(t, ord) on true " +
+			"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
+			"aclexplode(p.proacl) as acl " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+			// Filter by sequence, schema, role and grantable setting
+			"WHERE n.nspname=$2 " +
+			"AND s.rolname=$3 " +
+			"AND acl.is_grantable=$4 " +
+			"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+			") sub " +
+			"WHERE sub.signature = ANY($6)"
+		q.Parameters = []interface{}{
+			len(gp.Routines),
+			gp.Schema,
+			gp.Role,
+			gro,
+			pq.Array(sp),
+			pq.Array(routinesSignatures),
+		}
+
+		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -329,6 +374,8 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		return createRoleTable(gp, ql, ro)
 	case v1alpha1.RoleSequence:
 		return createRoleSequence(gp, ql, ro)
+	case v1alpha1.RoleRoutine:
+		return createRoleRoutine(gp, ql, ro)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -440,7 +487,7 @@ func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) e
 
 func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Sequences) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
-		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleSequence)
 	}
 
 	sq := strings.Join(prefixWithSchema(*gp.Schema, gp.Sequences), ",")
@@ -458,6 +505,33 @@ func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string
 		xsql.Query{String: fmt.Sprintf("GRANT %s ON SEQUENCE %s TO %s %s",
 			sp,
 			sq,
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
+}
+
+func createRoleRoutine(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || gp.Schema == nil || len(gp.Routines) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleRoutine)
+	}
+
+	rt := strings.Join(quotedSignaturesWithSchema(*gp.Schema, gp.Routines), ",")
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
+			sp,
+			rt,
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON ROUTINE %s TO %s %s",
+			sp,
+			rt,
 			ro,
 			withOption(gp.WithOption),
 		)},
@@ -508,8 +582,40 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 			ro,
 		)
 		return nil
+	case v1alpha1.RoleRoutine:
+		q.String = fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			strings.Join(quotedSignaturesWithSchema(*gp.Schema, gp.Routines), ","),
+			ro,
+		)
+		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
+}
+
+// signature returns routines with the same format as the select query
+func signature(r v1alpha1.Routine) string {
+	args := make([]string, len(r.Arguments))
+	for j, arg := range r.Arguments {
+		args[j] = strings.ToLower(arg)
+	}
+	return r.Name + "(" + strings.Join(args, ",") + ")"
+}
+
+// signature returns routines with grantable format
+func quotedSignaturesWithSchema(schema string, routines []v1alpha1.Routine) []string {
+	sh := pq.QuoteIdentifier(schema)
+	routinesWithSchema := make([]string, len(routines))
+
+	for i, routine := range routines {
+		args := make([]string, len(routine.Arguments))
+		for j, arg := range routine.Arguments {
+			args[j] = strings.ToUpper(arg)
+		}
+
+		routinesWithSchema[i] = sh + "." + pq.QuoteIdentifier(routine.Name) + "(" + strings.Join(args, ",") + ")"
+	}
+	return routinesWithSchema
 }
 
 func prefixWithSchema(schema string, objects []string) []string {

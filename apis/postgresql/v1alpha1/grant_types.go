@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"context"
-
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,8 +57,6 @@ const (
 	RoleSchema             GrantType = "ROLE_SCHEMA"
 	RoleTable              GrantType = "ROLE_TABLE"
 	RoleSequence           GrantType = "ROLE_SEQUENCE"
-	RoleFunction           GrantType = "ROLE_FUNCTION"
-	RoleProcedure          GrantType = "ROLE_PROCEDURE"
 	RoleRoutine            GrantType = "ROLE_ROUTE"
 	RoleColumn             GrantType = "ROLE_COLUMN"
 	RoleForeignDataWrapper GrantType = "ROLE_FOREIGN_DATA_WRAPPER"
@@ -106,8 +103,6 @@ func (gp *GrantParameters) filledInFields() *stringSet {
 		"Tables":              len(gp.Tables) > 0,
 		"Columns":             len(gp.Columns) > 0,
 		"Sequences":           len(gp.Sequences) > 0,
-		"Functions":           len(gp.Functions) > 0,
-		"Procedures":          len(gp.Procedures) > 0,
 		"Routines":            len(gp.Routines) > 0,
 		"ForeignServers":      len(gp.ForeignServers) > 0,
 		"ForeignDataWrappers": len(gp.ForeignDataWrappers) > 0,
@@ -134,8 +129,6 @@ func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
 		RoleTable:              {"Database", "Schema", "Tables"},
 		RoleColumn:             {"Database", "Schema", "Tables", "Columns"},
 		RoleSequence:           {"Database", "Schema", "Sequences"},
-		RoleFunction:           {"Database", "Schema", "Functions"},
-		RoleProcedure:          {"Database", "Schema", "Procedures"},
 		RoleRoutine:            {"Database", "Schema", "Routines"},
 		RoleForeignServer:      {"Database", "ForeignServers"},
 		RoleForeignDataWrapper: {"Database", "ForeignDataWrappers"},
@@ -165,7 +158,6 @@ func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
 // happen internally inside postgresql when making grants. When we query the
 // privileges back, we need to look for the expanded set.
 // https://www.postgresql.org/docs/15/ddl-priv.html
-// TODO: Grand ALL ON SCHEMA should be expanded to GRANT USAGE, CREATE ON SCHEMA
 var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
 	RoleDatabase: {
 		"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
@@ -180,9 +172,25 @@ var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
 		"ALL":            {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
 		"ALL PRIVILEGES": {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
 	},
+	RoleColumn: {
+		"ALL":            {"SELECT", "INSERT", "UPDATE", "REFERENCES"},
+		"ALL PRIVILEGES": {"SELECT", "INSERT", "UPDATE", "REFERENCES"},
+	},
 	RoleSequence: {
 		"ALL":            {"USAGE", "SELECT", "UPDATE"},
 		"ALL PRIVILEGES": {"USAGE", "SELECT", "UPDATE"},
+	},
+	RoleRoutine: {
+		"ALL":            {"EXECUTE"},
+		"ALL PRIVILEGES": {"EXECUTE"},
+	},
+	RoleForeignDataWrapper: {
+		"ALL":            {"USAGE"},
+		"ALL PRIVILEGES": {"USAGE"},
+	},
+	RoleForeignServer: {
+		"ALL":            {"USAGE"},
+		"ALL PRIVILEGES": {"USAGE"},
 	},
 }
 
@@ -240,6 +248,15 @@ const (
 	GrantOptionAdmin GrantOption = "ADMIN"
 	GrantOptionGrant GrantOption = "GRANT"
 )
+
+type Routine struct {
+	// The name of the routine.
+	Name string `json:"name,omitempty"`
+
+	// The arguments of the routine.
+	// +optional
+	Arguments []string `json:"args,omitempty"`
+}
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 type GrantParameters struct {
@@ -327,17 +344,9 @@ type GrantParameters struct {
 	// +optional
 	Sequences []string `json:"sequences,omitempty"`
 
-	// The functions upon which to grant the privileges.
-	// +optional
-	Functions []string `json:"functions,omitempty"`
-
-	// The procedures upon which to grant the privileges.
-	// +optional
-	Procedures []string `json:"procedures,omitempty"`
-
 	// The routines upon which to grant the privileges.
 	// +optional
-	Routines []string `json:"routines,omitempty"`
+	Routines []Routine `json:"routines,omitempty"`
 
 	// The foreign data wrappers upon which to grant the privileges.
 	// +optional

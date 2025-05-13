@@ -178,11 +178,6 @@ spec:
                     items:
                       type: string
                     type: array
-                  functions:
-                    description: The functions upon which to grant the privileges.
-                    items:
-                      type: string
-                    type: array
                   memberOf:
                     description: MemberOf is the Role that this grant makes Role a
                       member of.
@@ -273,11 +268,6 @@ spec:
                       type: string
                     minItems: 1
                     type: array
-                  procedures:
-                    description: The procedures upon which to grant the privileges.
-                    items:
-                      type: string
-                    type: array
                   revokePublicOnDb:
                     description: RevokePublicOnDb apply the statement "REVOKE ALL
                       ON DATABASE %s FROM PUBLIC" to make database unreachable from
@@ -365,7 +355,16 @@ spec:
                   routines:
                     description: The routines upon which to grant the privileges.
                     items:
-                      type: string
+                      properties:
+                        args:
+                          description: The arguments of the routine.
+                          items:
+                            type: string
+                          type: array
+                        name:
+                          description: The name of the routine.
+                          type: string
+                      type: object
                     type: array
                   schema:
                     description: Schema this grant is for.

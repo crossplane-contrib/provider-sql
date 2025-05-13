@@ -43,8 +43,11 @@ EOF
 create_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
-  request="CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL);
-  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;"
+  request="
+  CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL);
+  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;
+  CREATE PROCEDURE \"$TARGE_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  "
   create_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
     echo_info "PostgresDB objects created in schema public"
@@ -56,8 +59,11 @@ create_grantable_objects() {
 delete_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
-  request="DROP TABLE \"$TARGE_SCHEMA\".test_table;
-  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;"
+  request="
+  DROP TABLE \"$TARGE_SCHEMA\".test_table;
+  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;
+  DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
+  "
   drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
     echo_info "PostgresDB objects dropped from schema public"
@@ -227,6 +233,18 @@ check_sequence_privileges(){
   check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
 }
 
+check_routine_privileges(){
+  target_db="db1"
+  schema="public"
+  routine="test_procedure"
+  role='no-grants-role'
+  expected_privileges='EXECUTE|NO'
+
+  request="select privilege_type, is_grantable from information_schema.role_routine_grants where grantee = '$role' and routine_schema = '$schema' and routine_name='$routine' order by privilege_type asc"
+
+  check_privileges $target_db "routine $schema.$routine" $role $expected_privileges "$request"
+}
+
 
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
@@ -265,6 +283,7 @@ check_custom_object_privileges(){
 
   check_table_privileges
   check_sequence_privileges
+  check_routine_privileges
 
   echo_step_completed
 }
