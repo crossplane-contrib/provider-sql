@@ -344,6 +344,41 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		}
 
 		return nil
+	case v1alpha1.RoleColumn:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+
+		// Join grantee. Filter by schema name, table name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT COUNT(*) >= $1 AS ct " +
+			"FROM (SELECT 1 " +
+			"FROM information_schema.role_column_grants " +
+			// Filter by column, table, schema, role and grantable setting
+			"WHERE table_schema=$2 " +
+			"AND table_name = ANY($3) " +
+			"AND column_name = ANY($4) " +
+			"AND grantee=$5 " +
+			"AND is_grantable=$6 " +
+			"GROUP BY table_name, column_name " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($7::text[]) as perms ORDER BY perms ASC))" +
+			") sub"
+		q.Parameters = []interface{}{
+			len(gp.Tables) * len(gp.Columns),
+			gp.Schema,
+			pq.Array(gp.Tables),
+			pq.Array(gp.Columns),
+			gp.Role,
+			yesOrNo(gro),
+			pq.Array(sp),
+		}
+
+		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -376,6 +411,8 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		return createRoleSequence(gp, ql, ro)
 	case v1alpha1.RoleRoutine:
 		return createRoleRoutine(gp, ql, ro)
+	case v1alpha1.RoleColumn:
+		return createRoleColumn(gp, ql, ro)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -485,6 +522,36 @@ func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) e
 	return nil
 }
 
+func createRoleColumn(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleColumn)
+	}
+
+	co := strings.Join(gp.Columns, ",")
+	tb := strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ",")
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s",
+			sp,
+			co,
+			tb,
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s (%s) ON TABLE %s TO %s %s",
+			sp,
+			co,
+			tb,
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
+}
+
 func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Sequences) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleSequence)
@@ -586,6 +653,14 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		q.String = fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			strings.Join(quotedSignaturesWithSchema(*gp.Schema, gp.Routines), ","),
+			ro,
+		)
+		return nil
+	case v1alpha1.RoleColumn:
+		q.String = fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			strings.Join(gp.Columns, ","),
+			strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ","),
 			ro,
 		)
 		return nil

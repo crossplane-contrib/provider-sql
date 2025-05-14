@@ -44,9 +44,10 @@ create_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
   request="
-  CREATE TABLE \"$TARGE_SCHEMA\".test_table(column1 INT NULL);
+  CREATE TABLE \"$TARGE_SCHEMA\".test_table(col1 INT NULL);
   CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;
   CREATE PROCEDURE \"$TARGE_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  CREATE TABLE \"$TARGE_SCHEMA\".test_table_column(test_column INT NULL);
   "
   create_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
@@ -63,6 +64,7 @@ delete_grantable_objects() {
   DROP TABLE \"$TARGE_SCHEMA\".test_table;
   DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;
   DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
+  DROP TABLE \"$TARGE_SCHEMA\".test_table_column;
   "
   drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
@@ -81,10 +83,6 @@ echo_step "creating PostgresDB Database resource"
 echo_step "creating PostgresDB Role resource"
 # create grant
 "${KUBECTL}" apply -f ${projectdir}/examples/postgresql/role.yaml
-
-echo_step "creating PostgresDB Grant resource"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/grant.yaml
 
 echo_step "creating PostgresDB Schema resources"
 # create grant
@@ -105,6 +103,10 @@ echo_step_completed
 echo_step "create grantable objects"
 create_grantable_objects
 echo_step_completed
+
+echo_step "creating PostgresDB Grant resource"
+# create grant
+"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/grant.yaml
 
 echo_step "check if grant is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/grant.yaml
@@ -245,6 +247,19 @@ check_routine_privileges(){
   check_privileges $target_db "routine $schema.$routine" $role $expected_privileges "$request"
 }
 
+check_column_privileges(){
+  target_db="db1"
+  schema="public"
+  table="test_table_column"
+  column="test_column"
+  role='no-grants-role'
+  expected_privileges='UPDATE|NO'
+
+  request="select privilege_type, is_grantable from information_schema.role_column_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' and column_name='$column' order by privilege_type asc"
+
+  check_privileges $target_db "column $column on table $schema.$table" $role $expected_privileges "$request"
+}
+
 
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
@@ -284,6 +299,7 @@ check_custom_object_privileges(){
   check_table_privileges
   check_sequence_privileges
   check_routine_privileges
+  check_column_privileges
 
   echo_step_completed
 }

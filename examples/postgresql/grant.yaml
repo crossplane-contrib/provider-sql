@@ -134,3 +134,22 @@ spec:
       - name: test_procedure
         args:
         - TEXT
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-column
+spec:
+  forProvider:
+    privileges:
+      - UPDATE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - test_table_column
+    columns:
+      - test_column
