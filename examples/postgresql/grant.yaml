@@ -153,3 +153,33 @@ spec:
       - test_table_column
     columns:
       - test_column
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-foreign-data-wrapper
+spec:
+  forProvider:
+    privileges:
+      - USAGE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    foreignDataWrappers:
+      - test_foreign_data_wrapper
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-foreign-server
+spec:
+  forProvider:
+    privileges:
+      - USAGE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    foreignServers:
+      - test_foreign_server

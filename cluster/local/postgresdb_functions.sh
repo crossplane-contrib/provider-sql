@@ -48,6 +48,8 @@ create_grantable_objects() {
   CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;
   CREATE PROCEDURE \"$TARGE_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
   CREATE TABLE \"$TARGE_SCHEMA\".test_table_column(test_column INT NULL);
+  CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
+  CREATE SERVER test_foreign_server FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   "
   create_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
@@ -61,10 +63,12 @@ delete_grantable_objects() {
   TARGET_DB='db1'
   TARGE_SCHEMA='public'
   request="
-  DROP TABLE \"$TARGE_SCHEMA\".test_table;
-  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;
-  DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
+  DROP SERVER test_foreign_server;
+  DROP FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   DROP TABLE \"$TARGE_SCHEMA\".test_table_column;
+  DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
+  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;
+  DROP TABLE \"$TARGE_SCHEMA\".test_table;
   "
   drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
@@ -260,6 +264,27 @@ check_column_privileges(){
   check_privileges $target_db "column $column on table $schema.$table" $role $expected_privileges "$request"
 }
 
+check_foreign_data_wrapper_privileges(){
+  target_db="db1"
+  foreign_data_wrapper="test_foreign_data_wrapper"
+  role='no-grants-role'
+  expected_privileges='USAGE|NO'
+
+  request="select privilege_type, is_grantable from information_schema.role_usage_grants where grantee = '$role' and object_type = 'FOREIGN DATA WRAPPER' and object_name='$foreign_data_wrapper' order by privilege_type asc"
+
+  check_privileges $target_db "foreign data wrapper $foreign_data_wrapper" $role $expected_privileges "$request"
+}
+
+check_foreign_server_privileges(){
+  target_db="db1"
+  foreign_server="test_foreign_server"
+  role='no-grants-role'
+  expected_privileges='USAGE|NO'
+
+  request="select privilege_type, is_grantable from information_schema.role_usage_grants where grantee = '$role' and object_type = 'FOREIGN SERVER' and object_name='$foreign_server' order by privilege_type asc"
+
+  check_privileges $target_db "foreign server $foreign_server" $role $expected_privileges "$request"
+}
 
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
@@ -300,6 +325,8 @@ check_custom_object_privileges(){
   check_sequence_privileges
   check_routine_privileges
   check_column_privileges
+  check_foreign_data_wrapper_privileges
+  check_foreign_server_privileges
 
   echo_step_completed
 }

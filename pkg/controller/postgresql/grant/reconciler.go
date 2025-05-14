@@ -379,6 +379,70 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		}
 
 		return nil
+	case v1alpha1.RoleForeignDataWrapper:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+
+		// Join grantee. Filter by schema name, table name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT COUNT(*) >= $1 AS ct " +
+			"FROM (SELECT 1 " +
+			"FROM information_schema.role_usage_grants " +
+			// Filter by column, table, schema, role and grantable setting
+			"WHERE grantee=$2 " +
+			"AND object_type = 'FOREIGN DATA WRAPPER' " +
+			"AND object_name = ANY($3) " +
+			"AND is_grantable=$4 " +
+			"GROUP BY object_name " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+			") sub"
+		q.Parameters = []interface{}{
+			len(gp.ForeignDataWrappers),
+			gp.Role,
+			pq.Array(gp.ForeignDataWrappers),
+			yesOrNo(gro),
+			pq.Array(sp),
+		}
+
+		return nil
+	case v1alpha1.RoleForeignServer:
+		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+		ep := gp.ExpandPrivileges()
+		sp := ep.ToStringSlice()
+
+		// Join grantee. Filter by schema name, table name and grantee name.
+		// Finally, perform a permission comparison against expected
+		// permissions.
+		q.String = "SELECT COUNT(*) >= $1 AS ct " +
+			"FROM (SELECT 1 " +
+			"FROM information_schema.role_usage_grants " +
+			// Filter by column, table, schema, role and grantable setting
+			"WHERE grantee=$2 " +
+			"AND object_type = 'FOREIGN SERVER' " +
+			"AND object_name = ANY($3) " +
+			"AND is_grantable=$4 " +
+			"GROUP BY object_name " +
+			// Check privileges match. Convoluted right-hand-side is necessary to
+			// ensure identical sort order of the input permissions.
+			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+			") sub"
+		q.Parameters = []interface{}{
+			len(gp.ForeignServers),
+			gp.Role,
+			pq.Array(gp.ForeignServers),
+			yesOrNo(gro),
+			pq.Array(sp),
+		}
+
+		return nil
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -413,6 +477,10 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		return createRoleRoutine(gp, ql, ro)
 	case v1alpha1.RoleColumn:
 		return createRoleColumn(gp, ql, ro)
+	case v1alpha1.RoleForeignDataWrapper:
+		return createRoleForeignDataWrapper(gp, ql, ro)
+	case v1alpha1.RoleForeignServer:
+		return createRoleForeignServer(gp, ql, ro)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -523,7 +591,7 @@ func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) e
 }
 
 func createRoleColumn(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
-	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
+	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || len(gp.Columns) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleColumn)
 	}
 
@@ -606,6 +674,58 @@ func createRoleRoutine(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string)
 	return nil
 }
 
+func createRoleForeignDataWrapper(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || len(gp.ForeignDataWrappers) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleForeignDataWrapper)
+	}
+
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON FOREIGN DATA WRAPPER %s FROM %s",
+			sp,
+			strings.Join(gp.ForeignDataWrappers, ","),
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON FOREIGN DATA WRAPPER %s TO %s %s",
+			sp,
+			strings.Join(gp.ForeignDataWrappers, ","),
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
+}
+
+func createRoleForeignServer(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || len(gp.ForeignServers) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleForeignServer)
+	}
+
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+
+	*ql = append(*ql,
+		// REVOKE ANY MATCHING EXISTING PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON FOREIGN SERVER %s FROM %s",
+			sp,
+			strings.Join(gp.ForeignServers, ","),
+			ro,
+		)},
+
+		// GRANT REQUESTED PERMISSIONS
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON FOREIGN SERVER %s TO %s %s",
+			sp,
+			strings.Join(gp.ForeignServers, ","),
+			ro,
+			withOption(gp.WithOption),
+		)},
+	)
+	return nil
+}
+
 func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	gt, err := gp.IdentifyGrantType()
 	if err != nil {
@@ -661,6 +781,20 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			strings.Join(gp.Columns, ","),
 			strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ","),
+			ro,
+		)
+		return nil
+	case v1alpha1.RoleForeignDataWrapper:
+		q.String = fmt.Sprintf("REVOKE %s ON FOREIGN DATA WRAPPER %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			strings.Join(gp.ForeignDataWrappers, ","),
+			ro,
+		)
+		return nil
+	case v1alpha1.RoleForeignServer:
+		q.String = fmt.Sprintf("REVOKE %s ON FOREIGN SERVER %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			strings.Join(gp.ForeignServers, ","),
 			ro,
 		)
 		return nil
