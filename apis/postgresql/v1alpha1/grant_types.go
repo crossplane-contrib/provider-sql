@@ -18,12 +18,13 @@ package v1alpha1
 
 import (
 	"context"
-	"github.com/pkg/errors"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/reference"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -117,41 +118,41 @@ func (gp *GrantParameters) filledInFields() *stringSet {
 	return set
 }
 
+var grantTypeFields = map[GrantType][]string{
+	RoleMember:             {"MemberOf"},
+	RoleDatabase:           {"Database"},
+	RoleSchema:             {"Database", "Schema"},
+	RoleTable:              {"Database", "Schema", "Tables"},
+	RoleColumn:             {"Database", "Schema", "Tables", "Columns"},
+	RoleSequence:           {"Database", "Schema", "Sequences"},
+	RoleRoutine:            {"Database", "Schema", "Routines"},
+	RoleForeignServer:      {"Database", "ForeignServers"},
+	RoleForeignDataWrapper: {"Database", "ForeignDataWrappers"},
+}
+
 // IdentifyGrantType return the deduced GrantType from the filled in fields.
 func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
-	fields := gp.filledInFields()
+	ff := gp.filledInFields()
 	pc := len(gp.Privileges)
 
-	grantTypeFields := map[GrantType][]string{
-		RoleMember:             {"MemberOf"},
-		RoleDatabase:           {"Database"},
-		RoleSchema:             {"Database", "Schema"},
-		RoleTable:              {"Database", "Schema", "Tables"},
-		RoleColumn:             {"Database", "Schema", "Tables", "Columns"},
-		RoleSequence:           {"Database", "Schema", "Sequences"},
-		RoleRoutine:            {"Database", "Schema", "Routines"},
-		RoleForeignServer:      {"Database", "ForeignServers"},
-		RoleForeignDataWrapper: {"Database", "ForeignDataWrappers"},
-	}
+	var gt *GrantType
 
-	var role *GrantType
-
-	for key, expectedFields := range grantTypeFields {
-		if fields.containsExactly(expectedFields...) {
-			role = &key
+	for k, v := range grantTypeFields {
+		if ff.containsExactly(v...) {
+			gt = &k
 			break
 		}
 	}
-	if role == nil {
+	if gt == nil {
 		return "", errors.New(errUnknownGrant)
 	}
-	if *role == RoleMember && pc > 0 {
+	if *gt == RoleMember && pc > 0 {
 		return "", errors.New(errMemberOfWithPrivileges)
 	}
-	if *role != RoleMember && pc < 1 {
+	if *gt != RoleMember && pc < 1 {
 		return "", errors.New(errNoPrivileges)
 	}
-	return *role, nil
+	return *gt, nil
 }
 
 // Some privileges are shorthands for multiple privileges. These translations
@@ -196,12 +197,12 @@ var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
 
 // ExpandPrivileges expands any shorthand privileges to their full equivalents.
 func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
-	grantType, err := gp.IdentifyGrantType()
+	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return gp.Privileges
 	}
-	replacements, hasReplacements := grantReplacements[grantType]
-	if !hasReplacements {
+	gr, ex := grantReplacements[gt]
+	if !ex {
 		return gp.Privileges
 	}
 
@@ -209,8 +210,8 @@ func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
 
 	// Replace any shorthand privileges with their full equivalents
 	for _, p := range gp.Privileges {
-		if _, ok := replacements[p]; ok {
-			for _, rp := range replacements[p] {
+		if _, ok := gr[p]; ok {
+			for _, rp := range gr[p] {
 				privilegeSet[rp] = struct{}{}
 			}
 		} else {

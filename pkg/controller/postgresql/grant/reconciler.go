@@ -124,12 +124,12 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
 		return nil, errors.Wrap(err, errGetSecret)
 	}
-	database := reference.FromPtrValue(cr.Spec.ForProvider.Database)
-	if database == "" {
-		database = pc.Spec.DefaultDatabase
+	db := reference.FromPtrValue(cr.Spec.ForProvider.Database)
+	if db == "" {
+		db = pc.Spec.DefaultDatabase
 	}
 	return &external{
-		db:   c.newDB(s.Data, database, clients.ToString(pc.Spec.SSLMode)),
+		db:   c.newDB(s.Data, db, clients.ToString(pc.Spec.SSLMode)),
 		kube: c.kube,
 	}, nil
 }
@@ -147,304 +147,311 @@ func yesOrNo(b bool) string {
 	}
 }
 
-func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
-	gt, err := gp.IdentifyGrantType()
-	if err != nil {
-		return err
+func selectForeignServerGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+
+	// Join grantee. Filter by schema name, table name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) >= $1 AS ct " +
+		"FROM (SELECT 1 " +
+		"FROM information_schema.role_usage_grants " +
+		// Filter by column, table, schema, role and grantable setting
+		"WHERE grantee=$2 " +
+		"AND object_type = 'FOREIGN SERVER' " +
+		"AND object_name = ANY($3) " +
+		"AND is_grantable=$4 " +
+		"GROUP BY object_name " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+		") sub"
+	q.Parameters = []interface{}{
+		len(gp.ForeignServers),
+		gp.Role,
+		pq.Array(gp.ForeignServers),
+		yesOrNo(gro),
+		pq.Array(sp),
 	}
 
-	switch gt {
-	case v1alpha1.RoleMember:
-		ao := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionAdmin
+	return nil
+}
 
-		// Always returns a row with a true or false value
-		// A simpler query would use ::regrol to cast the
-		// roleid and member oids to their role names, but
-		// if this is used with a nonexistent role name it will
-		// throw an error rather than return false.
-		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
-			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
-			"INNER JOIN pg_roles r ON m.member = r.oid " +
-			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
-			"m.admin_option = $3)"
+func selectForeignDataWrapperGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
 
-		q.Parameters = []interface{}{
-			gp.Role,
-			gp.MemberOf,
-			ao,
-		}
-		return nil
-	case v1alpha1.RoleDatabase:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
 
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-		// Join grantee. Filter by database name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT EXISTS(SELECT 1 " +
-			"FROM pg_database db, " +
-			"aclexplode(datacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by database, role and grantable setting
-			"WHERE db.datname=$1 " +
-			"AND s.rolname=$2 " +
-			"AND acl.is_grantable=$3 " +
-			"GROUP BY db.datname, s.rolname, acl.is_grantable " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
-
-		q.Parameters = []interface{}{
-			gp.Database,
-			gp.Role,
-			gro,
-			pq.Array(sp),
-		}
-		return nil
-	case v1alpha1.RoleSchema:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-		// Join grantee. Filter by schema name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT EXISTS(SELECT 1 " +
-			"FROM pg_namespace n, " +
-			"aclexplode(nspacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by schema, role and grantable setting
-			"WHERE n.nspname=$1 " +
-			"AND s.rolname=$2 " +
-			"AND acl.is_grantable=$3 " +
-			"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
-		q.Parameters = []interface{}{
-			gp.Schema,
-			gp.Role,
-			gro,
-			pq.Array(sp),
-		}
-		return nil
-	case v1alpha1.RoleTable:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-
-		// Join grantee. Filter by schema name, table name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) = $1 AS ct " +
-			"FROM (SELECT 1 " +
-			"FROM information_schema.role_table_grants " +
-			// Filter by table, schema, role and grantable setting
-			"WHERE table_schema=$2 " +
-			"AND table_name = ANY($3) " +
-			"AND grantee=$4 " +
-			"AND is_grantable=$5 " +
-			"GROUP BY table_name " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
-			") sub"
-		q.Parameters = []interface{}{
-			len(gp.Tables),
-			gp.Schema,
-			pq.Array(gp.Tables),
-			gp.Role,
-			yesOrNo(gro),
-			pq.Array(sp),
-		}
-
-		return nil
-	case v1alpha1.RoleSequence:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-		// Join grantee. Filter by sequence name, schema name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) = $1 AS ct " +
-			"FROM (SELECT 1 FROM pg_class c " +
-			"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
-			"aclexplode(c.relacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			"WHERE c.relkind = 'S' " +
-			// Filter by sequence, schema, role and grantable setting
-			"AND n.nspname=$2 " +
-			"AND s.rolname=$3 " +
-			"AND c.relname = ANY($4) " +
-			"AND acl.is_grantable=$5 " +
-			"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
-			") sub"
-		q.Parameters = []interface{}{
-			len(gp.Sequences),
-			gp.Schema,
-			gp.Role,
-			pq.Array(gp.Sequences),
-			gro,
-			pq.Array(sp),
-		}
-
-		return nil
-	case v1alpha1.RoleRoutine:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-
-		routinesSignatures := make([]string, len(gp.Routines))
-		for i, routine := range gp.Routines {
-			routinesSignatures[i] = signature(routine)
-		}
-
-		// Join grantee. Filter by routine name and signature, schema name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) = $1 AS ct " +
-			"FROM (SELECT " +
-			// format routine args
-			"p.proname || '(' || coalesce(array_to_string(array_agg(pg_catalog.format_type(t, NULL) ORDER BY args.ord), ',')) || ')' " +
-			"AS signature " +
-			"FROM pg_proc p " +
-			"LEFT JOIN unnest(p.proargtypes) WITH ORDINALITY AS args(t, ord) on true " +
-			"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
-			"aclexplode(p.proacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by sequence, schema, role and grantable setting
-			"WHERE n.nspname=$2 " +
-			"AND s.rolname=$3 " +
-			"AND acl.is_grantable=$4 " +
-			"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
-			") sub " +
-			"WHERE sub.signature = ANY($6)"
-		q.Parameters = []interface{}{
-			len(gp.Routines),
-			gp.Schema,
-			gp.Role,
-			gro,
-			pq.Array(sp),
-			pq.Array(routinesSignatures),
-		}
-
-		return nil
-	case v1alpha1.RoleColumn:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-
-		// Join grantee. Filter by schema name, table name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) >= $1 AS ct " +
-			"FROM (SELECT 1 " +
-			"FROM information_schema.role_column_grants " +
-			// Filter by column, table, schema, role and grantable setting
-			"WHERE table_schema=$2 " +
-			"AND table_name = ANY($3) " +
-			"AND column_name = ANY($4) " +
-			"AND grantee=$5 " +
-			"AND is_grantable=$6 " +
-			"GROUP BY table_name, column_name " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($7::text[]) as perms ORDER BY perms ASC))" +
-			") sub"
-		q.Parameters = []interface{}{
-			len(gp.Tables) * len(gp.Columns),
-			gp.Schema,
-			pq.Array(gp.Tables),
-			pq.Array(gp.Columns),
-			gp.Role,
-			yesOrNo(gro),
-			pq.Array(sp),
-		}
-
-		return nil
-	case v1alpha1.RoleForeignDataWrapper:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-
-		// Join grantee. Filter by schema name, table name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) >= $1 AS ct " +
-			"FROM (SELECT 1 " +
-			"FROM information_schema.role_usage_grants " +
-			// Filter by column, table, schema, role and grantable setting
-			"WHERE grantee=$2 " +
-			"AND object_type = 'FOREIGN DATA WRAPPER' " +
-			"AND object_name = ANY($3) " +
-			"AND is_grantable=$4 " +
-			"GROUP BY object_name " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
-			") sub"
-		q.Parameters = []interface{}{
-			len(gp.ForeignDataWrappers),
-			gp.Role,
-			pq.Array(gp.ForeignDataWrappers),
-			yesOrNo(gro),
-			pq.Array(sp),
-		}
-
-		return nil
-	case v1alpha1.RoleForeignServer:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-
-		// Join grantee. Filter by schema name, table name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT COUNT(*) >= $1 AS ct " +
-			"FROM (SELECT 1 " +
-			"FROM information_schema.role_usage_grants " +
-			// Filter by column, table, schema, role and grantable setting
-			"WHERE grantee=$2 " +
-			"AND object_type = 'FOREIGN SERVER' " +
-			"AND object_name = ANY($3) " +
-			"AND is_grantable=$4 " +
-			"GROUP BY object_name " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
-			") sub"
-		q.Parameters = []interface{}{
-			len(gp.ForeignServers),
-			gp.Role,
-			pq.Array(gp.ForeignServers),
-			yesOrNo(gro),
-			pq.Array(sp),
-		}
-
-		return nil
+	// Join grantee. Filter by schema name, table name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) >= $1 AS ct " +
+		"FROM (SELECT 1 " +
+		"FROM information_schema.role_usage_grants " +
+		// Filter by column, table, schema, role and grantable setting
+		"WHERE grantee=$2 " +
+		"AND object_type = 'FOREIGN DATA WRAPPER' " +
+		"AND object_name = ANY($3) " +
+		"AND is_grantable=$4 " +
+		"GROUP BY object_name " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+		") sub"
+	q.Parameters = []interface{}{
+		len(gp.ForeignDataWrappers),
+		gp.Role,
+		pq.Array(gp.ForeignDataWrappers),
+		yesOrNo(gro),
+		pq.Array(sp),
 	}
-	return errors.Errorf(errUnsupportedGrant, gt)
+
+	return nil
+}
+
+func selectColumnGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+
+	// Join grantee. Filter by schema name, table name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) >= $1 AS ct " +
+		"FROM (SELECT 1 " +
+		"FROM information_schema.role_column_grants " +
+		// Filter by column, table, schema, role and grantable setting
+		"WHERE table_schema=$2 " +
+		"AND table_name = ANY($3) " +
+		"AND column_name = ANY($4) " +
+		"AND grantee=$5 " +
+		"AND is_grantable=$6 " +
+		"GROUP BY table_name, column_name " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($7::text[]) as perms ORDER BY perms ASC))" +
+		") sub"
+	q.Parameters = []interface{}{
+		len(gp.Tables) * len(gp.Columns),
+		gp.Schema,
+		pq.Array(gp.Tables),
+		pq.Array(gp.Columns),
+		gp.Role,
+		yesOrNo(gro),
+		pq.Array(sp),
+	}
+
+	return nil
+}
+
+func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+
+	routinesSignatures := make([]string, len(gp.Routines))
+	for i, routine := range gp.Routines {
+		routinesSignatures[i] = signature(routine)
+	}
+
+	// Join grantee. Filter by routine name and signature, schema name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) = $1 AS ct " +
+		"FROM (SELECT " +
+		// format routine args
+		"p.proname || '(' || coalesce(array_to_string(array_agg(pg_catalog.format_type(t, NULL) ORDER BY args.ord), ',')) || ')' " +
+		"AS signature " +
+		"FROM pg_proc p " +
+		"LEFT JOIN unnest(p.proargtypes) WITH ORDINALITY AS args(t, ord) on true " +
+		"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
+		"aclexplode(p.proacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		// Filter by sequence, schema, role and grantable setting
+		"WHERE n.nspname=$2 " +
+		"AND s.rolname=$3 " +
+		"AND acl.is_grantable=$4 " +
+		"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($5::text[]) as perms ORDER BY perms ASC))" +
+		") sub " +
+		"WHERE sub.signature = ANY($6)"
+	q.Parameters = []interface{}{
+		len(gp.Routines),
+		gp.Schema,
+		gp.Role,
+		gro,
+		pq.Array(sp),
+		pq.Array(routinesSignatures),
+	}
+
+	return nil
+}
+
+func selectSequenceGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+	// Join grantee. Filter by sequence name, schema name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) = $1 AS ct " +
+		"FROM (SELECT 1 FROM pg_class c " +
+		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
+		"aclexplode(c.relacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		"WHERE c.relkind = 'S' " +
+		// Filter by sequence, schema, role and grantable setting
+		"AND n.nspname=$2 " +
+		"AND s.rolname=$3 " +
+		"AND c.relname = ANY($4) " +
+		"AND acl.is_grantable=$5 " +
+		"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
+		") sub"
+	q.Parameters = []interface{}{
+		len(gp.Sequences),
+		gp.Schema,
+		gp.Role,
+		pq.Array(gp.Sequences),
+		gro,
+		pq.Array(sp),
+	}
+
+	return nil
+}
+
+func selectTableGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+
+	// Join grantee. Filter by schema name, table name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT COUNT(*) = $1 AS ct " +
+		"FROM (SELECT 1 " +
+		"FROM information_schema.role_table_grants " +
+		// Filter by table, schema, role and grantable setting
+		"WHERE table_schema=$2 " +
+		"AND table_name = ANY($3) " +
+		"AND grantee=$4 " +
+		"AND is_grantable=$5 " +
+		"GROUP BY table_name " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
+		") sub"
+	q.Parameters = []interface{}{
+		len(gp.Tables),
+		gp.Schema,
+		pq.Array(gp.Tables),
+		gp.Role,
+		yesOrNo(gro),
+		pq.Array(sp),
+	}
+
+	return nil
+}
+
+func selectSchemaGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+	// Join grantee. Filter by schema name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT EXISTS(SELECT 1 " +
+		"FROM pg_namespace n, " +
+		"aclexplode(nspacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		// Filter by schema, role and grantable setting
+		"WHERE n.nspname=$1 " +
+		"AND s.rolname=$2 " +
+		"AND acl.is_grantable=$3 " +
+		"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
+	q.Parameters = []interface{}{
+		gp.Schema,
+		gp.Role,
+		gro,
+		pq.Array(sp),
+	}
+	return nil
+}
+
+func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+
+	ep := gp.ExpandPrivileges()
+	sp := ep.ToStringSlice()
+	// Join grantee. Filter by database name and grantee name.
+	// Finally, perform a permission comparison against expected
+	// permissions.
+	q.String = "SELECT EXISTS(SELECT 1 " +
+		"FROM pg_database db, " +
+		"aclexplode(datacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		// Filter by database, role and grantable setting
+		"WHERE db.datname=$1 " +
+		"AND s.rolname=$2 " +
+		"AND acl.is_grantable=$3 " +
+		"GROUP BY db.datname, s.rolname, acl.is_grantable " +
+		// Check privileges match. Convoluted right-hand-side is necessary to
+		// ensure identical sort order of the input permissions.
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
+
+	q.Parameters = []interface{}{
+		gp.Database,
+		gp.Role,
+		gro,
+		pq.Array(sp),
+	}
+	return nil
+}
+
+func selectMemberGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	ao := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionAdmin
+
+	// Always returns a row with a true or false value
+	// A simpler query would use ::regrol to cast the
+	// roleid and member oids to their role names, but
+	// if this is used with a nonexistent role name it will
+	// throw an error rather than return false.
+	q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
+		"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+		"INNER JOIN pg_roles r ON m.member = r.oid " +
+		"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
+		"m.admin_option = $3)"
+
+	q.Parameters = []interface{}{
+		gp.Role,
+		gp.MemberOf,
+		ao,
+	}
+	return nil
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
@@ -452,6 +459,35 @@ func withOption(option *v1alpha1.GrantOption) string {
 		return fmt.Sprintf("WITH %s OPTION", string(*option))
 	}
 	return ""
+}
+
+func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nolint: gocyclo
+	gt, err := gp.IdentifyGrantType()
+	if err != nil {
+		return err
+	}
+
+	switch gt {
+	case v1alpha1.RoleMember:
+		return selectMemberGrantQuery(gp, q)
+	case v1alpha1.RoleDatabase:
+		return selectDatabaseGrantQuery(gp, q)
+	case v1alpha1.RoleSchema:
+		return selectSchemaGrantQuery(gp, q)
+	case v1alpha1.RoleTable:
+		return selectTableGrantQuery(gp, q)
+	case v1alpha1.RoleSequence:
+		return selectSequenceGrantQuery(gp, q)
+	case v1alpha1.RoleRoutine:
+		return selectRoutineGrantQuery(gp, q)
+	case v1alpha1.RoleColumn:
+		return selectColumnGrantQuery(gp, q)
+	case v1alpha1.RoleForeignDataWrapper:
+		return selectForeignDataWrapperGrantQuery(gp, q)
+	case v1alpha1.RoleForeignServer:
+		return selectForeignServerGrantQuery(gp, q)
+	}
+	return errors.Errorf(errUnsupportedGrant, gt)
 }
 
 func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { // nolint: gocyclo
@@ -464,28 +500,28 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 
 	switch gt {
 	case v1alpha1.RoleMember:
-		return createRoleMember(gp, ql, ro)
+		return createMemberGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleDatabase:
-		return createRoleDatabase(gp, ql, ro)
+		return createDatabaseGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleSchema:
-		return createRoleSchema(gp, ql, ro)
+		return createSchemaGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleTable:
-		return createRoleTable(gp, ql, ro)
+		return createTableGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleSequence:
-		return createRoleSequence(gp, ql, ro)
+		return createSequenceGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleRoutine:
-		return createRoleRoutine(gp, ql, ro)
+		return createRoutineGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleColumn:
-		return createRoleColumn(gp, ql, ro)
+		return createColumnGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleForeignDataWrapper:
-		return createRoleForeignDataWrapper(gp, ql, ro)
+		return createForeignDataWrapperGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleForeignServer:
-		return createRoleForeignServer(gp, ql, ro)
+		return createForeignServerGrantQueries(gp, ql, ro)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
 
-func createRoleMember(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createMemberGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.MemberOf == nil || gp.Role == nil {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleMember)
 	}
@@ -501,7 +537,7 @@ func createRoleMember(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) 
 	return nil
 }
 
-func createRoleDatabase(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createDatabaseGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleDatabase)
 	}
@@ -536,7 +572,7 @@ func createRoleDatabase(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string
 	return nil
 }
 
-func createRoleSchema(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createSchemaGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleSchema)
 	}
@@ -563,12 +599,12 @@ func createRoleSchema(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) 
 	return nil
 }
 
-func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createTableGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
 	}
 
-	tb := strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ",")
+	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
@@ -590,13 +626,13 @@ func createRoleTable(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) e
 	return nil
 }
 
-func createRoleColumn(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createColumnGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || len(gp.Columns) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleColumn)
 	}
 
 	co := strings.Join(gp.Columns, ",")
-	tb := strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ",")
+	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
@@ -620,12 +656,12 @@ func createRoleColumn(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) 
 	return nil
 }
 
-func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createSequenceGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Sequences) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleSequence)
 	}
 
-	sq := strings.Join(prefixWithSchema(*gp.Schema, gp.Sequences), ",")
+	sq := strings.Join(prefixAndQuote(*gp.Schema, gp.Sequences), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
@@ -647,12 +683,12 @@ func createRoleSequence(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string
 	return nil
 }
 
-func createRoleRoutine(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createRoutineGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Routines) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleRoutine)
 	}
 
-	rt := strings.Join(quotedSignaturesWithSchema(*gp.Schema, gp.Routines), ",")
+	rt := strings.Join(quotedSignatures(*gp.Schema, gp.Routines), ",")
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
@@ -674,7 +710,7 @@ func createRoleRoutine(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string)
 	return nil
 }
 
-func createRoleForeignDataWrapper(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createForeignDataWrapperGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || len(gp.ForeignDataWrappers) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleForeignDataWrapper)
 	}
@@ -700,7 +736,7 @@ func createRoleForeignDataWrapper(gp v1alpha1.GrantParameters, ql *[]xsql.Query,
 	return nil
 }
 
-func createRoleForeignServer(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+func createForeignServerGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
 	if gp.Database == nil || len(gp.ForeignServers) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleForeignServer)
 	}
@@ -726,7 +762,7 @@ func createRoleForeignServer(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro s
 	return nil
 }
 
-func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nolint: gocyclo
 	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return err
@@ -758,21 +794,21 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	case v1alpha1.RoleTable:
 		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ","),
+			strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ","),
 			ro,
 		)
 		return nil
 	case v1alpha1.RoleSequence:
 		q.String = fmt.Sprintf("REVOKE %s ON SEQUENCE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(prefixWithSchema(*gp.Schema, gp.Sequences), ","),
+			strings.Join(prefixAndQuote(*gp.Schema, gp.Sequences), ","),
 			ro,
 		)
 		return nil
 	case v1alpha1.RoleRoutine:
 		q.String = fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(quotedSignaturesWithSchema(*gp.Schema, gp.Routines), ","),
+			strings.Join(quotedSignatures(*gp.Schema, gp.Routines), ","),
 			ro,
 		)
 		return nil
@@ -780,7 +816,7 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		q.String = fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			strings.Join(gp.Columns, ","),
-			strings.Join(prefixWithSchema(*gp.Schema, gp.Tables), ","),
+			strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ","),
 			ro,
 		)
 		return nil
@@ -805,35 +841,31 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 // signature returns routines with the same format as the select query
 func signature(r v1alpha1.Routine) string {
 	args := make([]string, len(r.Arguments))
-	for j, arg := range r.Arguments {
-		args[j] = strings.ToLower(arg)
+	for i, v := range r.Arguments {
+		args[i] = strings.ToLower(v)
 	}
 	return r.Name + "(" + strings.Join(args, ",") + ")"
 }
 
-// signature returns routines with grantable format
-func quotedSignaturesWithSchema(schema string, routines []v1alpha1.Routine) []string {
-	sh := pq.QuoteIdentifier(schema)
-	routinesWithSchema := make([]string, len(routines))
+// quotedSignatures returns routines in a quoted grantable format, prefixed with the schema
+func quotedSignatures(sc string, rs []v1alpha1.Routine) []string {
+	qsc := pq.QuoteIdentifier(sc)
+	sigs := make([]string, len(rs))
 
-	for i, routine := range routines {
-		args := make([]string, len(routine.Arguments))
-		for j, arg := range routine.Arguments {
-			args[j] = strings.ToUpper(arg)
-		}
-
-		routinesWithSchema[i] = sh + "." + pq.QuoteIdentifier(routine.Name) + "(" + strings.Join(args, ",") + ")"
+	for i, r := range rs {
+		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(r.Arguments, ",") + ")"
 	}
-	return routinesWithSchema
+	return sigs
 }
 
-func prefixWithSchema(schema string, objects []string) []string {
-	sh := pq.QuoteIdentifier(schema)
-	objectsWithSchema := make([]string, len(objects))
-	for i, object := range objects {
-		objectsWithSchema[i] = sh + "." + pq.QuoteIdentifier(object)
+// prefixAndQuote returns objects in a quoted grantable format, prefixed with the schema
+func prefixAndQuote(sc string, obj []string) []string {
+	qsc := pq.QuoteIdentifier(sc)
+	ret := make([]string, len(obj))
+	for i, v := range obj {
+		ret[i] = qsc + "." + pq.QuoteIdentifier(v)
 	}
-	return objectsWithSchema
+	return ret
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
