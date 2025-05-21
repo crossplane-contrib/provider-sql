@@ -334,6 +334,10 @@ spec:
                           type: string
                       type: object
                     type: array
+                  connectionLimit:
+                    description: ConnectionLimit represents the applied connectionlimit
+                    format: int32
+                    type: integer
                   privilegesAsClauses:
                     description: |-
                       PrivilegesAsClauses represents the applied privileges state, taking into account

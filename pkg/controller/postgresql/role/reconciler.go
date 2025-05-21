@@ -207,6 +207,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 			Replication: new(bool),
 			BypassRls:   new(bool),
 		},
+		ConnectionLimit: new(int32),
 	}
 
 	query := "SELECT " +
@@ -258,6 +259,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		observed.ConfigurationParameters = &rc
 	}
 	cr.Status.AtProvider.ConfigurationParameters = observed.ConfigurationParameters
+
+	cr.Status.AtProvider.ConnectionLimit = observed.ConnectionLimit
 
 	_, pwdChanged, err := c.getPassword(ctx, cr)
 	if err != nil {
@@ -405,10 +408,11 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		// Update state to reflect the current configuration parameters
 		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
 	}
-	cl := cr.Spec.ForProvider.ConnectionLimit
-	if cl != nil {
+	newCl := cr.Spec.ForProvider.ConnectionLimit
+	currCl := cr.Status.AtProvider.ConnectionLimit
+	if (newCl != nil && currCl != nil) && (int64(*currCl) != int64(*newCl)) {
 		if err := c.db.Exec(ctx, xsql.Query{
-			String: fmt.Sprintf("ALTER ROLE %s CONNECTION LIMIT %d", crn, int64(*cl)),
+			String: fmt.Sprintf("ALTER ROLE %s CONNECTION LIMIT %d", crn, int64(*newCl)),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
