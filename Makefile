@@ -23,17 +23,20 @@ NPROCS ?= 1
 # to half the number of CPU cores.
 GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 
+GOLANGCILINT_VERSION ?= 2.1.2
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_LDFLAGS += -X $(GO_PROJECT)/pkg/version.Version=$(VERSION)
 GO_SUBDIRS += cmd pkg apis
 GO111MODULE = on
-GOLANGCILINT_VERSION ?= 2.1.2
 -include build/makelib/golang.mk
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_NODE_IMAGE_TAG ?= v1.23.4
-DOCKER_REGISTRY ?= "xpkg.upbound.io"
+KIND_NODE_IMAGE_TAG ?= v1.30.13
+KIND_VERSION ?= v0.29.0
+KUBECTL_VERSION ?= v1.30.13
+CROSSPLANE_CLI_VERSION ?= v1.20.0
+DOCKER_REGISTRY ?= "xpkg.crossplane.io"
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================
@@ -45,10 +48,10 @@ IMAGES = provider-sql
 # ====================================================================================
 # Setup XPKG
 
-XPKG_REG_ORGS ?= xpkg.upbound.io/crossplane-contrib
+XPKG_REG_ORGS ?= xpkg.crossplane.io/crossplane-contrib
 # NOTE(hasheddan): skip promoting on xpkg.upbound.io as channel tags are
 # inferred.
-XPKG_REG_ORGS_NO_PROMOTE ?= xpkg.upbound.io/crossplane-contrib
+XPKG_REG_ORGS_NO_PROMOTE ?= xpkg.crossplane.io/crossplane-contrib
 XPKGS = provider-sql
 -include build/makelib/xpkg.mk
 
