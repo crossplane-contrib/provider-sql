@@ -36,7 +36,6 @@ KIND_NODE_IMAGE_TAG ?= v1.30.13
 KIND_VERSION ?= v0.29.0
 KUBECTL_VERSION ?= v1.30.13
 CROSSPLANE_CLI_VERSION ?= v1.20.0
-DOCKER_REGISTRY ?= "xpkg.crossplane.io"
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================
@@ -48,10 +47,10 @@ IMAGES = provider-sql
 # ====================================================================================
 # Setup XPKG
 
-XPKG_REG_ORGS ?= xpkg.crossplane.io/crossplane-contrib
+XPKG_REG_ORGS ?= xpkg.upbound.io/crossplane-contrib
 # NOTE(hasheddan): skip promoting on xpkg.upbound.io as channel tags are
 # inferred.
-XPKG_REG_ORGS_NO_PROMOTE ?= xpkg.crossplane.io/crossplane-contrib
+XPKG_REG_ORGS_NO_PROMOTE ?= xpkg.upbound.io/crossplane-contrib
 XPKGS = provider-sql
 -include build/makelib/xpkg.mk
 
