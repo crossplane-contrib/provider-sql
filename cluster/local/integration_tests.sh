@@ -220,7 +220,7 @@ cleanup_provider() {
   timeout=60
   current=0
   step=3
-  while [[ $(kubectl get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
+  while [[ $("${KUBECTL}" get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
     echo "waiting another $step seconds"
     current=$((current + step))
     if [[ $current -ge $timeout ]]; then
