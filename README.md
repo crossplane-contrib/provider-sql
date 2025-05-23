@@ -60,7 +60,7 @@ Check the example:
 2. Create managed resources for your SQL server flavor:
 
    - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
-   - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
+   - **PostgreSQL**: `Database`, `Schema`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
    - **MSSQL**: `Database`, `Grant`, `User` (See [the examples](examples/mssql))
 
 [crossplane]: https://crossplane.io
