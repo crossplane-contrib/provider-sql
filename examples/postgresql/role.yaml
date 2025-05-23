@@ -73,11 +73,4 @@ spec:
         value: '"$user",public'
   writeConnectionSecretToRef:
     name: example-parent-role-secret
-<<<<<<< HEAD
-<<<<<<< HEAD
     namespace: default
-=======
->>>>>>> 1a486d6 (Added new code to check the existing state of rolconnlimit in database before mutating it. This will help cut down the number of ALTER ROLE statements that would otherwise needlessly fire for each role.)
-=======
-    namespace: default
->>>>>>> refs/remotes/origin/master
