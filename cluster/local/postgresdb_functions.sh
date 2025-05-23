@@ -189,7 +189,7 @@ check_observe_only_database(){
   echo_step "check if observe only database is preserved after deletion"
 
   # Delete the database kubernetes object, it should not delete the database
-  kubectl delete database.postgresql.sql.crossplane.io db-observe
+  "${KUBECTL}" delete database.postgresql.sql.crossplane.io db-observe
 
   local datname
   datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
