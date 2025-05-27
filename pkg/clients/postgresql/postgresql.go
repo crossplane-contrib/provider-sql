@@ -23,31 +23,62 @@ type postgresDB struct {
 	dsn      string
 	endpoint string
 	port     string
-	sslmode  string
+	options  Options
+}
+
+type Options struct {
+	SSLMode     string
+	SSLCert     string
+	SSLKey      string
+	SSLRootCert string
+}
+
+func (o Options) queryString() string {
+	values := url.Values{}
+
+	if o.SSLMode != "" {
+		values.Add("sslmode", o.SSLMode)
+	}
+
+	if o.SSLCert != "" {
+		values.Add("sslcert", o.SSLCert)
+	}
+
+	if o.SSLKey != "" {
+		values.Add("sslkey", o.SSLKey)
+	}
+
+	if o.SSLRootCert != "" {
+		values.Add("sslrootcert", o.SSLRootCert)
+	}
+
+	return values.Encode()
 }
 
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
-// The sslmode defines the mode used to set up the connection for the provider.
-func New(creds map[string][]byte, database, sslmode string) xsql.DB {
+// The options provide additional settings to set up the connection for the
+// provider.
+func New(creds map[string][]byte, database string, options Options) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
 	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
-	dsn := DSN(username, password, endpoint, port, database, sslmode)
+
+	dsn := DSN(username, password, endpoint, port, database, options.queryString())
 
 	return postgresDB{
 		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
-		sslmode:  sslmode,
+		options:  options,
 	}
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, database, sslmode string) string {
+func DSN(username, password, endpoint, port, database, options string) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
@@ -57,7 +88,8 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 		endpoint + ":" +
 		port + "/" +
 		database +
-		"?sslmode=" + sslmode
+		"?" + options
+
 }
 
 // ExecTx executes an array of queries, committing if all are successful and
@@ -130,10 +162,13 @@ func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{})
 // GetConnectionDetails returns the connection details for a user of this DB
 func (c postgresDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
-		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
+		xpv1.ResourceCredentialsSecretUserKey:       []byte(username),
+		xpv1.ResourceCredentialsSecretPasswordKey:   []byte(password),
+		xpv1.ResourceCredentialsSecretEndpointKey:   []byte(c.endpoint),
+		xpv1.ResourceCredentialsSecretPortKey:       []byte(c.port),
+		xpv1.ResourceCredentialsSecretClientCertKey: []byte(c.options.SSLCert),
+		xpv1.ResourceCredentialsSecretClientKeyKey:  []byte(c.options.SSLKey),
+		xpv1.ResourceCredentialsSecretCAKey:         []byte(c.options.SSLRootCert),
 	}
 }
 

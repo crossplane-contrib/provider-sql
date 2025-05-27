@@ -38,6 +38,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -78,7 +79,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, options postgresql.Options) xsql.DB
 	}
 
 	type args struct {
