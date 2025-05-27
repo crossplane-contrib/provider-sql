@@ -19,6 +19,8 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 )
 
@@ -36,6 +38,24 @@ type ProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+	// Path to the certificate used for client authentication
+	// +kubebuilder:validation:Optional
+	SSLCert *string `json:"sslCert,omitempty"`
+	// Path to the key used for client authentication
+	// +kubebuilder:validation:Optional
+	SSLKey *string `json:"sslKey,omitempty"`
+	// Path to the CA certificate(s) used for verifying the server certificate
+	// +kubebuilder:validation:Optional
+	SSLRootCert *string `json:"sslRootCert,omitempty"`
+}
+
+func (s ProviderConfigSpec) Options() postgresql.Options {
+	return postgresql.Options{
+		SSLMode:     clients.ToString(s.SSLMode),
+		SSLCert:     clients.ToString(s.SSLCert),
+		SSLKey:      clients.ToString(s.SSLKey),
+		SSLRootCert: clients.ToString(s.SSLRootCert),
+	}
 }
 
 const (

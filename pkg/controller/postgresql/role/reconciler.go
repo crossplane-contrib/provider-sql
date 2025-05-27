@@ -42,7 +42,6 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -95,7 +94,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, options postgresql.Options) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -129,7 +128,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
+		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.Options()),
 		kube: c.kube,
 	}, nil
 }
