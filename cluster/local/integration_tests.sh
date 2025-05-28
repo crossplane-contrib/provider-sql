@@ -96,6 +96,15 @@ nodes:
   extraMounts:
   - hostPath: "${cache_path}/"
     containerPath: /cache
+  extraPortMappings:
+  - containerPort: 5432
+    hostPort: 5432
+  kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      extraArgs:
+        "service-node-port-range": "1-65535"
 EOF
   )"
   echo "${config}" | "${KIND}" create cluster --name="${K8S_CLUSTER}" --wait=5m --image="${node_image}" --config=-
