@@ -292,10 +292,10 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 
 	if len(authplugin) > 0 {
 		switch authplugin {
-			case "mysql_native_password", "caching_sha2_password":
-				authStm = fmt.Sprintf("WITH %s BY %s", authplugin, mysql.QuoteValue(pw))
-			case "AWSAuthenticationPlugin":
-				authStm = fmt.Sprintf("WITH %s AS %s", authplugin, mysql.QuoteValue("RDS"))
+		case "mysql_native_password", "caching_sha2_password":
+			authStm = fmt.Sprintf("WITH %s BY %s", authplugin, mysql.QuoteValue(pw))
+		case "AWSAuthenticationPlugin":
+			authStm = fmt.Sprintf("WITH %s AS %s", authplugin, mysql.QuoteValue("RDS"))
 		}
 	} else {
 		authStm = fmt.Sprintf("BY %s", mysql.QuoteValue(pw))
