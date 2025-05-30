@@ -100,6 +100,8 @@ type RoleConfigurationParameter struct {
 
 // A RoleObservation represents the observed state of a PostgreSQL role.
 type RoleObservation struct {
+	// ConnectionLimit represents the applied connectionlimit
+	ConnectionLimit *int32 `json:"connectionLimit,omitempty"`
 	// PrivilegesAsClauses represents the applied privileges state, taking into account
 	// any defaults applied by Postgres, and expressed as a list of ROLE PRIVILEGE clauses.
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
