@@ -71,7 +71,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte, database string, options postgresql.Options) xsql.DB
+		newDB func(creds map[string][]byte, database string, options postgresql.Options) (xsql.DB, error)
 	}
 
 	type args struct {

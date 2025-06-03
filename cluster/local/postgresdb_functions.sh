@@ -137,6 +137,33 @@ EOF
   "${KUBECTL}" patch providers.pkg.crossplane.io/provider-sql --type=json --patch='[{"op":"add","path":"/spec/runtimeConfigRef","value":{"name":"postgres-tls"}}]'
 }
 
+setup_provider_config_postgres_inline_tls() {
+  echo_step "creating ProviderConfig for PostgresDb with inline TLS"
+  local yaml="$(cat <<EOF
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      namespace: default
+      name: postgresdb-creds
+EOF
+  )"
+  echo "${yaml}" | "${KUBECTL}" apply -f -
+
+  # make use of the default debug-config DeploymentRuntimeConfig
+  "${KUBECTL}" patch providers.pkg.crossplane.io/provider-sql --type=json --patch='[{"op":"add","path":"/spec/runtimeConfigRef","value":{"name":"debug-config"}}]'
+
+  # add the clusterCA key from the postgresdb-postgresql-crt Secret created by
+  # Helm chart to the postgresdb-creds Secret
+  sslrootcert="$("${KUBECTL}" get secret postgresdb-postgresql-crt -o go-template='{{index .data "ca.crt"}}')"
+  "${KUBECTL}" patch secret postgresdb-creds --type='json' --patch='[{"op" : "add" ,"path" : "/data/clusterCA" ,"value" : "'"${sslrootcert}"'"}]'
+}
+
 setup_postgresdb_tests(){
 # install provider resources
 echo_step "creating PostgresDB Database resource"
@@ -306,6 +333,10 @@ delete_postgresdb_resources(){
 
   # make sure to delete the PVC, otherwise the password will be reused from the first installation
   "${KUBECTL}" delete --ignore-not-found=true pvc data-postgresdb-postgresql-0
+
+  "${KUBECTL}" delete --ignore-not-found=true service postgres-nodeport
+
+  "${KUBECTL}" delete --ignore-not-found=true secret -n crossplane-system postgresdb-postgresql-crt
 }
 
 integration_tests_postgres() {
@@ -329,4 +360,16 @@ integration_tests_postgres() {
     delete_postgresdb_resources
   }
   tls_tests
+
+  inline_tls_tests() {
+    local PGSSLMODE=require
+    setup_postgresdb_tls
+    setup_provider_config_postgres_inline_tls
+    check_tls_used
+    setup_observe_only_database
+    setup_postgresdb_tests
+    check_all_roles_privileges
+    delete_postgresdb_resources
+  }
+  inline_tls_tests
 }

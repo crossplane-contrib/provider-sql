@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"os"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -55,17 +56,59 @@ func (o Options) queryString() string {
 	return values.Encode()
 }
 
+func (o *Options) withSecretData(data map[string][]byte) error {
+	set := func(key string, to *string) error {
+		v, ok := data[key]
+
+		if !ok {
+			return nil
+		}
+
+		f, err := os.CreateTemp("", key)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		if _, err := f.Write(v); err != nil {
+			return err
+		}
+
+		*to = f.Name()
+
+		return nil
+	}
+
+	if err := set(xpv1.ResourceCredentialsSecretClientCertKey, &o.SSLCert); err != nil {
+		return err
+	}
+
+	if err := set(xpv1.ResourceCredentialsSecretClientKeyKey, &o.SSLKey); err != nil {
+		return err
+	}
+
+	if err := set(xpv1.ResourceCredentialsSecretCAKey, &o.SSLRootCert); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
 // The options provide additional settings to set up the connection for the
 // provider.
-func New(creds map[string][]byte, database string, options Options) xsql.DB {
+func New(data map[string][]byte, database string, options Options) (xsql.DB, error) {
 	// TODO(negz): Support alternative connection secret formats?
-	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
-	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
-	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	endpoint := string(data[xpv1.ResourceCredentialsSecretEndpointKey])
+	port := string(data[xpv1.ResourceCredentialsSecretPortKey])
+	username := string(data[xpv1.ResourceCredentialsSecretUserKey])
+	password := string(data[xpv1.ResourceCredentialsSecretPasswordKey])
+
+	if err := options.withSecretData(data); err != nil {
+		return nil, err
+	}
 
 	dsn := DSN(username, password, endpoint, port, database, options.queryString())
 
@@ -74,7 +117,7 @@ func New(creds map[string][]byte, database string, options Options) xsql.DB {
 		endpoint: endpoint,
 		port:     port,
 		options:  options,
-	}
+	}, nil
 }
 
 // DSN returns the DSN URL

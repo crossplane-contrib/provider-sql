@@ -47,10 +47,11 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errGetPC            = "cannot get ProviderConfig"
+	errNoSecretRef      = "ProviderConfig does not reference a credentials Secret"
+	errGetSecret        = "cannot get credentials Secret"
+	errCreateConnection = "cannot configure connection"
 
 	errNotRole                 = "managed resource is not a Role custom resource"
 	errSelectRole              = "cannot select role"
@@ -94,7 +95,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, database string, options postgresql.Options) xsql.DB
+	newDB func(creds map[string][]byte, database string, options postgresql.Options) (xsql.DB, error)
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -127,8 +128,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	db, err := c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.Options())
+	if err != nil {
+		return nil, errors.Wrap(err, errCreateConnection)
+	}
+
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, pc.Spec.Options()),
+		db:   db,
 		kube: c.kube,
 	}, nil
 }
