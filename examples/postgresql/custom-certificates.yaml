@@ -1,0 +1,51 @@
+---
+# This DeploymentRuntimeConfig will mount files embedded in a Secret to the
+# provider Pod, this allows accessing those files as paths on in the options,
+# e.g. when using custom TLS CA certificates or keys
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: postgres-custom-tls
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              volumeMounts:
+                - mountPath: /certs/postgres
+                  name: postgresql-tls
+                  readOnly: true
+          volumes:
+            - name: postgresql-tls
+              secret:
+                # Name of the secret containing the files
+                secretName: postgresdb-postgresql-crt
+                defaultMode: 420
+---
+# The DeploymentRuntimeConfig must be referenced in the Provider configuration
+# for it to be effective
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-sql
+spec:
+  runtimeConfigRef:
+    name: postgres-custom-tls
+  package: xpkg.upbound.io/crossplane-contrib/provider-sql:v0.13.0
+---
+# The configuration can now point to the /certs/postgres/ca.crt, ca.crt being
+# the key in the postgresdb-postgresql-crt Secret referenced above
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  sslRootCert: /certs/postgres/ca.crt
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      namespace: default
+      name: postgresdb-creds

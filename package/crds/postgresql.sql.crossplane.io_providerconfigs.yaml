@@ -84,6 +84,12 @@ spec:
                   Defines the database name used to set up a connection to the provided
                   PostgreSQL instance. Same as PGDATABASE environment variable.
                 type: string
+              sslCert:
+                description: Path to the certificate used for client authentication
+                type: string
+              sslKey:
+                description: Path to the key used for client authentication
+                type: string
               sslMode:
                 default: verify-full
                 description: |-
@@ -94,6 +100,10 @@ spec:
                 - require
                 - verify-ca
                 - verify-full
+                type: string
+              sslRootCert:
+                description: Path to the CA certificate(s) used for verifying the
+                  server certificate
                 type: string
             required:
             - credentials
