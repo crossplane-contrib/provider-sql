@@ -64,9 +64,9 @@ func main() {
 
 		// print log output to stdout
 		azlog.SetListener(func(event azlog.Event, s string) {
-			log.Debug(s) //fmt.Println(s)
+			log.Debug(s)
 		})
-		
+
 		// include only azidentity credential logs
 		azlog.SetEvents(azidentity.EventAuthentication)
 	}

@@ -165,6 +165,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	default:
 		return managed.ExternalObservation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
+	}
 
 	var name string
 	err := c.userDB.Scan(ctx, xsql.Query{
@@ -205,7 +206,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	switch userType {
 	case v1alpha1.UserTypeExternal:
-		return c.createEntraIDUser(ctx, cr)
+		return c.createExternalUser(ctx, cr)
 	case v1alpha1.UserTypePassword:
 		return c.createPasswordUser(ctx, cr)
 	default:

@@ -548,11 +548,6 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 		*out = new(v1.SecretKeySelector)
 		**out = **in
 	}
-	if in.Type != nil {
-		in, out := &in.Type, &out.Type
-		*out = new(string)
-		**out = **in
-	}
 	if in.LoginDatabase != nil {
 		in, out := &in.LoginDatabase, &out.LoginDatabase
 		*out = new(string)
@@ -567,6 +562,11 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 		in, out := &in.LoginDatabaseSelector, &out.LoginDatabaseSelector
 		*out = new(v1.Selector)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.Type != nil {
+		in, out := &in.Type, &out.Type
+		*out = new(string)
+		**out = **in
 	}
 }
 
