@@ -151,7 +151,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
-	userType := v1alpha1.UserTypePassword
+	userType := v1alpha1.UserTypeLocal
 	if cr.Spec.ForProvider.Type != nil {
 		userType = *cr.Spec.ForProvider.Type
 	}
@@ -159,9 +159,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	var query string
 
 	switch userType {
-	case v1alpha1.UserTypeExternal:
+	case v1alpha1.UserTypeAD:
 		query = "SELECT name FROM sys.database_principals WHERE type IN ('E','X') AND name = @p1"
-	case v1alpha1.UserTypePassword:
+	case v1alpha1.UserTypeLocal:
 		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	default:
 		return managed.ExternalObservation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
@@ -199,22 +199,22 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
 
-	userType := v1alpha1.UserTypePassword
+	userType := v1alpha1.UserTypeLocal
 	if cr.Spec.ForProvider.Type != nil {
 		userType = *cr.Spec.ForProvider.Type
 	}
 
 	switch userType {
-	case v1alpha1.UserTypeExternal:
-		return c.createExternalUser(ctx, cr)
-	case v1alpha1.UserTypePassword:
-		return c.createPasswordUser(ctx, cr)
+	case v1alpha1.UserTypeAD:
+		return c.createADUser(ctx, cr)
+	case v1alpha1.UserTypeLocal:
+		return c.createLocalUser(ctx, cr)
 	default:
 		return managed.ExternalCreation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 	}
 }
 
-func (c *external) createExternalUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
+func (c *external) createADUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
 	externalProviderUserQuery := fmt.Sprintf("CREATE USER %s FROM EXTERNAL PROVIDER", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
 	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: externalProviderUserQuery,
@@ -227,7 +227,7 @@ func (c *external) createExternalUser(ctx context.Context, cr *v1alpha1.User) (m
 	}, nil
 }
 
-func (c *external) createPasswordUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
+func (c *external) createLocalUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
 	pw, _, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -264,7 +264,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	if t := cr.Spec.ForProvider.Type; t == nil || *t == v1alpha1.UserTypePassword {
+	if t := cr.Spec.ForProvider.Type; t == nil || *t == v1alpha1.UserTypeLocal {
 		pw, changed, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalUpdate{}, err

@@ -254,8 +254,8 @@ spec:
                     - namespace
                     type: object
                   type:
-                    description: The type of user to create.  Defaults to Password.  Can
-                      be either Password or External.
+                    description: The type of user to create.  Defaults to Local.  Can
+                      be either Local or AD.
                     type: string
                 type: object
               managementPolicies:

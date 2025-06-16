@@ -7,6 +7,6 @@ metadata:
     crossplane.io/external-name: "example-user@example-domain.com"
 spec:
   forProvider:
-    type: External
+    type: AD
     databaseRef:
       name: example-db-ad
