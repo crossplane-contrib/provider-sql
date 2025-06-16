@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -33,6 +33,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
@@ -60,14 +61,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.GrantGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.GrantGroupVersionKind),
+	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: mssql.New}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
-
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+	}
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1alpha1.GrantGroupVersionKind),
+		reconcilerOptions...,
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.Grant{}).
@@ -114,7 +121,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		db:   c.newClient(s.Data, pointer.StringPtrDerefOr(cr.Spec.ForProvider.Database, "")),
+		db:   c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, "")),
 		kube: c.kube,
 	}, nil
 }
@@ -130,7 +137,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotGrant)
 	}
 
-	permissions, err := c.getPermissions(ctx, *cr.Spec.ForProvider.User)
+	permissions, err := c.getPermissions(ctx, cr)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -156,7 +163,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	username := *cr.Spec.ForProvider.User
 	permissions := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
 
-	query := fmt.Sprintf("GRANT %s TO %s", permissions, mssql.QuoteIdentifier(username))
+	query := fmt.Sprintf("GRANT %s %s TO %s", permissions, onSchemaQuery(cr), mssql.QuoteIdentifier(username))
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errGrant)
 }
 
@@ -166,7 +173,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotGrant)
 	}
 
-	observed, err := c.getPermissions(ctx, *cr.Spec.ForProvider.User)
+	observed, err := c.getPermissions(ctx, cr)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
@@ -175,16 +182,16 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
-		query := fmt.Sprintf("REVOKE %s FROM %s",
-			strings.Join(toRevoke, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+		query := fmt.Sprintf("REVOKE %s %s FROM %s",
+			strings.Join(toRevoke, ", "), onSchemaQuery(cr), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errRevoke)
 		}
 	}
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
-		query := fmt.Sprintf("GRANT %s TO %s",
-			strings.Join(toGrant, ", "), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+		query := fmt.Sprintf("GRANT %s %s TO %s",
+			strings.Join(toGrant, ", "), onSchemaQuery(cr), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errGrant)
 		}
@@ -200,23 +207,47 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	username := *cr.Spec.ForProvider.User
 
-	query := fmt.Sprintf("REVOKE %s FROM %s",
+	query := fmt.Sprintf("REVOKE %s %s FROM %s",
 		strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", "),
+		onSchemaQuery(cr),
 		mssql.QuoteIdentifier(username),
 	)
 	return errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errRevoke)
 }
 
-func (c *external) getPermissions(ctx context.Context, username string) ([]string, error) {
-	// TODO(turkenh/ulucinar): Possible performance improvement. We first
-	//  calculate the Cartesian product, and then filter. It would be more
-	//  efficient to first filter principals by name, and then join.
-	query := fmt.Sprintf(`SELECT pe.permission_name
-	FROM sys.database_principals AS pr  
-	JOIN sys.database_permissions AS pe  
-	    ON pe.grantee_principal_id = pr.principal_id  
+// TODO(turkenh/ulucinar): Possible performance improvement. We first
+//
+//	calculate the Cartesian product, and then filter. It would be more
+//	efficient to first filter principals by name, and then join.
+const queryPermissionDefault = `SELECT pe.permission_name
+	FROM sys.database_principals AS pr
+	JOIN sys.database_permissions AS pe
+	    ON pe.grantee_principal_id = pr.principal_id
 	WHERE
-	  pr.name = %s`, mssql.QuoteValue(username))
+	      pe.class = 0 /* DATABASE (default) */
+	  AND pr.name = %s`
+
+const queryPermissionSchema = `SELECT pe.permission_name
+	FROM sys.database_principals AS pr
+	JOIN sys.database_permissions AS pe
+	    ON pe.grantee_principal_id = pr.principal_id
+	JOIN sys.schemas AS s
+	    ON s.schema_id = pe.major_id
+	WHERE
+	      pe.class = 3 /* SCHEMA */
+	  AND s.name = %s
+	  AND pr.name = %s`
+
+func (c *external) getPermissions(ctx context.Context, cr *v1alpha1.Grant) ([]string, error) {
+	var query string
+	if cr.Spec.ForProvider.Schema == nil {
+		query = fmt.Sprintf(queryPermissionDefault, mssql.QuoteValue(*cr.Spec.ForProvider.User))
+	} else {
+		query = fmt.Sprintf(queryPermissionSchema,
+			mssql.QuoteValue(*cr.Spec.ForProvider.Schema),
+			mssql.QuoteValue(*cr.Spec.ForProvider.User),
+		)
+	}
 	rows, err := c.db.Query(ctx, xsql.Query{String: query})
 	if err != nil {
 		return nil, errors.Wrap(err, errCannotGetGrants)
@@ -235,6 +266,13 @@ func (c *external) getPermissions(ctx context.Context, username string) ([]strin
 		return nil, errors.Wrap(err, errCannotGetGrants)
 	}
 	return permissions, nil
+}
+
+func onSchemaQuery(cr *v1alpha1.Grant) (schema string) {
+	if cr.Spec.ForProvider.Schema != nil {
+		schema = fmt.Sprintf("ON SCHEMA::%s", *cr.Spec.ForProvider.Schema)
+	}
+	return
 }
 
 func diffPermissions(desired, observed []string) ([]string, []string) {

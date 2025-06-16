@@ -23,21 +23,19 @@ NPROCS ?= 1
 # to half the number of CPU cores.
 GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 
+GOLANGCILINT_VERSION ?= 2.1.2
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_LDFLAGS += -X $(GO_PROJECT)/pkg/version.Version=$(VERSION)
 GO_SUBDIRS += cmd pkg apis
 GO111MODULE = on
 -include build/makelib/golang.mk
 
-# kind-related versions
-KIND_VERSION ?= v0.12.0
-KIND_NODE_IMAGE_TAG ?= v1.23.4
-
 # ====================================================================================
 # Setup Kubernetes tools
-
-UP_VERSION = v0.18.0
-UP_CHANNEL = stable
+KIND_NODE_IMAGE_TAG ?= v1.30.13
+KIND_VERSION ?= v0.29.0
+KUBECTL_VERSION ?= v1.30.13
+CROSSPLANE_CLI_VERSION ?= v1.20.0
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================
@@ -45,7 +43,6 @@ UP_CHANNEL = stable
 
 IMAGES = provider-sql
 -include build/makelib/imagelight.mk
-
 
 # ====================================================================================
 # Setup XPKG
@@ -87,7 +84,7 @@ generate: crds.clean
 e2e.run: test-integration
 
 # Run integration tests.
-test-integration: $(KIND) $(KUBECTL) $(UP) $(HELM3)
+test-integration: $(KIND) $(KUBECTL) $(UP) $(HELM)
 	@$(INFO) running integration tests using kind $(KIND_VERSION)
 	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
 	@$(OK) integration tests passed
@@ -124,7 +121,7 @@ dev: $(KIND) $(KUBECTL)
 	@$(KIND) create cluster --name=$(PROJECT_NAME)-dev
 	@$(KUBECTL) cluster-info --context kind-$(PROJECT_NAME)-dev
 	@$(INFO) Installing Crossplane CRDs
-	@$(KUBECTL) apply -k https://github.com/crossplane/crossplane//cluster?ref=master
+	@$(KUBECTL) apply --server-side -k https://github.com/crossplane/crossplane//cluster?ref=master
 	@$(INFO) Installing Provider SQL CRDs
 	@$(KUBECTL) apply -R -f package/crds
 	@$(INFO) Starting Provider SQL controllers

@@ -1,0 +1,86 @@
+name: Comment Commands
+
+on: issue_comment
+
+jobs:
+  points:
+    runs-on: ubuntu-24.04
+    if: startsWith(github.event.comment.body, '/points')
+
+    steps:
+    - name: Extract Command
+      id: command
+      uses: xt0rted/slash-command-action@bf51f8f5f4ea3d58abc7eca58f77104182b23e88 # v2.0.0
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        command: points
+        reaction: "true"
+        reaction-type: "eyes"
+        allow-edits: "false"
+        permission-level: write
+    - name: Handle Command
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      env:
+        POINTS: ${{ steps.command.outputs.command-arguments }}
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const points = process.env.POINTS
+
+          if (isNaN(parseInt(points))) {
+            console.log("Malformed command - expected '/points <int>'")
+            github.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: "confused"
+            })
+            return
+          }
+          const label = "points/" + points
+
+          // Delete our needs-points-label label.
+          try {
+            await github.issues.deleteLabel({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: ['needs-points-label']
+            })
+            console.log("Deleted 'needs-points-label' label.")
+          }
+          catch(e) {
+            console.log("Label 'needs-points-label' probably didn't exist.")
+          }
+
+          // Add our points label.
+          github.issues.addLabels({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: [label]
+          })
+          console.log("Added '" + label + "' label.")
+
+  # NOTE(negz): See also backport.yml, which is the variant that triggers on PR
+  # merge rather than on comment.
+  backport:
+    runs-on: ubuntu-24.04
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/backport')
+    steps:
+    - name: Extract Command
+      id: command
+      uses: xt0rted/slash-command-action@865ee04a1dfc8aa2571513eee8e84b5377153511 # v1
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        command: backport
+        reaction: "true"
+        reaction-type: "eyes"
+        allow-edits: "false"
+        permission-level: write
+
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Open Backport PR
+      uses: korthout/backport-action@bd68141f079bd036e45ea8149bc9d174d5a04703 # v1

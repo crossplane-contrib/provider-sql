@@ -29,7 +29,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
@@ -51,15 +51,19 @@ type mockDB struct {
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
 	return m.MockExec(ctx, q)
 }
+
 func (m mockDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	return m.MockExecTx(ctx, ql)
 }
+
 func (m mockDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 	return m.MockScan(ctx, q, dest...)
 }
+
 func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	return m.MockQuery(ctx, q)
 }
+
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return m.MockGetConnectionDetails(username, password)
 }
@@ -70,7 +74,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		usage resource.Tracker
-		newDB func(creds map[string][]byte, tls *string) xsql.DB
+		newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 	}
 
 	type args struct {
@@ -228,8 +232,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -249,8 +253,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -276,8 +280,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("no-user"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("no-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -304,8 +308,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
@@ -337,7 +341,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							User:       pointer.StringPtr("success-user"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT", "GRANT OPTION"},
 						},
 					},
@@ -373,8 +377,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT", "GRANT OPTION"},
 						},
 					},
@@ -410,8 +414,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("diff-user"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("diff-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP"},
 						},
 					},
@@ -441,7 +445,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							User:       pointer.StringPtr("success-user"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -472,7 +476,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							User:       pointer.StringPtr("success-user"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -502,8 +506,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -534,7 +538,7 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							User:       pointer.StringPtr("success-user"),
+							User:       ptr.To("success-user"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -565,9 +569,9 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
-							Table:      pointer.StringPtr("success-table"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("success-user"),
+							Table:      ptr.To("success-table"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP", "CREATE"},
 						},
 					},
@@ -598,9 +602,9 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("success-db"),
-							User:       pointer.StringPtr("success-user"),
-							Table:      pointer.StringPtr("success-table"),
+							Database:   ptr.To("success-db"),
+							User:       ptr.To("success-user"),
+							Table:      ptr.To("success-table"),
 							Privileges: v1alpha1.GrantPrivileges{"INSERT", "CREATE"},
 						},
 					},
@@ -687,8 +691,8 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -708,8 +712,8 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
 						},
 					},
@@ -730,7 +734,7 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							User:       pointer.StringPtr("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"INSERT", "SELECT"},
 						},
 					},
@@ -758,8 +762,8 @@ func TestCreate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
 						},
 					},
@@ -834,8 +838,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CREATE"},
 						},
 					},
@@ -867,8 +871,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CREATE", "SELECT"},
 						},
 					},
@@ -896,8 +900,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
 						},
 					},
@@ -930,8 +934,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"CREATE", "DROP"},
 						},
 					},
@@ -964,8 +968,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"DROP"},
 						},
 					},
@@ -999,8 +1003,8 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database:   pointer.StringPtr("test-example"),
-							User:       pointer.StringPtr("test-example"),
+							Database:   ptr.To("test-example"),
+							User:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"GRANT OPTION", "ALL"},
 						},
 					},
@@ -1070,8 +1074,8 @@ func TestDelete(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -1084,8 +1088,8 @@ func TestDelete(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -1103,8 +1107,8 @@ func TestDelete(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ForProvider: v1alpha1.GrantParameters{
-							Database: pointer.StringPtr("test-example"),
-							User:     pointer.StringPtr("test-example"),
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-example"),
 						},
 					},
 				},
@@ -1226,11 +1230,11 @@ func Test_diffPermissions(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			gotToGrant, gotToRevoke := diffPermissions(tc.args.desired, tc.args.observed)
-			if diff := cmp.Diff(tc.want.toGrant, gotToGrant, equateSlices()...); diff != "" {
+			gotToGrant, gotToRevoke := diffPermissions(tc.desired, tc.observed)
+			if diff := cmp.Diff(tc.toGrant, gotToGrant, equateSlices()...); diff != "" {
 				t.Errorf("\ndiffPermissions(...): -want toGrant, +got toGrant:\n%s", diff)
 			}
-			if diff := cmp.Diff(tc.want.toRevoke, gotToRevoke, equateSlices()...); diff != "" {
+			if diff := cmp.Diff(tc.toRevoke, gotToRevoke, equateSlices()...); diff != "" {
 				t.Errorf("\ndiffPermissions(...): -want toRevoke, +got toRevoke:\n%s", diff)
 			}
 		})

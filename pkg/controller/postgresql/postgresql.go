@@ -26,6 +26,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/extension"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/grant"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/role"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/schema"
 )
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds
@@ -37,6 +38,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		role.Setup,
 		grant.Setup,
 		extension.Setup,
+		schema.Setup,
 	} {
 		if err := setup(mgr, o); err != nil {
 			return err

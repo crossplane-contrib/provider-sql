@@ -12,6 +12,32 @@ managed resources, this provider reconciles its managed resources every 10 minut
 
 It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
+## Install
+
+Install the provider by using the following command after changing the image tag to the [latest release](https://marketplace.upbound.io/providers/crossplane-contrib/provider-sql/):
+
+```bash
+cat << EOF | kubectl apply -f -
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-sql
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/provider-sql:v0.9.0
+EOF
+```
+
+Alternatively, you can use Crossplane CLI:
+```bash
+up ctp provider install xpkg.upbound.io/crossplane-contrib/provider-sql:v0.9.0
+```
+
+Check the example:
+
+- [Provider](./examples/provider.yaml)
+- [deploymentRuntimeConfig](./examples/deploymentRuntimeConfig.yaml)
+
+
 ## Usage
 
 1. Create a connection secret:
@@ -31,7 +57,7 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
      --from-literal=port=3306
    ```
 
-2. Create managed resource for your SQL server flavor:
+2. Create managed resources for your SQL server flavor:
 
    - **MySQL**: `Database`, `Grant`, `User` (See [the examples](examples/mysql))
    - **PostgreSQL**: `Database`, `Grant`, `Extension`, `Role` (See [the examples](examples/postgresql))
@@ -45,7 +71,7 @@ It currently supports **MySQL**, **PostgreSQL** and **MSSQL**.
 
 1. Fork the project and clone locally.
 2. Create a branch with the changes.
-3. Install go version 1.17.
+3. Install go version 1.18.
 4. Run `make` to initialize the "build". Make submodules used for CI/CD.
 5. Run `make reviewable` to run code generation, linters, and tests.
 6. Commit, push, and PR.

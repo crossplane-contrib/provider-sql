@@ -31,6 +31,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/password"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -39,6 +40,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/tls"
 )
 
 const (
@@ -46,6 +48,7 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+	errTLSConfig    = "cannot load TLS config"
 
 	errNotUser                 = "managed resource is not a User custom resource"
 	errSelectUser              = "cannot select user"
@@ -63,13 +66,19 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
+	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
-
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+	}
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
+		reconcilerOptions...,
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.User{}).
@@ -82,7 +91,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, tls *string) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -97,8 +106,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
+	providerConfigName := cr.GetProviderConfigReference().Name
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -115,8 +125,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, errTLSConfig)
+	}
+
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.TLS),
+		db:   c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }
@@ -251,8 +266,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	binlog := cr.Spec.ForProvider.BinLog
-	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw, binlog); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -265,7 +279,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
-func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string, binlog *bool) error {
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string) error {
 	resourceOptions := ""
 	if len(resourceOptionsClauses) != 0 {
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
@@ -279,7 +293,7 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 		resourceOptions,
 	)
 
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}); err != nil {
 		return err
 	}
 
@@ -303,14 +317,13 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(rochanged) > 0 {
 		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
-		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf(
 			"ALTER USER %s@%s %s",
 			mysql.QuoteValue(username),
 			mysql.QuoteValue(host),
 			resourceOptions,
 		)
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 
@@ -336,9 +349,8 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 	}
 
 	if pwchanged {
-		binlog := cr.Spec.ForProvider.BinLog
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
-		if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
 			return managed.ConnectionDetails{}, err
 		}
 
@@ -358,9 +370,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 
-	binlog := cr.Spec.ForProvider.BinLog
 	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
-	if err := mysql.ExecWithBinlogAndFlush(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}, mysql.ExecOptions{Binlog: binlog}); err != nil {
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}); err != nil {
 		return err
 	}
 

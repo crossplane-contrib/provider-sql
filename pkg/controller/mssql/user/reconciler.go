@@ -23,7 +23,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -31,6 +31,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
+	"github.com/crossplane/crossplane-runtime/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/password"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
@@ -67,13 +68,19 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
+	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newClient: mssql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
-
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+	}
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
+		reconcilerOptions...,
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.User{}).
@@ -119,15 +126,23 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	userDB := c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.Database, ""))
+	loginDB := userDB
+	if cr.Spec.ForProvider.LoginDatabase != nil {
+		loginDB = c.newClient(s.Data, ptr.Deref(cr.Spec.ForProvider.LoginDatabase, ""))
+	}
+
 	return &external{
-		db:   c.newClient(s.Data, pointer.StringPtrDerefOr(cr.Spec.ForProvider.Database, "")),
-		kube: c.kube,
+		userDB:  userDB,
+		loginDB: loginDB,
+		kube:    c.kube,
 	}, nil
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	userDB  xsql.DB
+	loginDB xsql.DB
+	kube    client.Client
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
@@ -136,27 +151,26 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.New(errNotUser)
 	}
 
-	var name string
-	var query string
-	var userType string
-	if cr.Spec.ForProvider.Type == nil {
-		userType = v1alpha1.UserTypeLocal
-	} else {
+	userType := v1alpha1.UserTypePassword
+	if cr.Spec.ForProvider.Type != nil {
 		userType = *cr.Spec.ForProvider.Type
 	}
+
+	var query string
+
 	switch userType {
-	case v1alpha1.UserTypeAD:
+	case v1alpha1.UserTypeExternal:
 		query = "SELECT name FROM sys.database_principals WHERE type IN ('E','X') AND name = @p1"
-	case v1alpha1.UserTypeLocal:
-		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
-	case v1alpha1.UserTypeLocalContained:
+	case v1alpha1.UserTypePassword:
 		query = "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	default:
 		return managed.ExternalObservation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
 
-	}
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{
-		meta.GetExternalName(cr)},
+	var name string
+	err := c.userDB.Scan(ctx, xsql.Query{
+		String: query, Parameters: []interface{}{
+			meta.GetExternalName(cr),
+		},
 	}, &name)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
@@ -183,76 +197,63 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotUser)
 	}
-	var outPw string
-	var userType string
-	if cr.Spec.ForProvider.Type == nil {
-		userType = v1alpha1.UserTypeLocal
-	} else {
+
+	userType := v1alpha1.UserTypePassword
+	if cr.Spec.ForProvider.Type != nil {
 		userType = *cr.Spec.ForProvider.Type
 	}
+
 	switch userType {
-	case v1alpha1.UserTypeAD:
-		externalProviderUserQuery := fmt.Sprintf("CREATE USER %s FROM EXTERNAL PROVIDER", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: externalProviderUserQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
-		}
-	
-	case v1alpha1.UserTypeLocal:
-		pw, _, err := c.getPassword(ctx, cr)
-		if err != nil {
-			return managed.ExternalCreation{}, err
-		}
-		if pw == "" {
-			pw, err = password.Generate()
-			if err != nil {
-				return managed.ExternalCreation{}, err
-			}
-		}
-		outPw = pw
-
-		loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: loginQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
-		}
-	
-		userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: userQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
-		}
-
-	case v1alpha1.UserTypeLocalContained:
-		pw, _, err := c.getPassword(ctx, cr)
-		if err != nil {
-			return managed.ExternalCreation{}, err
-		}
-		if pw == "" {
-			pw, err = password.Generate()
-			if err != nil {
-				return managed.ExternalCreation{}, err
-			}
-		}
-		outPw = pw
-
-		userQuery := fmt.Sprintf("CREATE USER %s WITH PASSWORD = %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-		if err := c.db.Exec(ctx, xsql.Query{
-			String: userQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
-		}
-		
+	case v1alpha1.UserTypeExternal:
+		return c.createEntraIDUser(ctx, cr)
+	case v1alpha1.UserTypePassword:
+		return c.createPasswordUser(ctx, cr)
 	default:
 		return managed.ExternalCreation{}, errors.Errorf("Type '%s' is not valid", *cr.Spec.ForProvider.Type)
+	}
+}
 
+func (c *external) createExternalUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
+	externalProviderUserQuery := fmt.Sprintf("CREATE USER %s FROM EXTERNAL PROVIDER", mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	if err := c.userDB.Exec(ctx, xsql.Query{
+		String: externalProviderUserQuery,
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, errCreateUser)
 	}
 
 	return managed.ExternalCreation{
-		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), outPw),
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), ""),
+	}, nil
+}
+
+func (c *external) createPasswordUser(ctx context.Context, cr *v1alpha1.User) (managed.ExternalCreation, error) {
+	pw, _, err := c.getPassword(ctx, cr)
+	if err != nil {
+		return managed.ExternalCreation{}, err
+	}
+	if pw == "" {
+		pw, err = password.Generate()
+		if err != nil {
+			return managed.ExternalCreation{}, err
+		}
+	}
+
+	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+	if err := c.loginDB.Exec(ctx, xsql.Query{
+		String: loginQuery,
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
+	}
+
+	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	if err := c.userDB.Exec(ctx, xsql.Query{
+		String: userQuery,
+	}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
+	}
+
+	return managed.ExternalCreation{
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
 	}, nil
 }
 
@@ -262,23 +263,22 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, errors.New(errNotUser)
 	}
 
-	if t := cr.Spec.ForProvider.Type; t == nil || *t == v1alpha1.UserTypeLocal {
+	if t := cr.Spec.ForProvider.Type; t == nil || *t == v1alpha1.UserTypePassword {
 		pw, changed, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalUpdate{}, err
 		}
 
-		// TODO: Need to support alterning contained users.
 		if changed {
 			query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
-			if err := c.db.Exec(ctx, xsql.Query{
+			if err := c.loginDB.Exec(ctx, xsql.Query{
 				String: query,
 			}); err != nil {
 				return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 			}
 
 			return managed.ExternalUpdate{
-				ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+				ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
 			}, nil
 		}
 	}
@@ -291,9 +291,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.New(errNotUser)
 	}
 
-	// TODO: Need to support alterning contained users.
 	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
-	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
 	if err != nil {
 		return errors.Wrap(err, errCannotGetLogins)
 	}
@@ -304,7 +303,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		if err := rows.Scan(&sessionID); err != nil {
 			return errors.Wrap(err, errCannotGetLogins)
 		}
-		if err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
+		if err := c.userDB.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
 			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
 		}
 	}
@@ -312,13 +311,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		return errors.Wrap(err, errCannotGetLogins)
 	}
 
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
 		return errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
 	}
 
-	if err := c.db.Exec(ctx, xsql.Query{
+	if err := c.loginDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
 		return errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))
