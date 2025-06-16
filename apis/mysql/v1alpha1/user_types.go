@@ -54,7 +54,7 @@ type UserParameters struct {
 	// Supported values: "mysql_native_password", "caching_sha2_password", "AWSAuthenticationPlugin".
 	// +kubebuilder:validation:Enum=mysql_native_password;caching_sha2_password;AWSAuthenticationPlugin
 	// +optional
-	AuthPlugin string `json:"authPlugin,omitempty,"`
+	AuthPlugin string `json:"authPlugin,omitempty"`
 }
 
 // ResourceOptions define the account specific resource limits.
