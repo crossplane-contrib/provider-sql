@@ -241,8 +241,6 @@ spec:
                 - name
                 - namespace
                 type: object
-            required:
-            - forProvider
             type: object
           status:
             description: A DatabaseStatus represents the observed state of a Database.

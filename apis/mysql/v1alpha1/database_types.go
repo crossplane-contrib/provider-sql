@@ -25,7 +25,8 @@ import (
 // A DatabaseSpec defines the desired state of a Database.
 type DatabaseSpec struct {
 	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DatabaseParameters `json:"forProvider"`
+	// +optional
+	ForProvider DatabaseParameters `json:"forProvider"`
 }
 
 // A DatabaseStatus represents the observed state of a Database.
