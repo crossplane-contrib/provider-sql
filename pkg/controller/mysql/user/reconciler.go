@@ -266,7 +266,10 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw); err != nil {
+
+	authplugin := cr.Spec.ForProvider.AuthPlugin
+
+	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw, authplugin); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -279,17 +282,30 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	}, nil
 }
 
-func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string) error {
+func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, pw string, authplugin string) error {
 	resourceOptions := ""
 	if len(resourceOptionsClauses) != 0 {
 		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
 	}
 
+	var authStm string
+
+	if len(authplugin) > 0 {
+		switch authplugin {
+		case "mysql_native_password", "caching_sha2_password":
+			authStm = fmt.Sprintf("WITH %s BY %s", authplugin, mysql.QuoteValue(pw))
+		case "AWSAuthenticationPlugin":
+			authStm = fmt.Sprintf("WITH %s AS %s", authplugin, mysql.QuoteValue("RDS"))
+		}
+	} else {
+		authStm = fmt.Sprintf("BY %s", mysql.QuoteValue(pw))
+	}
+
 	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED BY %s%s",
+		"CREATE USER %s@%s IDENTIFIED %s%s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
-		mysql.QuoteValue(pw),
+		authStm,
 		resourceOptions,
 	)
 
