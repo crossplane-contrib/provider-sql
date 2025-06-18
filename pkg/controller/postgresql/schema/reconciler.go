@@ -37,16 +37,16 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errGetPC            = "cannot get ProviderConfig"
+	errNoSecretRef      = "ProviderConfig does not reference a credentials Secret"
+	errGetSecret        = "cannot get credentials Secret"
+	errCreateConnection = "cannot configure connection"
 
 	errNotSchema    = "managed resource is not a Schema custom resource"
 	errSelectSchema = "cannot select schema"
@@ -88,7 +88,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, options postgresql.Options) (xsql.DB, error)
 }
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
@@ -125,7 +125,12 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.New(errNoDatabase)
 	}
 
-	return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+	db, err := c.newDB(s.Data, *cr.Spec.ForProvider.Database, pc.Spec.Options())
+	if err != nil {
+		return nil, errors.Wrap(err, errCreateConnection)
+	}
+
+	return &external{db}, nil
 }
 
 type external struct{ db xsql.DB }
