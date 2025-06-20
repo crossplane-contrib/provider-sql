@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -20,6 +21,8 @@ const (
 )
 
 type postgresDB struct {
+	db       *sql.DB
+	err      error
 	dsn      string
 	endpoint string
 	port     string
@@ -38,12 +41,44 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
 	dsn := DSN(username, password, endpoint, port, database, sslmode)
 
+	db, err := openDB(dsn, true)
+
 	return postgresDB{
+		db:       db,
+		err:      err,
 		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
 		sslmode:  sslmode,
 	}
+}
+
+// openDB returns a new database connection
+func openDB(dsn string, setLimits bool) (*sql.DB, error) {
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	// Since we are now using connection pooling, establish some sensible defaults for connections
+	// Ideally these parameters would be set in the config section for the provider, but that
+	// can be deferred to a later time.
+	if setLimits {
+		db.SetMaxOpenConns(5)
+		db.SetMaxIdleConns(2)
+		db.SetConnMaxIdleTime(2 * time.Minute)
+		db.SetConnMaxLifetime(10 * time.Minute)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
 
 // DSN returns the DSN URL
@@ -63,12 +98,16 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 // ExecTx executes an array of queries, committing if all are successful and
 // rolling back immediately on failure.
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	if c.db == nil || c.err != nil {
+		return c.err
+	}
+
+	err := c.db.PingContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	tx, err := d.BeginTx(ctx, nil)
+	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -76,7 +115,6 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	// Rollback or Commit based on error state. Defer close in defer to make
 	// sure the connection is always closed.
 	defer func() {
-		defer d.Close() //nolint:errcheck
 		if err != nil {
 			tx.Rollback() //nolint:errcheck
 			return
@@ -94,37 +132,46 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	if c.db == nil || c.err != nil {
+		return c.err
+	}
+
+	err := c.db.PingContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer d.Close() //nolint:errcheck
 
-	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
+	_, err = c.db.ExecContext(ctx, q.String, q.Parameters...)
 	return err
 }
 
 // Query the supplied query.
 func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("postgres", c.dsn)
+	if c.err != nil || c.db == nil {
+		return nil, c.err
+	}
+
+	err := c.db.PingContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer d.Close() //nolint:errcheck
 
-	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
+	rows, err := c.db.QueryContext(ctx, q.String, q.Parameters...)
 	return rows, err
 }
 
 // Scan the results of the supplied query into the supplied destination.
 func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("postgres", c.dsn)
+	if c.db == nil || c.err != nil {
+		return c.err
+	}
+
+	err := c.db.PingContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer db.Close() //nolint:errcheck
 
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
+	return c.db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB

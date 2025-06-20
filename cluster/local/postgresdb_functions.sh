@@ -116,6 +116,46 @@ check_role_privileges() {
     fi
 }
 
+check_all_conn_limits() {
+  # check if the role connection limit is working properly
+  echo_step "check if role connection update is working"
+
+  TARGET_DB='db1'
+  PARENT_ROLE='parent-role'
+  USER_ROLE='example-role'
+
+  roles="$PARENT_ROLE $USER_ROLE"
+  conn_limits="12 -1"
+
+  # Iterate over roles and expected connection limits 
+  role_index=1
+  for role in $roles; do
+      expected_limits=$(echo "$conn_limits" | cut -d ' ' -f $role_index)
+      check_role_limits "$role" "$expected_limits" "${postgres_root_pw}" "$TARGET_DB"
+      role_index=$((role_index + 1))
+  done
+
+  echo_step_completed
+}
+
+check_role_limits() {
+    local role=$1
+    local expected_limits=$2
+    local target_db=$4
+
+    echo_info "Checking connection limits for role: $role (expected: $expected_limits)"
+    echo ""
+    result=$(PGPASSWORD="$3" psql -h localhost -p 5432 -U postgres -d postgres -wtAc" SELECT rolconnlimit FROM pg_roles WHERE rolname = '$role' " | tr '\n' ',' | sed 's/,$//')
+
+    if [ "$result" = "$expected_limits" ]; then
+        echo_info "Connection limits for $role are as expected: $result"
+        echo ""
+    else
+        echo_error "ERROR: Connection limits for $role do not match expected. Found: $result, Expected: $expected_limits"
+        echo ""
+    fi
+}
+
 check_schema_privileges(){
   # check if schema privileges are set properly
   echo_step "check if schema privileges are set properly"
@@ -149,7 +189,7 @@ check_observe_only_database(){
   echo_step "check if observe only database is preserved after deletion"
 
   # Delete the database kubernetes object, it should not delete the database
-  kubectl delete database.postgresql.sql.crossplane.io db-observe
+  "${KUBECTL}" delete database.postgresql.sql.crossplane.io db-observe
 
   local datname
   datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
@@ -196,6 +236,7 @@ integration_tests_postgres() {
   setup_postgresdb_tests
   check_observe_only_database
   check_all_roles_privileges
+  check_all_conn_limits
   check_schema_privileges
   delete_postgresdb_resources
 }
