@@ -7,7 +7,7 @@ require (
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/crossplane/crossplane-runtime v1.16.0
 	github.com/crossplane/crossplane-tools v0.0.0-20240522174801-1ad3d4c87f21
-	github.com/denisenkom/go-mssqldb v0.11.0
+	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/google/go-cmp v0.7.0
 	github.com/lib/pq v1.10.9
@@ -40,6 +40,7 @@ require (
 	github.com/gobuffalo/flect v1.0.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
