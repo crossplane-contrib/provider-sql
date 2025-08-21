@@ -21,9 +21,9 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql"
 )
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds

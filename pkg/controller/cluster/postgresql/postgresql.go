@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Crossplane Authors.
+Copyright 2020 The Crossplane Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,27 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package mssql
+package postgresql
 
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/config"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/database"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/grant"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql/user"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/config"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/extension"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/grant"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/role"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/schema"
 )
 
-// Setup creates all MSSQL controllers with the supplied logger and adds
+// Setup creates all PostgreSQL controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, o controller.Options) error {
 	for _, setup := range []func(ctrl.Manager, controller.Options) error{
 		config.Setup,
 		database.Setup,
-		user.Setup,
+		role.Setup,
 		grant.Setup,
+		extension.Setup,
+		schema.Setup,
 	} {
 		if err := setup(mgr, o); err != nil {
 			return err

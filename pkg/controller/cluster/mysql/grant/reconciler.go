@@ -41,7 +41,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql/tls"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql/tls"
 )
 
 const (
