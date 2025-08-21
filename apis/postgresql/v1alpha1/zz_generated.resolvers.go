@@ -19,7 +19,7 @@ package v1alpha1
 
 import (
 	"context"
-	reference "github.com/crossplane/crossplane-runtime/pkg/reference"
+	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 	errors "github.com/pkg/errors"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -34,6 +34,7 @@ func (mg *Schema) ResolveReferences(ctx context.Context, c client.Reader) error 
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.RoleRef,
 		Selector:     mg.Spec.ForProvider.RoleSelector,
 		To: reference.To{
@@ -50,6 +51,7 @@ func (mg *Schema) ResolveReferences(ctx context.Context, c client.Reader) error 
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
 		To: reference.To{

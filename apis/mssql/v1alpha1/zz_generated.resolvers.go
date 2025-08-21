@@ -19,7 +19,7 @@ package v1alpha1
 
 import (
 	"context"
-	reference "github.com/crossplane/crossplane-runtime/pkg/reference"
+	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 	errors "github.com/pkg/errors"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -34,6 +34,7 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.UserRef,
 		Selector:     mg.Spec.ForProvider.UserSelector,
 		To: reference.To{
@@ -50,6 +51,7 @@ func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
 		To: reference.To{
@@ -76,6 +78,7 @@ func (mg *User) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.DatabaseRef,
 		Selector:     mg.Spec.ForProvider.DatabaseSelector,
 		To: reference.To{
@@ -92,6 +95,7 @@ func (mg *User) ResolveReferences(ctx context.Context, c client.Reader) error {
 	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
 		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.LoginDatabase),
 		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
 		Reference:    mg.Spec.ForProvider.LoginDatabaseRef,
 		Selector:     mg.Spec.ForProvider.LoginDatabaseSelector,
 		To: reference.To{

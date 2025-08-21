@@ -19,7 +19,8 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
+	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 )
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
@@ -53,6 +54,8 @@ type ProviderConfigStatus struct {
 	xpv1.ProviderConfigStatus `json:",inline"`
 }
 
+var _ resource.ProviderConfig = &ProviderConfig{}
+
 // +kubebuilder:object:root=true
 
 // A ProviderConfig configures a SQL provider.
@@ -68,6 +71,8 @@ type ProviderConfig struct {
 	Status ProviderConfigStatus `json:"status,omitempty"`
 }
 
+var _ resource.ProviderConfig = &ProviderConfig{}
+
 // +kubebuilder:object:root=true
 
 // ProviderConfigList contains a list of ProviderConfig.
@@ -76,6 +81,8 @@ type ProviderConfigList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ProviderConfig `json:"items"`
 }
+
+// var _ resource.ProviderConfigList = &ProviderConfigList{}
 
 // +kubebuilder:object:root=true
 
@@ -92,6 +99,8 @@ type ProviderConfigUsage struct {
 	xpv1.ProviderConfigUsage `json:",inline"`
 }
 
+var _ resource.LegacyProviderConfigUsage = &ProviderConfigUsage{}
+
 // +kubebuilder:object:root=true
 
 // ProviderConfigUsageList contains a list of ProviderConfigUsage
@@ -100,3 +109,15 @@ type ProviderConfigUsageList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ProviderConfigUsage `json:"items"`
 }
+
+var _ resource.ProviderConfigUsageList = &ProviderConfigUsageList{}
+
+// type ProviderUsageTracker struct {
+// }
+
+// var _ resource.ProviderConfigUsageTracker = &ProviderUsageTracker{}
+
+// type LegacyProviderConfigUsageTracker struct {
+// }
+
+// var _ resource.LegacyProviderConfigUsageTracker = &LegacyProviderConfigUsageTracker{}
