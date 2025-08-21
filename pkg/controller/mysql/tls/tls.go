@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"

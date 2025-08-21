@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"

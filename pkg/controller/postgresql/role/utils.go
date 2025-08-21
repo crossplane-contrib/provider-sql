@@ -27,7 +27,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
-	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 )
 
 func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd string, changed bool, err error) {

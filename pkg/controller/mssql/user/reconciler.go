@@ -37,7 +37,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
-	"github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )

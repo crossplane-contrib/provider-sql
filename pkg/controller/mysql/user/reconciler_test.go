@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"

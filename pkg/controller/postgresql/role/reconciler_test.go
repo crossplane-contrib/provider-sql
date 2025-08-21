@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/lib/pq"
