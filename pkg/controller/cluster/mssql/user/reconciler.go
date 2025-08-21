@@ -63,13 +63,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles User managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newClient: mssql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newClient: mssql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -96,7 +110,9 @@ type connector struct {
 	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return nil, errors.New(errNotUser)
@@ -144,6 +160,8 @@ type external struct {
 	loginDB xsql.DB
 	kube    client.Client
 }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.User)
@@ -241,43 +259,47 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return errors.New(errNotUser)
+		return managed.ExternalDelete{}, errors.New(errNotUser)
 	}
 
 	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
 	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
 	if err != nil {
-		return errors.Wrap(err, errCannotGetLogins)
+		return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
 	}
 	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
 		var sessionID int
 		if err := rows.Scan(&sessionID); err != nil {
-			return errors.Wrap(err, errCannotGetLogins)
+			return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
 		}
 		if err := c.userDB.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
-			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
+			return managed.ExternalDelete{}, errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return errors.Wrap(err, errCannotGetLogins)
+		return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
 	}
 
 	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
-		return errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
+		return managed.ExternalDelete{}, errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
 	}
 
 	if err := c.loginDB.Exec(ctx, xsql.Query{
 		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
 	}); err != nil {
-		return errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))
+		return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))
 	}
 
-	return nil
+	return managed.ExternalDelete{}, nil
 }

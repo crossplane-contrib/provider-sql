@@ -55,13 +55,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles Extension managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.ExtensionGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -88,7 +102,9 @@ type connector struct {
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.Extension)
 	if !ok {
 		return nil, errors.New(errNotExtension)
@@ -128,6 +144,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 }
 
 type external struct{ db xsql.DB }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Extension)
@@ -197,14 +215,18 @@ func (c *external) Update(_ context.Context, mg resource.Managed) (managed.Exter
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.Extension)
 	if !ok {
-		return errors.New(errNotExtension)
+		return managed.ExternalDelete{}, errors.New(errNotExtension)
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION IF EXISTS " + pq.QuoteIdentifier(cr.Spec.ForProvider.Extension)})
-	return errors.Wrap(err, errDropExtension)
+	return managed.ExternalDelete{}, errors.Wrap(err, errDropExtension)
 }
 
 func upToDate(observed, desired v1alpha1.ExtensionParameters) bool {

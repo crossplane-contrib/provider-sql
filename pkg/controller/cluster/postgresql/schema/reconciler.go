@@ -58,13 +58,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles Schema managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.SchemaGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -85,13 +99,15 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
 type connector struct {
 	kube  client.Client
 	usage resource.Tracker
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.Schema)
 	if !ok {
 		return nil, errors.New(errNotSchema)
@@ -128,7 +144,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
 }
 
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
+
 type external struct{ db xsql.DB }
+
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Schema)
@@ -201,14 +223,14 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, errors.Wrap(err, errAlterSchema)
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.Schema)
 	if !ok {
-		return errors.New(errNotSchema)
+		return managed.ExternalDelete{}, errors.New(errNotSchema)
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: "DROP SCHEMA IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(err, errDropSchema)
+	return managed.ExternalDelete{}, errors.Wrap(err, errDropSchema)
 }
 
 func upToDate(observed, desired v1alpha1.SchemaParameters) bool {

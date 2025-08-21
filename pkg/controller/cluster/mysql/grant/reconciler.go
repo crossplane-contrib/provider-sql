@@ -65,13 +65,27 @@ var (
 	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (\S+)\.(\S+) TO \S+@\S+?(\sWITH GRANT OPTION)?$`)
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles Grant managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.GrantGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: mysql.New}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
@@ -99,7 +113,9 @@ type connector struct {
 	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
 		return nil, errors.New(errNotGrant)
@@ -135,16 +151,12 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{
-		db:   c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog),
-		kube: c.kube,
-	}, nil
+	return &external{db: c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog)}, nil
 }
 
-type external struct {
-	db   xsql.DB
-	kube client.Client
-}
+type external struct{ db xsql.DB }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Grant)
@@ -367,10 +379,14 @@ func createGrantQuery(privileges, dbname, username, host, table string, grantOpt
 	return result
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
-		return errors.New(errNotGrant)
+		return managed.ExternalDelete{}, errors.New(errNotGrant)
 	}
 
 	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
@@ -384,13 +400,13 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 		var myErr *mysqldriver.MySQLError
 		if errors.As(err, &myErr) && myErr.Number == errCodeNoSuchGrant {
 			// MySQL automatically deletes related grants if the user has been deleted
-			return nil
+			return managed.ExternalDelete{}, nil
 		}
 
-		return err
+		return managed.ExternalDelete{}, err
 	}
 
-	return nil
+	return managed.ExternalDelete{}, nil
 }
 
 func diffPermissions(desired, observed []string) ([]string, []string) {

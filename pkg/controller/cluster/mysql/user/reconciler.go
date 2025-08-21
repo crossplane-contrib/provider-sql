@@ -61,13 +61,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles User managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.UserGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: mysql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -94,7 +108,9 @@ type connector struct {
 	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
 		return nil, errors.New(errNotUser)
@@ -140,6 +156,8 @@ type external struct {
 	db   xsql.DB
 	kube client.Client
 }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
 
 func handleClause(clause string, value *int, out *[]string) {
 	// If clause is not set (nil pointer), do not push a setting.
@@ -360,10 +378,14 @@ func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, userna
 	return managed.ConnectionDetails{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.User)
 	if !ok {
-		return errors.New(errNotUser)
+		return managed.ExternalDelete{}, errors.New(errNotUser)
 	}
 
 	cr.SetConditions(xpv1.Deleting())
@@ -372,10 +394,10 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}); err != nil {
-		return err
+		return managed.ExternalDelete{}, err
 	}
 
-	return nil
+	return managed.ExternalDelete{}, nil
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {

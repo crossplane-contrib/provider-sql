@@ -18,7 +18,6 @@ package database
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -36,7 +35,6 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	clusterv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
-	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -58,13 +56,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(clusterv1alpha1.DatabaseGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &clusterv1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &clusterv1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newClient: mssql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newClient: mssql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -91,7 +103,9 @@ type connector struct {
 	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*clusterv1alpha1.Database)
 	if !ok {
 		return nil, errors.New(errNotDatabase)
@@ -125,6 +139,14 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 }
 
 type external struct{ db xsql.DB }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
+
+func (c *external) Disconnect(ctx context.Context) error {
+	// Do we need to implement this? Clean up any db connections?
+	// The xsql.DB interface does not have a Disconnect method.
+	return nil
+}
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*clusterv1alpha1.Database)
@@ -169,97 +191,12 @@ func (c *external) Update(_ context.Context, _ resource.Managed) (managed.Extern
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*clusterv1alpha1.Database)
 	if !ok {
-		return errors.New(errNotDatabase)
+		return managed.ExternalDelete{}, errors.New(errNotDatabase)
 	}
 
 	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mssql.QuoteIdentifier(meta.GetExternalName(cr))})
-	return errors.Wrap(err, errDropDB)
-}
-
-func toSharedPCSpec(pc *clusterv1alpha1.ProviderConfig) (*namespacedv1alpha1.ProviderConfigSpec, error) {
-	if pc == nil {
-		return nil, nil
-	}
-	data, err := json.Marshal(pc.Spec)
-	if err != nil {
-		return nil, err
-	}
-
-	var mSpec namespacedv1alpha1.ProviderConfigSpec
-	err = json.Unmarshal(data, &mSpec)
-	return &mSpec, err
-}
-
-func resolveProviderConfig(ctx context.Context, crClient client.Client, mg resource.Managed) (*namespacedv1alpha1.ProviderConfigSpec, error) {
-	switch managed := mg.(type) {
-	case resource.LegacyManaged:
-		return resolveLegacy(ctx, crClient, managed)
-	case resource.ModernManaged:
-		return resolveV2(ctx, crClient, managed)
-	default:
-		return nil, errors.New("resource is not a managed")
-	}
-}
-
-func resolveLegacy(ctx context.Context, client client.Client, mg resource.LegacyManaged) (*namespacedv1alpha1.ProviderConfigSpec, error) {
-	configRef := mg.GetProviderConfigReference()
-	if configRef == nil {
-		return nil, errors.New(errNoProviderConfig)
-	}
-	pc := &clusterv1alpha1.ProviderConfig{}
-	if err := client.Get(ctx, types.NamespacedName{Name: configRef.Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetProviderConfig)
-	}
-
-	t := resource.NewLegacyProviderConfigUsageTracker(client, &clusterv1alpha1.ProviderConfigUsage{})
-	if err := t.Track(ctx, mg); err != nil {
-		return nil, errors.Wrap(err, errTrackUsage)
-	}
-
-	return toSharedPCSpec(pc)
-}
-
-func resolveV2(ctx context.Context, crClient client.Client, mg resource.ModernManaged) (*namespacedv1alpha1.ProviderConfigSpec, error) {
-	configRef := mg.GetProviderConfigReference()
-	if configRef == nil {
-		return nil, errors.New(errNoProviderConfig)
-	}
-
-	pcRuntimeObj, err := crClient.Scheme().New(namespacedv1alpha1.SchemeGroupVersion.WithKind(configRef.Kind))
-	if err != nil {
-		return nil, errors.Wrap(err, "unknown GVK for ProviderConfig")
-	}
-	pcObj, ok := pcRuntimeObj.(client.Object)
-	if !ok {
-		// This indicates a programming error, types are not properly generated
-		return nil, errors.New("pc is not an Object")
-	}
-
-	// Namespace will be ignored if the PC is a cluster-scoped type
-	if err := crClient.Get(ctx, types.NamespacedName{Name: configRef.Name, Namespace: mg.GetNamespace()}, pcObj); err != nil {
-		return nil, errors.Wrap(err, errGetProviderConfig)
-	}
-
-	var pcSpec namespacedv1alpha1.ProviderConfigSpec
-	pcu := &namespacedv1alpha1.ProviderConfigUsage{}
-	switch pc := pcObj.(type) {
-	case *namespacedv1alpha1.ProviderConfig:
-		pcSpec = pc.Spec
-		if pcSpec.Credentials.ConnectionSecretRef != nil {
-			pcSpec.Credentials.ConnectionSecretRef.Namespace = mg.GetNamespace()
-		}
-	case *namespacedv1alpha1.ClusterProviderConfig:
-		pcSpec = pc.Spec
-	default:
-		// TODO(erhan)
-		return nil, errors.New("unknown")
-	}
-	t := resource.NewProviderConfigUsageTracker(crClient, pcu)
-	if err := t.Track(ctx, mg); err != nil {
-		return nil, errors.Wrap(err, errTrackUsage)
-	}
-	return &pcSpec, nil
+	return managed.ExternalDelete{}, errors.Wrap(err, errDropDB)
 }

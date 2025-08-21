@@ -21,18 +21,18 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql"
+	clustermssql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
+	clustermysql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
+	clusterpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql"
 )
 
-// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// Setup creates all controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, l controller.Options) error {
 	for _, setup := range []func(ctrl.Manager, controller.Options) error{
-		mssql.Setup,
-		mysql.Setup,
-		postgresql.Setup,
+		clustermssql.Setup,
+		clustermysql.Setup,
+		clusterpostgresql.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err

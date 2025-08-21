@@ -64,13 +64,27 @@ const (
 	maxConcurrency = 5
 )
 
+// TODO(nateinaction): This looks wrong, can tracker creation be improved?
+type tracker struct {
+	tracker *resource.LegacyProviderConfigUsageTracker
+}
+
+var _ resource.Tracker = &tracker{}
+
+func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
+	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
+}
+
 // Setup adds a controller that reconciles Grant managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.GrantGroupKind)
 
-	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	// This can only be a legacy tracker
+	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
+	trk := &tracker{tracker: t}
+
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithExternalConnector(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -97,7 +111,9 @@ type connector struct {
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
+var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+
+func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
 		return nil, errors.New(errNotGrant)
@@ -136,6 +152,8 @@ type external struct {
 	db   xsql.DB
 	kube client.Client
 }
+
+var _ managed.TypedExternalClient[resource.Managed] = &external{}
 
 type grantType string
 
@@ -382,10 +400,14 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
 	cr, ok := mg.(*v1alpha1.Grant)
 	if !ok {
-		return errors.New(errNotGrant)
+		return managed.ExternalDelete{}, errors.New(errNotGrant)
 	}
 	var query xsql.Query
 
@@ -393,8 +415,8 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 
 	err := deleteGrantQuery(cr.Spec.ForProvider, &query)
 	if err != nil {
-		return errors.Wrap(err, errRevokeGrant)
+		return managed.ExternalDelete{}, errors.Wrap(err, errRevokeGrant)
 	}
 
-	return errors.Wrap(c.db.Exec(ctx, query), errRevokeGrant)
+	return managed.ExternalDelete{}, errors.Wrap(c.db.Exec(ctx, query), errRevokeGrant)
 }
