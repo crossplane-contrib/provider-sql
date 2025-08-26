@@ -1,0 +1,28 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Schema
+metadata:
+  name: my-schema
+  namespace: default
+spec:
+  forProvider:
+    databaseRef:
+      name: example
+    roleRef:
+      name: example-role
+  providerConfigRef:
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Schema
+metadata:
+  name: public
+  namespace: default
+spec:
+  forProvider:
+    revokePublicOnSchema: true
+    databaseRef:
+      name: db1
+    roleRef:
+      name: ownerrole
+  providerConfigRef:
+    name: default

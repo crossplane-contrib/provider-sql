@@ -24,6 +24,9 @@ import (
 	clustermssql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
 	clustermysql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
 	clusterpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql"
+	namespacedmssql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mssql"
+	namespacedmysql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mysql"
+	namespacedpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql"
 )
 
 // Setup creates all controllers with the supplied logger and adds
@@ -33,6 +36,9 @@ func Setup(mgr ctrl.Manager, l controller.Options) error {
 		clustermssql.Setup,
 		clustermysql.Setup,
 		clusterpostgresql.Setup,
+		namespacedmssql.Setup,
+		namespacedmysql.Setup,
+		namespacedpostgresql.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
