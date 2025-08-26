@@ -74,7 +74,7 @@ func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
-	name := managed.ControllerName(namespacedv1alpha1.GrantGroupKind)
+	name := managed.ControllerName(namespacedv1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
 	trk := &tracker{tracker: t}
