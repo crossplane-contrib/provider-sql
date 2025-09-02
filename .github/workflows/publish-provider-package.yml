@@ -1,0 +1,26 @@
+name: Publish Provider Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string to use while publishing the package (e.g. v1.0.0-alpha.1)"
+        default: ''
+        required: false
+      go-version:
+        description: 'Go version to use if building needs to be done'
+        default: '1.23'
+        required: false
+
+jobs:
+  publish-provider-package:
+    uses: crossplane-contrib/provider-workflows/.github/workflows/publish-provider-non-family.yml@d736839d853a03083eb1aac9af4825f11321c88c
+    with:
+      repository: provider-sql
+      version: ${{ github.event.inputs.version }}
+      go-version: ${{ github.event.inputs.go-version }}
+      cleanup-disk: true
+    secrets:
+      GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
+      XPKG_MIRROR_TOKEN: ${{ secrets.XPKG_TOKEN }}
+      XPKG_MIRROR_ACCESS_ID: ${{ secrets.XPKG_ACCESS_ID }}
