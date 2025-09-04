@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -40,12 +39,12 @@ type SchemaParameters struct {
 	// RoleRef references the role object this schema is for.
 	// +immutable
 	// +optional
-	RoleRef *common.Reference `json:"roleRef,omitempty"`
+	RoleRef *xpv1.NamespacedReference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this schema is for.
 	// +immutable
 	// +optional
-	RoleSelector *common.Selector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv1.NamespacedSelector `json:"roleSelector,omitempty"`
 
 	// Database this schema is for.
 	// +optional
@@ -55,12 +54,12 @@ type SchemaParameters struct {
 	// DatabaseRef references the database object this schema is for.
 	// +immutable
 	// +optional
-	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this schema is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// RevokePublicOnSchema apply a "REVOKE ALL ON SCHEMA public FROM public" statement
 	// +optional

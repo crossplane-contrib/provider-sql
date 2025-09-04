@@ -43,9 +43,9 @@ type UserParameters struct {
 	Database *string `json:"database,omitempty"`
 	// DatabaseRef allows you to specify custom resource name of the Database the USER is created for.
 	// to fill Database field.
-	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
 	// DatabaseSelector allows you to use selector constraints to select a Database the USER is created for.
-	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
@@ -55,9 +55,9 @@ type UserParameters struct {
 	LoginDatabase *string `json:"loginDatabase,omitempty"`
 	// DatabaseRef allows you to specify custom resource name of the Database to be used to create the user LOGIN in (normally master).
 	// to fill Database field.
-	LoginDatabaseRef *common.Reference `json:"loginDatabaseRef,omitempty"`
+	LoginDatabaseRef *xpv1.NamespacedReference `json:"loginDatabaseRef,omitempty"`
 	// DatabaseSelector allows you to use selector constraints to select a Database to be used to create the user LOGIN in (normally master).
-	LoginDatabaseSelector *common.Selector `json:"loginDatabaseSelector,omitempty"`
+	LoginDatabaseSelector *xpv1.NamespacedSelector `json:"loginDatabaseSelector,omitempty"`
 }
 
 // A UserObservation represents the observed state of a MSSQL user.

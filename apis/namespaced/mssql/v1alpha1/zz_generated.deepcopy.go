@@ -10,6 +10,7 @@ package v1alpha1
 
 import (
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
+	"github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -210,12 +211,12 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 	}
 	if in.UserRef != nil {
 		in, out := &in.UserRef, &out.UserRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.UserSelector != nil {
 		in, out := &in.UserSelector, &out.UserSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Database != nil {
@@ -225,12 +226,12 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 }
@@ -550,12 +551,12 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.PasswordSecretRef != nil {
@@ -570,12 +571,12 @@ func (in *UserParameters) DeepCopyInto(out *UserParameters) {
 	}
 	if in.LoginDatabaseRef != nil {
 		in, out := &in.LoginDatabaseRef, &out.LoginDatabaseRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.LoginDatabaseSelector != nil {
 		in, out := &in.LoginDatabaseSelector, &out.LoginDatabaseSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 }

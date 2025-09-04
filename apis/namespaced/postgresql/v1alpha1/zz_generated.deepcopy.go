@@ -10,6 +10,7 @@ package v1alpha1
 
 import (
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
+	"github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -967,12 +968,12 @@ func (in *SchemaParameters) DeepCopyInto(out *SchemaParameters) {
 	}
 	if in.RoleRef != nil {
 		in, out := &in.RoleRef, &out.RoleRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.RoleSelector != nil {
 		in, out := &in.RoleSelector, &out.RoleSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Database != nil {
@@ -982,12 +983,12 @@ func (in *SchemaParameters) DeepCopyInto(out *SchemaParameters) {
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(common.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(common.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.RevokePublicOnSchema != nil {
