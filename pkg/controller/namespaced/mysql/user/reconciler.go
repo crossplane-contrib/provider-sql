@@ -123,7 +123,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 	// DefaultProviderConfig initializer will set it before we get here.
 	providerConfigName := cr.GetProviderConfigReference().Name
 	pc := &namespacedv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName, Namespace: mg.GetNamespace()}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
