@@ -32,7 +32,9 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
@@ -120,8 +122,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{},
 						},
 					},
 				},
@@ -142,8 +144,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{},
 						},
 					},
 				},
@@ -157,7 +159,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -169,8 +171,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{},
 						},
 					},
 				},
@@ -298,8 +300,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password",
@@ -307,8 +309,8 @@ func TestObserve(t *testing.T) {
 							Privileges:      v1alpha1.RolePrivilege{},
 							ConnectionLimit: ptr.To(int32(10)),
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -500,8 +502,8 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
@@ -589,15 +591,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
 								Name: "password-secret",
 							},
 						},
@@ -653,15 +655,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -696,15 +698,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -769,8 +771,8 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
@@ -821,8 +823,8 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
@@ -875,8 +877,8 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
@@ -942,8 +944,8 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
@@ -1006,8 +1008,8 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
 									Name: "connection-secret",
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,

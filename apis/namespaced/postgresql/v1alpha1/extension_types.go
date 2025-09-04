@@ -20,11 +20,13 @@ import (
 	"context"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	client "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
-	"github.com/pkg/errors"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	errors "github.com/pkg/errors"
 )
 
 // ExtensionParameters are the configurable fields of a Extension.
@@ -48,18 +50,18 @@ type ExtensionParameters struct {
 	// DatabaseRef references the database object this extension is for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this extension is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
 }
 
 // ExtensionSpec defines the desired state of an Extension.
 type ExtensionSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       ExtensionParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	ForProvider              ExtensionParameters `json:"forProvider"`
 }
 
 // A ExtensionStatus represents the observed state of a Extension.

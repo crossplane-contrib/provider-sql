@@ -19,18 +19,21 @@ package v1alpha1
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 )
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       GrantParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	// +optional
+	ForProvider GrantParameters `json:"forProvider"`
 }
 
 // GrantPrivilege represents a privilege to be granted
@@ -68,12 +71,12 @@ type GrantParameters struct {
 	// UserRef references the user object this grant is for.
 	// +immutable
 	// +optional
-	UserRef *xpv1.Reference `json:"userRef,omitempty"`
+	UserRef *common.Reference `json:"userRef,omitempty"`
 
 	// UserSelector selects a reference to a User this grant is for.
 	// +immutable
 	// +optional
-	UserSelector *xpv1.Selector `json:"userSelector,omitempty"`
+	UserSelector *common.Selector `json:"userSelector,omitempty"`
 
 	// Tables this grant is for, default *.
 	// +optional
@@ -86,12 +89,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
 
 	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
 	// +optional

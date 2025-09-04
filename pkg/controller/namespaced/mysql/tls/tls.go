@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -17,7 +17,14 @@ import (
 
 // LoadConfig loads the TLS configuration when tls mode is set to custom and
 // returns the tls name of registered configuration.
-func LoadConfig(ctx context.Context, kube client.Client, providerConfigName string, mode *string, cfg *namespacedv1alpha1.TLSConfig) (*string, error) {
+func LoadConfig(
+	ctx context.Context,
+	kube client.Client,
+	providerConfigName string,
+	mode *string,
+	cfg *namespacedv1alpha1.TLSConfig,
+	namespace string,
+) (*string, error) {
 	if mode == nil || *mode != "custom" {
 		if cfg != nil {
 			return nil, fmt.Errorf("tlsConfig is allowed only when tls=custom")
@@ -30,7 +37,7 @@ func LoadConfig(ctx context.Context, kube client.Client, providerConfigName stri
 	}
 
 	tlsName := fmt.Sprintf("custom-%s", providerConfigName)
-	err := registerTLS(ctx, kube, tlsName, cfg)
+	err := registerTLS(ctx, kube, tlsName, cfg, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -50,12 +57,12 @@ func validateTLSConfig(cfg *namespacedv1alpha1.TLSConfig) error {
 	return nil
 }
 
-func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *namespacedv1alpha1.TLSConfig) error {
+func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *namespacedv1alpha1.TLSConfig, namespace string) error {
 	if cfg == nil {
 		return nil
 	}
 
-	caCert, err := getSecret(ctx, kube, cfg.CACert.SecretRef)
+	caCert, err := getSecret(ctx, kube, cfg.CACert.SecretRef, namespace)
 	if err != nil {
 		return fmt.Errorf("cannot get CA certificate: %w", err)
 	}
@@ -65,7 +72,7 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 		return fmt.Errorf("cannot append CA certificate to pool")
 	}
 
-	keyPair, err := getClientKeyPair(ctx, kube, cfg)
+	keyPair, err := getClientKeyPair(ctx, kube, cfg, namespace)
 	if err != nil {
 		return err
 	}
@@ -77,13 +84,13 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 	})
 }
 
-func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1alpha1.TLSConfig) (tls.Certificate, error) {
-	cert, err := getSecret(ctx, kube, cfg.ClientCert.SecretRef)
+func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1alpha1.TLSConfig, namespace string) (tls.Certificate, error) {
+	cert, err := getSecret(ctx, kube, cfg.ClientCert.SecretRef, namespace)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("cannot get client certificate: %w", err)
 	}
 
-	key, err := getSecret(ctx, kube, cfg.ClientKey.SecretRef)
+	key, err := getSecret(ctx, kube, cfg.ClientKey.SecretRef, namespace)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("cannot get client key: %w", err)
 	}
@@ -95,12 +102,12 @@ func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1
 	return keyPair, nil
 }
 
-func getSecret(ctx context.Context, kube client.Client, sel xpv1.SecretKeySelector) ([]byte, error) {
+func getSecret(ctx context.Context, kube client.Client, sel common.LocalSecretKeySelector, namespace string) ([]byte, error) {
 	secret := &corev1.Secret{}
 	if err := kube.Get(ctx, types.NamespacedName{
-		Namespace: sel.Namespace,
+		Namespace: namespace,
 		Name:      sel.Name}, secret); err != nil {
-		return nil, fmt.Errorf("cannot get Secret %q in namespace %q: %w", sel.Name, sel.Namespace, err)
+		return nil, fmt.Errorf("cannot get Secret %q in namespace %q: %w", sel.Name, namespace, err)
 	}
 
 	data, ok := secret.Data[sel.Key]

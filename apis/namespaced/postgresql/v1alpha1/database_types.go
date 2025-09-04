@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
 
 // DatabaseParameters are the configurable fields of a Database.
@@ -77,8 +78,8 @@ type DatabaseParameters struct {
 
 // A DatabaseSpec defines the desired state of a Database.
 type DatabaseSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DatabaseParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	ForProvider              DatabaseParameters `json:"forProvider"`
 }
 
 // A DatabaseStatus represents the observed state of a Database.

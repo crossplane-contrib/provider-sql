@@ -141,11 +141,11 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 	}
 
 	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: mg.GetNamespace(), Name: ref.Name}, s); err != nil {
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig)
+	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig, mg.GetNamespace())
 	if err != nil {
 		return nil, errors.Wrap(err, errTLSConfig)
 	}

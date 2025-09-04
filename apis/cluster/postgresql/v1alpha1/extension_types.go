@@ -20,11 +20,11 @@ import (
 	"context"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
-	"github.com/pkg/errors"
+	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	errors "github.com/pkg/errors"
 )
 
 // ExtensionParameters are the configurable fields of a Extension.

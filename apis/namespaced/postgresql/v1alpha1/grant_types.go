@@ -19,18 +19,20 @@ package v1alpha1
 import (
 	"context"
 
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	client "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	errors "github.com/pkg/errors"
 )
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       GrantParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	ForProvider              GrantParameters `json:"forProvider"`
 }
 
 // GrantPrivilege represents a privilege to be granted
@@ -120,12 +122,12 @@ type GrantParameters struct {
 	// RoleRef references the role object this grant is for.
 	// +immutable
 	// +optional
-	RoleRef *xpv1.Reference `json:"roleRef,omitempty"`
+	RoleRef *common.Reference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *xpv1.Selector `json:"roleSelector,omitempty"`
+	RoleSelector *common.Selector `json:"roleSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -134,12 +136,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
@@ -148,12 +150,12 @@ type GrantParameters struct {
 	// MemberOfRef references the Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfRef *xpv1.Reference `json:"memberOfRef,omitempty"`
+	MemberOfRef *common.Reference `json:"memberOfRef,omitempty"`
 
 	// MemberOfSelector selects a reference to a Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfSelector *xpv1.Selector `json:"memberOfSelector,omitempty"`
+	MemberOfSelector *common.Selector `json:"memberOfSelector,omitempty"`
 
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional

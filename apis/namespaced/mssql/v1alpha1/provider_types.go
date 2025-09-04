@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -46,7 +47,7 @@ type ProviderCredentials struct {
 	// that contains the credentials that must be used to connect to the
 	// provider.
 	// +optional
-	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef *common.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.

@@ -19,13 +19,15 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
 
 // A RoleSpec defines the desired state of a Role.
 type RoleSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       RoleParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	ForProvider              RoleParameters `json:"forProvider"`
 }
 
 // A RoleStatus represents the observed state of a Role.
@@ -82,7 +84,7 @@ type RoleParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
 	// for this role. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *common.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 
 	// ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
 	// role in the database will be reset.

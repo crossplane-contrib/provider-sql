@@ -36,7 +36,7 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 	}
 	nn := types.NamespacedName{
 		Name:      role.Spec.ForProvider.PasswordSecretRef.Name,
-		Namespace: role.Spec.ForProvider.PasswordSecretRef.Namespace,
+		Namespace: role.Namespace,
 	}
 	s := &corev1.Secret{}
 	if err := c.kube.Get(ctx, nn, s); err != nil {
@@ -50,7 +50,7 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 
 	nn = types.NamespacedName{
 		Name:      role.Spec.WriteConnectionSecretToReference.Name,
-		Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
+		Namespace: role.Namespace,
 	}
 	s = &corev1.Secret{}
 	// the output secret may not exist yet, so we can skip returning an
