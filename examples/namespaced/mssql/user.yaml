@@ -9,8 +9,6 @@ spec:
       name: example-db
     passwordSecretRef:
       name: example-pw
-      namespace: default
       key: password
   writeConnectionSecretToRef:
     name: example-connection-secret
-    namespace: default

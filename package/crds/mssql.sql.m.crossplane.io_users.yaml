@@ -8,10 +8,6 @@ metadata:
 spec:
   group: mssql.sql.m.crossplane.io
   names:
-    categories:
-    - crossplane
-    - managed
-    - sql
     kind: User
     listKind: UserList
     plural: users

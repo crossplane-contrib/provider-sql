@@ -17,14 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -63,6 +58,7 @@ type GrantParameters struct {
 
 	// User this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=User
 	User *string `json:"user,omitempty"`
 
 	// UserRef references the user object this grant is for.
@@ -81,6 +77,7 @@ type GrantParameters struct {
 
 	// Database this grant is for, default *.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty" default:"*"`
 
 	// DatabaseRef references the database object this grant it for.
@@ -136,39 +133,4 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
-}
-
-// ResolveReferences of this Grant
-func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.user
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
-		Reference:    mg.Spec.ForProvider.UserRef,
-		Selector:     mg.Spec.ForProvider.UserSelector,
-		To:           reference.To{Managed: &User{}, List: &UserList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.user")
-	}
-	mg.Spec.ForProvider.User = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.UserRef = rsp.ResolvedReference
-
-	return nil
 }

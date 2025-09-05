@@ -22,7 +22,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
-    - jsonPath: .spec.credentialsSecretRef.name
+    - jsonPath: .spec.credentials.connectionSecretRef.name
       name: SECRET-NAME
       priority: 1
       type: string
@@ -49,7 +49,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: A ProviderConfigSpec defines the desired state of a ProviderConfig.
+            description: A ClusterProviderConfigSpec defines the desired state of
+              a ClusterProviderConfig.
             properties:
               credentials:
                 description: Credentials required to authenticate to this provider.
@@ -63,8 +64,12 @@ spec:
                       name:
                         description: Name of the secret.
                         type: string
+                      namespace:
+                        description: Namespace of the secret.
+                        type: string
                     required:
                     - name
+                    - namespace
                     type: object
                   source:
                     description: Source of the provider credentials.
@@ -98,18 +103,22 @@ spec:
                       PEM format.
                     properties:
                       secretRef:
-                        description: |-
-                          A LocalSecretKeySelector is a reference to a secret key
-                          in the same namespace with the referencing object.
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
                         properties:
                           key:
+                            description: The key to select.
                             type: string
                           name:
                             description: Name of the secret.
                             type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
                         required:
                         - key
                         - name
+                        - namespace
                         type: object
                     type: object
                   clientCert:
@@ -118,18 +127,22 @@ spec:
                       PEM format.
                     properties:
                       secretRef:
-                        description: |-
-                          A LocalSecretKeySelector is a reference to a secret key
-                          in the same namespace with the referencing object.
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
                         properties:
                           key:
+                            description: The key to select.
                             type: string
                           name:
                             description: Name of the secret.
                             type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
                         required:
                         - key
                         - name
+                        - namespace
                         type: object
                     type: object
                   clientKey:
@@ -138,18 +151,22 @@ spec:
                       PEM format.
                     properties:
                       secretRef:
-                        description: |-
-                          A LocalSecretKeySelector is a reference to a secret key
-                          in the same namespace with the referencing object.
+                        description: A SecretKeySelector is a reference to a secret
+                          key in an arbitrary namespace.
                         properties:
                           key:
+                            description: The key to select.
                             type: string
                           name:
                             description: Name of the secret.
                             type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
                         required:
                         - key
                         - name
+                        - namespace
                         type: object
                     type: object
                   insecureSkipVerify:
@@ -159,7 +176,8 @@ spec:
             - credentials
             type: object
           status:
-            description: A ProviderConfigStatus reflects the observed state of a ProviderConfig.
+            description: A ClusterProviderConfigStatus reflects the observed state
+              of a ClusterProviderConfig.
             properties:
               conditions:
                 description: Conditions of the resource.

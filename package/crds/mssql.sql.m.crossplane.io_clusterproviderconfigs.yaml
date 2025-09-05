@@ -22,14 +22,14 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
-    - jsonPath: .spec.credentialsSecretRef.name
+    - jsonPath: .spec.credentials.connectionSecretRef.name
       name: SECRET-NAME
       priority: 1
       type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A ClusterProviderConfig configures a Template provider.
+        description: A ClusterProviderConfig configures a SQL provider.
         properties:
           apiVersion:
             description: |-
@@ -49,7 +49,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: A ProviderConfigSpec defines the desired state of a ProviderConfig.
+            description: A ClusterProviderConfigSpec defines the desired state of
+              a ClusterProviderConfig.
             properties:
               credentials:
                 description: Credentials required to authenticate to this provider.

@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -49,7 +48,7 @@ type UserParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *common.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv1.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 	// LoginDatabase allows you to specify the name of the Database to be used to create the user LOGIN in (normally master).
 	// +crossplane:generate:reference:type=Database
 	LoginDatabase *string `json:"loginDatabase,omitempty"`
@@ -71,7 +70,7 @@ type UserObservation struct {
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource,categories={crossplane,managed,sql}
 type User struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

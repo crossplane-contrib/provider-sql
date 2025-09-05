@@ -58,6 +58,27 @@ var (
 	ProviderConfigUsageListGroupVersionKind = SchemeGroupVersion.WithKind(ProviderConfigUsageListKind)
 )
 
+// ClusterProviderConfig type metadata.
+var (
+	ClusterProviderConfigKind             = reflect.TypeOf(ClusterProviderConfig{}).Name()
+	ClusterProviderConfigGroupKind        = schema.GroupKind{Group: Group, Kind: ClusterProviderConfigKind}.String()
+	ClusterProviderConfigKindAPIVersion   = ClusterProviderConfigKind + "." + SchemeGroupVersion.String()
+	ClusterProviderConfigGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigKind)
+)
+
+// ProviderConfigUsage type metadata.
+var (
+	ClusterProviderConfigUsageKind             = reflect.TypeOf(ProviderConfigUsage{}).Name()
+	ClusterProviderConfigUsageGroupKind        = schema.GroupKind{Group: Group, Kind: ClusterProviderConfigUsageKind}.String()
+	ClusterProviderConfigUsageKindAPIVersion   = ClusterProviderConfigUsageKind + "." + SchemeGroupVersion.String()
+	ClusterProviderConfigUsageGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigUsageKind)
+
+	ClusterProviderConfigUsageListKind             = reflect.TypeOf(ProviderConfigUsageList{}).Name()
+	ClusterProviderConfigUsageListGroupKind        = schema.GroupKind{Group: Group, Kind: ClusterProviderConfigUsageListKind}.String()
+	ClusterProviderConfigUsageListKindAPIVersion   = ClusterProviderConfigUsageListKind + "." + SchemeGroupVersion.String()
+	ClusterProviderConfigUsageListGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigUsageListKind)
+)
+
 // Database type metadata.
 var (
 	DatabaseKind             = reflect.TypeOf(Database{}).Name()

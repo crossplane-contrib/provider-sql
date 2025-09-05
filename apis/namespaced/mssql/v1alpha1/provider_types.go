@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -30,24 +29,26 @@ type ProviderConfigSpec struct {
 	Credentials ProviderCredentials `json:"credentials"`
 }
 
+type MSSQLConnectionSource string
+
 const (
 	// CredentialsSourceMSSQLConnectionSecret indicates that a provider
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a MSSQL server.
-	CredentialsSourceMSSQLConnectionSecret xpv1.CredentialsSource = "MSSQLConnectionSecret"
+	CredentialsSourceMSSQLConnectionSecret MSSQLConnectionSource = "MSSQLConnectionSecret"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
 	// +kubebuilder:validation:Enum=MSSQLConnectionSecret
-	Source xpv1.CredentialsSource `json:"source"`
+	Source MSSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MSSQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider.
 	// +optional
-	ConnectionSecretRef *common.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef *xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
@@ -72,21 +73,6 @@ type ProviderConfig struct {
 
 // +kubebuilder:object:root=true
 
-// A ClusterProviderConfig configures a Template provider.
-// +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentialsSecretRef.name",priority=1
-// +kubebuilder:resource:categories={crossplane,provider,sql}
-type ClusterProviderConfig struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   ProviderConfigSpec   `json:"spec"`
-	Status ProviderConfigStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
 // ProviderConfigList contains a list of ProviderConfig.
 type ProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -101,7 +87,7 @@ type ProviderConfigList struct {
 // +kubebuilder:printcolumn:name="CONFIG-NAME",type="string",JSONPath=".providerConfigRef.name"
 // +kubebuilder:printcolumn:name="RESOURCE-KIND",type="string",JSONPath=".resourceRef.kind"
 // +kubebuilder:printcolumn:name="RESOURCE-NAME",type="string",JSONPath=".resourceRef.name"
-// +kubebuilder:resource:categories={crossplane,provider,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,provider,sql}
 type ProviderConfigUsage struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

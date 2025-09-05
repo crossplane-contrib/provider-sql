@@ -17,14 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
-	errors "github.com/pkg/errors"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -115,6 +110,7 @@ type GrantParameters struct {
 
 	// Role this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=Role
 	Role *string `json:"role,omitempty"`
 
 	// RoleRef references the role object this grant is for.
@@ -129,6 +125,7 @@ type GrantParameters struct {
 
 	// Database this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this grant it for.
@@ -143,6 +140,7 @@ type GrantParameters struct {
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
+	// +crossplane:generate:reference:type=Role
 	MemberOf *string `json:"memberOf,omitempty"`
 
 	// MemberOfRef references the Role that this grant makes Role a member of.
@@ -192,52 +190,4 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
-}
-
-// ResolveReferences of this Grant
-func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.role
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
-		Reference:    mg.Spec.ForProvider.RoleRef,
-		Selector:     mg.Spec.ForProvider.RoleSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.role")
-	}
-	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.memberOf
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.MemberOf),
-		Reference:    mg.Spec.ForProvider.MemberOfRef,
-		Selector:     mg.Spec.ForProvider.MemberOfSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.memberOf")
-	}
-	mg.Spec.ForProvider.MemberOf = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.MemberOfRef = rsp.ResolvedReference
-	return nil
 }

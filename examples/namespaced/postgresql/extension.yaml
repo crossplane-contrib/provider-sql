@@ -10,6 +10,7 @@ spec:
     databaseRef:
       name: example
   providerConfigRef:
+    kind: ProviderConfig
     name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
@@ -24,4 +25,5 @@ spec:
     databaseRef:
       name: example
   providerConfigRef:
+    kind: ProviderConfig
     name: default

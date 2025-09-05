@@ -17,16 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	client "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
-	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
-	errors "github.com/pkg/errors"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -122,12 +116,12 @@ type GrantParameters struct {
 	// RoleRef references the role object this grant is for.
 	// +immutable
 	// +optional
-	RoleRef *common.Reference `json:"roleRef,omitempty"`
+	RoleRef *xpv1.NamespacedReference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *common.Selector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv1.NamespacedSelector `json:"roleSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -136,12 +130,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
@@ -150,12 +144,12 @@ type GrantParameters struct {
 	// MemberOfRef references the Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfRef *common.Reference `json:"memberOfRef,omitempty"`
+	MemberOfRef *xpv1.NamespacedReference `json:"memberOfRef,omitempty"`
 
 	// MemberOfSelector selects a reference to a Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfSelector *common.Selector `json:"memberOfSelector,omitempty"`
+	MemberOfSelector *xpv1.NamespacedSelector `json:"memberOfSelector,omitempty"`
 
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
@@ -178,7 +172,7 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="MEMBER OF",type="string",JSONPath=".spec.forProvider.memberOf"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type Grant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -194,52 +188,4 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
-}
-
-// ResolveReferences of this Grant
-func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.role
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
-		Reference:    mg.Spec.ForProvider.RoleRef,
-		Selector:     mg.Spec.ForProvider.RoleSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.role")
-	}
-	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.memberOf
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.MemberOf),
-		Reference:    mg.Spec.ForProvider.MemberOfRef,
-		Selector:     mg.Spec.ForProvider.MemberOfSelector,
-		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.memberOf")
-	}
-	mg.Spec.ForProvider.MemberOf = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.MemberOfRef = rsp.ResolvedReference
-	return nil
 }

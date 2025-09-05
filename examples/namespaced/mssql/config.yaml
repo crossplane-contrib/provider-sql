@@ -8,5 +8,4 @@ spec:
   credentials:
     source: MSSQLConnectionSecret
     connectionSecretRef:
-      namespace: default
       name: db-conn

@@ -8,7 +8,6 @@ spec:
   credentials:
     source: MySQLConnectionSecret
     connectionSecretRef:
-      namespace: default
       name: credentials
   # setting tls to custom will configure mysql driver with custom tls configuration specified in tlsConfig
   tls: custom

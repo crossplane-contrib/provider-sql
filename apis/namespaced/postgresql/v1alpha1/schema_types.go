@@ -80,7 +80,7 @@ type SchemaStatus struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.role"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type Schema struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

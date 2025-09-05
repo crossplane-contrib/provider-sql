@@ -23,10 +23,11 @@ import (
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
 
-// A ProviderConfigSpec defines the desired state of a ProviderConfig.
-type ProviderConfigSpec struct {
+// A ClusterProviderConfigSpec defines the desired state of a ClusterProviderConfig.
+type ClusterProviderConfigSpec struct {
 	// Credentials required to authenticate to this provider.
-	Credentials ProviderCredentials `json:"credentials"`
+	Credentials ClusterProviderCredentials `json:"credentials"`
+
 	// tls=true enables TLS / SSL encrypted connection to the server.
 	// Use skip-verify if you want to use a self-signed or invalid certificate (server side)
 	// or use preferred to use TLS only when advertised by the server. This is similar
@@ -42,30 +43,8 @@ type ProviderConfigSpec struct {
 	TLSConfig *TLSConfig `json:"tlsConfig"`
 }
 
-// TLSConfig defines the TLS configuration for the provider when tls=custom.
-type TLSConfig struct {
-	CACert             TLSSecret `json:"caCert,omitempty"`
-	ClientCert         TLSSecret `json:"clientCert,omitempty"`
-	ClientKey          TLSSecret `json:"clientKey,omitempty"`
-	InsecureSkipVerify bool      `json:"insecureSkipVerify,omitempty"`
-}
-
-// TLSSecret defines a reference to a K8s secret and its specific internal key that contains the TLS cert/keys in PEM format.
-type TLSSecret struct {
-	SecretRef xpv1.SecretKeySelector `json:"secretRef,omitempty"`
-}
-
-type MySQLConnectionSecretSource string
-
-const (
-	// CredentialsSourceMySQLConnectionSecret indicates that a provider
-	// should acquire credentials from a connection secret written by a managed
-	// resource that represents a MySQL server.
-	CredentialsSourceMySQLConnectionSecret MySQLConnectionSecretSource = "MySQLConnectionSecret"
-)
-
-// ProviderCredentials required to authenticate.
-type ProviderCredentials struct {
+// ClusterProviderCredentials required to authenticate.
+type ClusterProviderCredentials struct {
 	// Source of the provider credentials.
 	// +kubebuilder:validation:Enum=MySQLConnectionSecret
 	Source MySQLConnectionSecretSource `json:"source"`
@@ -73,47 +52,47 @@ type ProviderCredentials struct {
 	// A CredentialsSecretRef is a reference to a MySQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
-	ConnectionSecretRef *xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
 }
 
-// A ProviderConfigStatus reflects the observed state of a ProviderConfig.
-type ProviderConfigStatus struct {
+// A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.
+type ClusterProviderConfigStatus struct {
 	xpv1.ProviderConfigStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true
 
-// A ProviderConfig configures a Template provider.
+// A ClusterProviderConfig configures a Template provider.
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentials.connectionSecretRef.name",priority=1
-// +kubebuilder:resource:scope=Namespaced,categories={crossplane,provider,sql}
-type ProviderConfig struct {
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
+type ClusterProviderConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ProviderConfigSpec   `json:"spec"`
-	Status ProviderConfigStatus `json:"status,omitempty"`
+	Spec   ClusterProviderConfigSpec   `json:"spec"`
+	Status ClusterProviderConfigStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ProviderConfigList contains a list of ProviderConfig.
-type ProviderConfigList struct {
+// ClusterProviderConfigList contains a list of ClusterProviderConfig.
+type ClusterProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ProviderConfig `json:"items"`
+	Items           []ClusterProviderConfig `json:"items"`
 }
 
 // +kubebuilder:object:root=true
 
-// A ProviderConfigUsage indicates that a resource is using a ProviderConfig.
+// A ClusterProviderConfigUsage indicates that a resource is using a ClusterProviderConfig.
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="CONFIG-NAME",type="string",JSONPath=".providerConfigRef.name"
 // +kubebuilder:printcolumn:name="RESOURCE-KIND",type="string",JSONPath=".resourceRef.kind"
 // +kubebuilder:printcolumn:name="RESOURCE-NAME",type="string",JSONPath=".resourceRef.name"
-// +kubebuilder:resource:scope=Namespaced,categories={crossplane,provider,sql}
-type ProviderConfigUsage struct {
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
+type ClusterProviderConfigUsage struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
@@ -122,9 +101,9 @@ type ProviderConfigUsage struct {
 
 // +kubebuilder:object:root=true
 
-// ProviderConfigUsageList contains a list of ProviderConfigUsage
-type ProviderConfigUsageList struct {
+// ClusterProviderConfigUsageList contains a list of ClusterProviderConfigUsage
+type ClusterProviderConfigUsageList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ProviderConfigUsage `json:"items"`
+	Items           []ClusterProviderConfigUsage `json:"items"`
 }

@@ -15,7 +15,6 @@ spec:
         value: '"$user",public'
   writeConnectionSecretToRef:
     name: example-parent-role-secret
-    namespace: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Role
@@ -28,7 +27,6 @@ spec:
       createDb: true
   writeConnectionSecretToRef:
     name: example-role-secret
-    namespace: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Role
@@ -39,7 +37,6 @@ spec:
   deletionPolicy:  Orphan
   writeConnectionSecretToRef:
     name: ownerrole-secret
-    namespace: default
   forProvider:
     privileges:
       createDb: true

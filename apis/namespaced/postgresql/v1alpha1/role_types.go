@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -84,7 +83,7 @@ type RoleParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
 	// for this role. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *common.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv1.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 
 	// ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
 	// role in the database will be reset.
@@ -117,7 +116,7 @@ type RoleObservation struct {
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="CONN LIMIT",type="integer",JSONPath=".spec.forProvider.connectionLimit"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".status.atProvider.privilegesAsClauses"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type Role struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

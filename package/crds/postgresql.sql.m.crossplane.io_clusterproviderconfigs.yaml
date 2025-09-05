@@ -16,13 +16,13 @@ spec:
     listKind: ClusterProviderConfigList
     plural: clusterproviderconfigs
     singular: clusterproviderconfig
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
-    - jsonPath: .spec.credentialsSecretRef.name
+    - jsonPath: .spec.credentials.connectionSecretRef.name
       name: SECRET-NAME
       priority: 1
       type: string
@@ -49,7 +49,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: A ProviderConfigSpec defines the desired state of a ProviderConfig.
+            description: A ClusterProviderConfigSpec defines the desired state of
+              a ClusterProviderConfig.
             properties:
               credentials:
                 description: Credentials required to authenticate to this provider.
@@ -95,7 +96,8 @@ spec:
             - credentials
             type: object
           status:
-            description: A ProviderConfigStatus reflects the observed state of a ProviderConfig.
+            description: A ClusterProviderConfigStatus reflects the observed state
+              of a ClusterProviderConfig.
             properties:
               conditions:
                 description: Conditions of the resource.

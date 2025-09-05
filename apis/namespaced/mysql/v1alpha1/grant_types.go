@@ -17,16 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/errors"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -66,17 +60,18 @@ type GrantParameters struct {
 
 	// User this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=User
 	User *string `json:"user,omitempty"`
 
 	// UserRef references the user object this grant is for.
 	// +immutable
 	// +optional
-	UserRef *common.Reference `json:"userRef,omitempty"`
+	UserRef *xpv1.NamespacedReference `json:"userRef,omitempty"`
 
 	// UserSelector selects a reference to a User this grant is for.
 	// +immutable
 	// +optional
-	UserSelector *common.Selector `json:"userSelector,omitempty"`
+	UserSelector *xpv1.NamespacedSelector `json:"userSelector,omitempty"`
 
 	// Tables this grant is for, default *.
 	// +optional
@@ -84,17 +79,18 @@ type GrantParameters struct {
 
 	// Database this grant is for, default *.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty" default:"*"`
 
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
 	// +optional
@@ -123,7 +119,7 @@ type GrantObservation struct {
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type Grant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -139,39 +135,4 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
-}
-
-// ResolveReferences of this Grant
-func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-
-	// Resolve spec.forProvider.user
-	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.User),
-		Reference:    mg.Spec.ForProvider.UserRef,
-		Selector:     mg.Spec.ForProvider.UserSelector,
-		To:           reference.To{Managed: &User{}, List: &UserList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.user")
-	}
-	mg.Spec.ForProvider.User = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.UserRef = rsp.ResolvedReference
-
-	return nil
 }

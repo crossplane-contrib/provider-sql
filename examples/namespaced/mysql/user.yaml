@@ -7,7 +7,6 @@ spec:
   forProvider:
     passwordSecretRef:
       name: example-pw
-      namespace: default
       key: password
     resourceOptions:
       maxQueriesPerHour: 1000
@@ -16,4 +15,3 @@ spec:
       maxUserConnections: 10
   writeConnectionSecretToRef:
     name: example-connection-secret
-    namespace: default
