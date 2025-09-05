@@ -99,11 +99,12 @@ type ProviderConfig struct {
 
 // +kubebuilder:object:root=true
 
-// ProviderConfigList contains a list of ProviderConfig.
-type ProviderConfigList struct {
+// A ClusterProviderConfigList contains a list of ClusterProviderConfig.
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
+type ClusterProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ProviderConfig `json:"items"`
+	Items           []ClusterProviderConfig `json:"items"`
 }
 
 // +kubebuilder:object:root=true
