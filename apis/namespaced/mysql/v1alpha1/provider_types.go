@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
@@ -53,7 +52,7 @@ type TLSConfig struct {
 
 // TLSSecret defines a reference to a K8s secret and its specific internal key that contains the TLS cert/keys in PEM format.
 type TLSSecret struct {
-	SecretRef common.LocalSecretKeySelector `json:"secretRef,omitempty"`
+	SecretRef xpv1.SecretKeySelector `json:"secretRef,omitempty"`
 }
 
 type MySQLConnectionSecretSource string
