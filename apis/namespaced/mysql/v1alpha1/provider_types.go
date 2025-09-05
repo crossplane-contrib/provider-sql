@@ -86,23 +86,8 @@ type ProviderConfigStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentialsSecretRef.name",priority=1
-// +kubebuilder:resource:categories={crossplane,provider,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,provider,sql}
 type ProviderConfig struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   ProviderConfigSpec   `json:"spec"`
-	Status ProviderConfigStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// A ClusterProviderConfig configures a Template provider.
-// +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentialsSecretRef.name",priority=1
-// +kubebuilder:resource:categories={crossplane,provider,sql}
-type ClusterProviderConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
@@ -117,6 +102,31 @@ type ProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ProviderConfig `json:"items"`
+}
+
+// +kubebuilder:object:root=true
+
+// A ClusterProviderConfig configures a Template provider.
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentialsSecretRef.name",priority=1
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
+type ClusterProviderConfig struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   ProviderConfigSpec   `json:"spec"`
+	Status ProviderConfigStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// A ClusterProviderConfigList contains a list of ClusterProviderConfig.
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
+type ClusterProviderConfigList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []ClusterProviderConfig `json:"items"`
 }
 
 // +kubebuilder:object:root=true
