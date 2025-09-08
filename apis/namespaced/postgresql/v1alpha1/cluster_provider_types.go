@@ -20,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
 
 // A ClusterProviderConfigSpec defines the desired state of a ClusterProviderConfig.
@@ -48,7 +47,7 @@ type ClusterProviderCredentials struct {
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
-	ConnectionSecretRef *xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.
@@ -78,28 +77,4 @@ type ClusterProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ClusterProviderConfig `json:"items"`
-}
-
-// +kubebuilder:object:root=true
-
-// A ClusterProviderConfigUsage indicates that a resource is using a ClusterProviderConfig.
-// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="CONFIG-NAME",type="string",JSONPath=".providerConfigRef.name"
-// +kubebuilder:printcolumn:name="RESOURCE-KIND",type="string",JSONPath=".resourceRef.kind"
-// +kubebuilder:printcolumn:name="RESOURCE-NAME",type="string",JSONPath=".resourceRef.name"
-// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
-type ClusterProviderConfigUsage struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	xpv2.TypedProviderConfigUsage `json:",inline"`
-}
-
-// +kubebuilder:object:root=true
-
-// ClusterProviderConfigUsageList contains a list of ClusterProviderConfigUsage
-type ClusterProviderConfigUsageList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ClusterProviderConfigUsage `json:"items"`
 }

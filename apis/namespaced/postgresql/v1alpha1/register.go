@@ -66,19 +66,6 @@ var (
 	ClusterProviderConfigGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigKind)
 )
 
-// ClusterProviderConfigUsage type metadata.
-var (
-	ClusterProviderConfigUsageKind             = reflect.TypeOf(ClusterProviderConfigUsage{}).Name()
-	ClusterProviderConfigUsageGroupKind        = schema.GroupKind{Group: Group, Kind: ClusterProviderConfigUsageKind}.String()
-	ClusterProviderConfigUsageKindAPIVersion   = ClusterProviderConfigUsageKind + "." + SchemeGroupVersion.String()
-	ClusterProviderConfigUsageGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigUsageKind)
-
-	ClusterProviderConfigUsageListKind             = reflect.TypeOf(ClusterProviderConfigUsageList{}).Name()
-	ClusterProviderConfigUsageListGroupKind        = schema.GroupKind{Group: Group, Kind: ClusterProviderConfigUsageListKind}.String()
-	ClusterProviderConfigUsageListKindAPIVersion   = ClusterProviderConfigUsageListKind + "." + SchemeGroupVersion.String()
-	ClusterProviderConfigUsageListGroupVersionKind = SchemeGroupVersion.WithKind(ClusterProviderConfigUsageListKind)
-)
-
 // Extension type metadata.
 var (
 	ExtensionKind             = reflect.TypeOf(Extension{}).Name()
