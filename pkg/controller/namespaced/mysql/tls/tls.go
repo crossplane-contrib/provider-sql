@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 
+	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	"github.com/go-sql-driver/mysql"
@@ -20,24 +21,24 @@ import (
 func LoadConfig(
 	ctx context.Context,
 	kube client.Client,
-	providerConfigName string,
-	mode *string,
-	cfg *namespacedv1alpha1.TLSConfig,
-	namespace string,
+	ProviderConfigName string,
+	TLSMode *string,
+	TLSConfig *v1alpha1.TLSConfig,
 ) (*string, error) {
-	if mode == nil || *mode != "custom" {
-		if cfg != nil {
+	if TLSMode == nil || *TLSMode != "custom" {
+		if TLSConfig != nil {
 			return nil, fmt.Errorf("tlsConfig is allowed only when tls=custom")
 		}
-		return mode, nil
+
+		return TLSMode, nil
 	}
 
-	if err := validateTLSConfig(cfg); err != nil {
+	if err := validateTLSConfig(TLSConfig); err != nil {
 		return nil, err
 	}
 
-	tlsName := fmt.Sprintf("custom-%s", providerConfigName)
-	err := registerTLS(ctx, kube, tlsName, cfg, namespace)
+	tlsName := fmt.Sprintf("custom-%s", ProviderConfigName)
+	err := registerTLS(ctx, kube, tlsName, TLSConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func validateTLSConfig(cfg *namespacedv1alpha1.TLSConfig) error {
 	return nil
 }
 
-func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *namespacedv1alpha1.TLSConfig, namespace string) error {
+func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *namespacedv1alpha1.TLSConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -72,7 +73,7 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 		return fmt.Errorf("cannot append CA certificate to pool")
 	}
 
-	keyPair, err := getClientKeyPair(ctx, kube, cfg, namespace)
+	keyPair, err := getClientKeyPair(ctx, kube, cfg)
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 	})
 }
 
-func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1alpha1.TLSConfig, namespace string) (tls.Certificate, error) {
+func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1alpha1.TLSConfig) (tls.Certificate, error) {
 	cert, err := getSecret(ctx, kube, cfg.ClientCert.SecretRef)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("cannot get client certificate: %w", err)

@@ -20,8 +20,6 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -37,14 +35,12 @@ import (
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mysql/provider"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mysql/tls"
 )
 
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
 
 	errNotDatabase = "managed resource is not a Database custom resource"
@@ -116,31 +112,17 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerConfigName := cr.GetProviderConfigReference().Name
-	pc := &namespacedv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	if err != nil {
+		return nil, err
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (MySQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
-	ref := pc.Spec.Credentials.ConnectionSecretRef
-	if ref == nil {
-		return nil, errors.New(errNoSecretRef)
-	}
-
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: mg.GetNamespace(), Name: ref.Name}, s); err != nil {
-		return nil, errors.Wrap(err, errGetSecret)
-	}
-
-	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig, mg.GetNamespace())
+	tlsName, err := tls.LoadConfig(ctx, c.kube, providerInfo.ProviderConfigName, providerInfo.TLS, providerInfo.TLSConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog)}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, tlsName, cr.Spec.ForProvider.BinLog)}, nil
 }
 
 type external struct{ db xsql.DB }

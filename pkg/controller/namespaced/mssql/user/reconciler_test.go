@@ -27,7 +27,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,6 +40,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
 
 type mockDB struct {
@@ -128,6 +129,24 @@ func TestConnect(t *testing.T) {
 				err: errors.Wrap(errBoom, errTrackPCUsage),
 			},
 		},
+		"ErrInvalidProviderConfigKind": {
+			reason: "An error should be returned if our ProviderConfigReference kind is invalid",
+			fields: fields{
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{Kind: "InvalidKind"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: provErrors.InvalidProviderConfigKindError("InvalidKind"),
+			},
+		},
 		"ErrGetProviderConfig": {
 			reason: "An error should be returned if we can't get our ProviderConfig",
 			fields: fields{
@@ -138,15 +157,45 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.UserSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errGetPC),
+				err: provErrors.GetProviderConfigError(errBoom),
+			},
+		},
+		"ErrGetClusterProviderConfig": {
+			reason: "An error should be returned if we can't get our ClusterProviderConfig",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(errBoom),
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ClusterProviderConfigKind,
+								Name: "example",
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: provErrors.GetClusterProviderConfigError(errBoom),
 			},
 		},
 		"ErrMissingConnectionSecret": {
@@ -162,15 +211,21 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.UserSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
 			want: want{
-				err: errors.New(errNoSecretRef),
+				err: provErrors.MissingSecretRefError(),
 			},
 		},
 		"ErrGetConnectionSecret": {
@@ -180,7 +235,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -191,15 +246,21 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.UserSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errGetSecret),
+				err: provErrors.GetSecretError(errBoom),
 			},
 		},
 		"Success": {
@@ -209,7 +270,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
@@ -224,9 +285,15 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.UserSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 						ForProvider: v1alpha1.UserParameters{
 							Database: ptr.To("success-database"),
@@ -246,7 +313,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
@@ -261,9 +328,15 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.UserSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 						ForProvider: v1alpha1.UserParameters{
 							Database:      ptr.To("success-database"),
@@ -503,7 +576,7 @@ func TestCreate(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
@@ -547,7 +620,7 @@ func TestCreate(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
@@ -682,7 +755,7 @@ func TestUpdate(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
@@ -739,7 +812,7 @@ func TestUpdate(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.User{
-					ObjectMeta: v1.ObjectMeta{
+					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},

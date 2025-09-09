@@ -23,8 +23,6 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -40,13 +38,11 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
 )
 
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
 
 	errNotGrant     = "managed resource is not a Grant custom resource"
 	errSelectGrant  = "cannot select grant"
@@ -124,25 +120,13 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	pc := &namespacedv1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	if err != nil {
+		return nil, err
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
-	ref := pc.Spec.Credentials.ConnectionSecretRef
-	if ref == nil {
-		return nil, errors.New(errNoSecretRef)
-	}
-
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: mg.GetNamespace(), Name: ref.Name}, s); err != nil {
-		return nil, errors.Wrap(err, errGetSecret)
-	}
 	return &external{
-		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
+		db:   c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode)),
 		kube: c.kube,
 	}, nil
 }

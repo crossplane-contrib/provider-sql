@@ -25,6 +25,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
@@ -34,6 +35,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
 
 type mockDB struct {
@@ -96,6 +98,22 @@ func TestConnect(t *testing.T) {
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
 		},
+		"ErrInvalidProviderConfigKind": {
+			reason: "An error should be returned if the ProviderConfig kind is not valid",
+			fields: fields{
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{Kind: "NotValid"},
+						},
+					},
+				},
+			},
+			want: provErrors.InvalidProviderConfigKindError("NotValid"),
+		},
 		"ErrGetProviderConfig": {
 			reason: "An error should be returned if we can't get our ProviderConfig",
 			fields: fields{
@@ -106,14 +124,42 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.Database{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.DatabaseSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetPC),
+			want: provErrors.GetProviderConfigError(errBoom),
+		},
+		"ErrClusterGetProviderConfig": {
+			reason: "An error should be returned if we can't get our ClusterProviderConfig",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(errBoom),
+				},
+				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ClusterProviderConfigKind,
+								Name: "example",
+							},
+						},
+					},
+				},
+			},
+			want: provErrors.GetClusterProviderConfigError(errBoom),
 		},
 		"ErrMissingConnectionSecret": {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
@@ -130,12 +176,12 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{Kind: v1alpha1.ProviderConfigKind},
 						},
 					},
 				},
 			},
-			want: errors.New(errNoSecretRef),
+			want: provErrors.MissingSecretRefError(),
 		},
 		"ErrGetConnectionSecret": {
 			reason: "An error should be returned if we can't get our ProviderConfig's connection secret",
@@ -144,7 +190,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -155,14 +201,17 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.Database{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.DatabaseSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{Kind: v1alpha1.ProviderConfigKind},
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetSecret),
+			want: provErrors.GetSecretError(errBoom),
 		},
 	}
 
