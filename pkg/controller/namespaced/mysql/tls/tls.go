@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	"github.com/go-sql-driver/mysql"
@@ -21,24 +20,24 @@ import (
 func LoadConfig(
 	ctx context.Context,
 	kube client.Client,
-	ProviderConfigName string,
-	TLSMode *string,
-	TLSConfig *v1alpha1.TLSConfig,
+	providerConfigName string,
+	tlsMode *string,
+	tlsConfig *namespacedv1alpha1.TLSConfig,
 ) (*string, error) {
-	if TLSMode == nil || *TLSMode != "custom" {
-		if TLSConfig != nil {
+	if tlsMode == nil || *tlsMode != "custom" {
+		if tlsConfig != nil {
 			return nil, fmt.Errorf("tlsConfig is allowed only when tls=custom")
 		}
 
-		return TLSMode, nil
+		return tlsMode, nil
 	}
 
-	if err := validateTLSConfig(TLSConfig); err != nil {
+	if err := validateTLSConfig(tlsConfig); err != nil {
 		return nil, err
 	}
 
-	tlsName := fmt.Sprintf("custom-%s", ProviderConfigName)
-	err := registerTLS(ctx, kube, tlsName, TLSConfig)
+	tlsName := fmt.Sprintf("custom-%s", providerConfigName)
+	err := registerTLS(ctx, kube, tlsName, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
