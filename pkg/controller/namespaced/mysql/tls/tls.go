@@ -62,7 +62,7 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 		return nil
 	}
 
-	caCert, err := getSecret(ctx, kube, cfg.CACert.SecretRef)
+	caCert, err := getSecret(ctx, kube, cfg.CACert.SecretRef, namespace)
 	if err != nil {
 		return fmt.Errorf("cannot get CA certificate: %w", err)
 	}
@@ -90,7 +90,7 @@ func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1
 		return tls.Certificate{}, fmt.Errorf("cannot get client certificate: %w", err)
 	}
 
-	key, err := getSecret(ctx, kube, cfg.ClientKey.SecretRef)
+	key, err := getSecret(ctx, kube, cfg.ClientKey.SecretRef, namespace)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("cannot get client key: %w", err)
 	}
@@ -105,9 +105,9 @@ func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1
 func getSecret(ctx context.Context, kube client.Client, sel common.SecretKeySelector) ([]byte, error) {
 	secret := &corev1.Secret{}
 	if err := kube.Get(ctx, types.NamespacedName{
-		Namespace: sel.Namespace,
+		Namespace: namespace,
 		Name:      sel.Name}, secret); err != nil {
-		return nil, fmt.Errorf("cannot get Secret %q in namespace %q: %w", sel.Name, sel.Namespace, err)
+		return nil, fmt.Errorf("cannot get Secret %q in namespace %q: %w", sel.Name, namespace, err)
 	}
 
 	data, ok := secret.Data[sel.Key]

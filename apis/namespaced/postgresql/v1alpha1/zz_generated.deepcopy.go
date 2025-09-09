@@ -9,6 +9,7 @@
 package v1alpha1
 
 import (
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	"github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -418,12 +419,12 @@ func (in *ExtensionParameters) DeepCopyInto(out *ExtensionParameters) {
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(v1.Reference)
+		*out = new(common.Reference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(v1.Selector)
+		*out = new(common.Selector)
 		(*in).DeepCopyInto(*out)
 	}
 }

@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
@@ -49,12 +50,12 @@ type ExtensionParameters struct {
 	// DatabaseRef references the database object this extension is for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *common.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this extension is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *common.Selector `json:"databaseSelector,omitempty"`
 }
 
 // ExtensionSpec defines the desired state of an Extension.
