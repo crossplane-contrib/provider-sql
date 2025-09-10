@@ -26,7 +26,7 @@ GO_TEST_PARALLEL := $(shell echo $$(( $(NPROCS) / 2 )))
 GOLANGCILINT_VERSION ?= 2.1.2
 GO_STATIC_PACKAGES = $(GO_PROJECT)/cmd/provider
 GO_LDFLAGS += -X $(GO_PROJECT)/pkg/version.Version=$(VERSION)
-GO_SUBDIRS += cmd pkg apis
+GO_SUBDIRS += generate cmd pkg apis
 GO111MODULE = on
 -include build/makelib/golang.mk
 
@@ -35,7 +35,7 @@ GO111MODULE = on
 KIND_NODE_IMAGE_TAG ?= v1.30.13
 KIND_VERSION ?= v0.29.0
 KUBECTL_VERSION ?= v1.30.13
-CROSSPLANE_CLI_VERSION ?= v1.20.0
+CROSSPLANE_CLI_VERSION ?= v2.0.2
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================

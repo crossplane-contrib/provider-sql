@@ -1,0 +1,9 @@
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-sql
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/provider-sql:v0.9.0
+  runtimeConfigRef:     # Optional
+    name: provider-sql  # This is referencing the DeploymentRuntimeConfig in deploymentRuntimeConfig.yaml file

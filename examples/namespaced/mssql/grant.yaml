@@ -1,0 +1,18 @@
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant
+  namespace: default
+spec:
+  forProvider:
+    permissions:
+      # CONNECT permission is added by default when user created. So, make sure
+      # to include it unless you are sure that you don't need it.
+      - CONNECT
+      - CREATE TABLE
+      - INSERT
+      - SELECT
+    userRef:
+      name: example-user
+    databaseRef:
+      name: example-db

@@ -195,7 +195,7 @@ metadata:
 spec:
   runtimeConfigRef:
     name: debug-config
-  package: "${PACKAGE_NAME}"
+  package: "xpkg.crossplane.io/${PACKAGE_NAME}:latest"
   packagePullPolicy: Never
 EOF
   )"

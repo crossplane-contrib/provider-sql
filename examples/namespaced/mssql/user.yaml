@@ -1,0 +1,14 @@
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-user
+  namespace: default
+spec:
+  forProvider:
+    databaseRef:
+      name: example-db
+    passwordSecretRef:
+      name: example-pw
+      key: password
+  writeConnectionSecretToRef:
+    name: example-connection-secret

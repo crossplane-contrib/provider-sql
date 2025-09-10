@@ -6,7 +6,7 @@ import (
 
 	"database/sql"
 
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 )
 
 // A Query that may be run against a DB.
