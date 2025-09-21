@@ -15,3 +15,6 @@ spec:
       maxUserConnections: 10
   writeConnectionSecretToRef:
     name: example-connection-secret
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

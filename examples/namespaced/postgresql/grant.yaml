@@ -12,6 +12,9 @@ spec:
       name: example-role
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Grant
@@ -27,11 +30,15 @@ spec:
       name: example-role
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Grant
 metadata:
   name: example-grant-role-membership
+  namespace: default
 spec:
   forProvider:
     withOption: ADMIN
@@ -39,6 +46,9 @@ spec:
       name: example-role
     memberOfRef:
       name: parent-role
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Grant
@@ -46,11 +56,13 @@ metadata:
   name: grant-postgres-an-owner-role
   namespace: default
 spec:
-  deletionPolicy:  Orphan
   forProvider:
     role: "postgres"
     memberOfRef:
       name: "ownerrole"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Grant
@@ -58,7 +70,6 @@ metadata:
   name: grant-owner-role-privilege-connect
   namespace: default
 spec:
-  deletionPolicy:  Orphan
   forProvider:
     withOption: "GRANT"
     privileges:
@@ -68,3 +79,6 @@ spec:
     databaseRef:
       name: "db1"
     revokePublicOnDb: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

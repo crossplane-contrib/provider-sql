@@ -13,3 +13,6 @@ spec:
       name: example-user
     databaseRef:
       name: example-db
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

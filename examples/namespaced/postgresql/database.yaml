@@ -5,6 +5,9 @@ metadata:
   namespace: default
 spec:
   forProvider: {}
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Database
@@ -12,10 +15,12 @@ metadata:
   name: db1
   namespace: default
 spec:
-  deletionPolicy: Orphan
   forProvider:
     allowConnections: true
     owner: "ownerrole"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Database
@@ -26,3 +31,6 @@ spec:
   managementPolicies:
   - Observe
   forProvider: {}
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

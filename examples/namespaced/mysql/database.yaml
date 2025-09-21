@@ -5,3 +5,6 @@ metadata:
   namespace: default
 spec:
   forProvider: {}
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
