@@ -45,7 +45,8 @@ create_grantable_objects() {
   TARGE_SCHEMA='public'
   request="
   CREATE TABLE \"$TARGE_SCHEMA\".test_table(col1 INT NULL);
-  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence START WITH 1000 INCREMENT BY 1;
+  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence_1 START WITH 1000 INCREMENT BY 1;
+  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence_2 START WITH 1000 INCREMENT BY 1;
   CREATE PROCEDURE \"$TARGE_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
   CREATE TABLE \"$TARGE_SCHEMA\".test_table_column(test_column INT NULL);
   CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
@@ -67,7 +68,8 @@ delete_grantable_objects() {
   DROP FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   DROP TABLE \"$TARGE_SCHEMA\".test_table_column;
   DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
-  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence;
+  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence_1;
+  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence_2;
   DROP TABLE \"$TARGE_SCHEMA\".test_table;
   "
   drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
@@ -230,12 +232,15 @@ check_table_privileges(){
 check_sequence_privileges(){
   target_db="db1"
   schema="public"
-  sequence="test_sequence"
   role='no-grants-role'
   expected_privileges='SELECT|f,UPDATE|f,USAGE|f'
 
+  sequence="test_sequence_1"
   request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
+  check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
 
+  sequence="test_sequence_2"
+  request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
   check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
 }
 

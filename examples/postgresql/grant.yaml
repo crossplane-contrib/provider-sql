@@ -114,7 +114,8 @@ spec:
     schemaRef:
       name: public
     sequences:
-      - test_sequence
+      - test_sequence_1
+      - test_sequence_2
 ---
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Grant
