@@ -318,7 +318,7 @@ func selectSequenceGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 		"AND s.rolname=$3 " +
 		"AND c.relname = ANY($4) " +
 		"AND acl.is_grantable=$5 " +
-		"GROUP BY n.nspname, s.rolname, acl.is_grantable " +
+		"GROUP BY c.relname, n.nspname, s.rolname, acl.is_grantable " +
 		// Check privileges match. Convoluted right-hand-side is necessary to
 		// ensure identical sort order of the input permissions.
 		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
