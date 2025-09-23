@@ -346,25 +346,28 @@ func selectTableGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	// Finally, perform a permission comparison against expected
 	// permissions.
 	q.String = "SELECT COUNT(*) = $1 AS ct " +
-		"FROM (SELECT 1 " +
-		"FROM information_schema.role_table_grants " +
+		"FROM (SELECT 1 FROM pg_class c " +
+		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
+		"aclexplode(c.relacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		"WHERE c.relkind = 'r' " +
 		// Filter by table, schema, role and grantable setting
-		"WHERE table_schema=$2 " +
-		"AND table_name = ANY($3) " +
-		"AND grantee=$4 " +
-		"AND is_grantable=$5 " +
-		"GROUP BY table_name " +
+		"AND n.nspname=$2 " +
+		"AND s.rolname=$3 " +
+		"AND c.relname = ANY($4) " +
+		"AND acl.is_grantable=$5 " +
+		"GROUP BY c.relname, n.nspname, s.rolname, acl.is_grantable " +
 		// Check privileges match. Convoluted right-hand-side is necessary to
 		// ensure identical sort order of the input permissions.
-		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
 		"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
 		") sub"
 	q.Parameters = []interface{}{
 		len(gp.Tables),
 		gp.Schema,
-		pq.Array(gp.Tables),
 		gp.Role,
-		yesOrNo(gro),
+		pq.Array(gp.Tables),
+		gro,
 		pq.Array(sp),
 	}
 
