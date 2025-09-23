@@ -111,6 +111,7 @@ type GrantParameters struct {
 
 	// Role this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=Role
 	Role *string `json:"role,omitempty"`
 
 	// RoleRef references the role object this grant is for.
@@ -125,6 +126,7 @@ type GrantParameters struct {
 
 	// Database this grant is for.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this grant it for.
@@ -139,6 +141,7 @@ type GrantParameters struct {
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
+	// +crossplane:generate:reference:type=Role
 	MemberOf *string `json:"memberOf,omitempty"`
 
 	// MemberOfRef references the Role that this grant makes Role a member of.

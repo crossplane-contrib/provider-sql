@@ -44,6 +44,7 @@ type ExtensionParameters struct {
 
 	// Database for extension install.
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this extension is for.
@@ -78,7 +79,7 @@ type ExtensionStatus struct {
 // +kubebuilder:printcolumn:name="EXTENSION",type="string",JSONPath=".spec.forProvider.extension"
 // +kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.forProvider.version"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:resource:categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type Extension struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -52,7 +52,7 @@ type ClusterProviderConfigStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="SECRET-NAME",type="string",JSONPath=".spec.credentials.connectionSecretRef.name",priority=1
-// +kubebuilder:resource:scope=Namespaced,categories={crossplane,provider,sql}
+// +kubebuilder:resource:scope=Cluster,categories={crossplane,provider,sql}
 type ClusterProviderConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -16,7 +16,7 @@ spec:
     listKind: ClusterProviderConfigList
     plural: clusterproviderconfigs
     singular: clusterproviderconfig
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .metadata.creationTimestamp
