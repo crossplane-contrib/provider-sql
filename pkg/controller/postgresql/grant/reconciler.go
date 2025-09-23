@@ -224,28 +224,32 @@ func selectColumnGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	// Join grantee. Filter by schema name, table name and grantee name.
 	// Finally, perform a permission comparison against expected
 	// permissions.
-	q.String = "SELECT COUNT(*) >= $1 AS ct " +
-		"FROM (SELECT 1 " +
-		"FROM information_schema.role_column_grants " +
-		// Filter by column, table, schema, role and grantable setting
-		"WHERE table_schema=$2 " +
-		"AND table_name = ANY($3) " +
-		"AND column_name = ANY($4) " +
-		"AND grantee=$5 " +
-		"AND is_grantable=$6 " +
-		"GROUP BY table_name, column_name " +
+	q.String = "SELECT COUNT(*) = $1 AS ct " +
+		"FROM (SELECT 1 FROM pg_class c " +
+		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid " +
+		"INNER JOIN pg_attribute attr on c.oid = attr.attrelid, " +
+		"aclexplode(attr.attacl) as acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		"WHERE c.relkind = 'r' " +
+		// Filter by table, schema, role and grantable setting
+		"AND n.nspname=$2 " +
+		"AND s.rolname=$3 " +
+		"AND c.relname = ANY($4) " +
+		"AND attr.attname = ANY($5) " +
+		"AND acl.is_grantable=$6 " +
+		"GROUP BY c.relname, n.nspname, s.rolname, attr.attname, acl.is_grantable " +
 		// Check privileges match. Convoluted right-hand-side is necessary to
 		// ensure identical sort order of the input permissions.
-		"HAVING array_agg(TEXT(privilege_type) ORDER BY privilege_type ASC) " +
+		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
 		"= (SELECT array(SELECT unnest($7::text[]) as perms ORDER BY perms ASC))" +
 		") sub"
 	q.Parameters = []interface{}{
 		len(gp.Tables) * len(gp.Columns),
 		gp.Schema,
+		gp.Role,
 		pq.Array(gp.Tables),
 		pq.Array(gp.Columns),
-		gp.Role,
-		yesOrNo(gro),
+		gro,
 		pq.Array(sp),
 	}
 
@@ -635,22 +639,20 @@ func createColumnGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro 
 	}
 
 	co := strings.Join(gp.Columns, ",")
+	cp := columnsPrivileges(gp.Privileges.ToStringSlice(), co)
 	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
-	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s",
-			sp,
-			co,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
+			cp,
 			tb,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s (%s) ON TABLE %s TO %s %s",
-			sp,
-			co,
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON TABLE %s TO %s %s",
+			cp,
 			tb,
 			ro,
 			withOption(gp.WithOption),
@@ -816,9 +818,10 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 		)
 		return nil
 	case v1alpha1.RoleColumn:
-		q.String = fmt.Sprintf("REVOKE %s (%s) ON TABLE %s FROM %s",
-			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(gp.Columns, ","),
+		co := strings.Join(gp.Columns, ",")
+		cp := columnsPrivileges(gp.Privileges.ToStringSlice(), co)
+		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
+			cp,
 			strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ","),
 			ro,
 		)
@@ -869,6 +872,15 @@ func prefixAndQuote(sc string, obj []string) []string {
 		ret[i] = qsc + "." + pq.QuoteIdentifier(v)
 	}
 	return ret
+}
+
+// columnsPrivileges returns the privileges for columns in grant format
+func columnsPrivileges(priv []string, cols string) string {
+	ret := make([]string, len(priv))
+	for i, v := range priv {
+		ret[i] = v + "(" + cols + ")"
+	}
+	return strings.Join(ret, ",")
 }
 
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
