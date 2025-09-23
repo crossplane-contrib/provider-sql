@@ -83,10 +83,10 @@ setup_cluster() {
   echo_step "setting up local package cache"
 
   local cache_path="${projectdir}/.work/inttest-package-cache"
-  mkdir -p "${cache_path}"
+  mkdir -p "${cache_path}/xpkg.crossplane.io"
   echo "created cache dir at ${cache_path}"
-  "${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/${PACKAGE_NAME}.gz"
-  chmod 644 "${cache_path}/${PACKAGE_NAME}.gz"
+  "${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
+  chmod 644 "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
 
   local node_image="kindest/node:${KIND_NODE_IMAGE_TAG}"
   echo_step "creating k8s cluster using kind ${KIND_VERSION} and node image ${node_image}"

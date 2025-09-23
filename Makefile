@@ -32,9 +32,9 @@ GO111MODULE = on
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_NODE_IMAGE_TAG ?= v1.30.13
-KIND_VERSION ?= v0.29.0
-KUBECTL_VERSION ?= v1.30.13
+KIND_NODE_IMAGE_TAG ?= v1.32.8
+KIND_VERSION ?= v0.30.0
+KUBECTL_VERSION ?= v1.32.8
 CROSSPLANE_CLI_VERSION ?= v2.0.2
 -include build/makelib/k8s_tools.mk
 
