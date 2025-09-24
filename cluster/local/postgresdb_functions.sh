@@ -3,9 +3,11 @@ set -e
 
 setup_postgresdb_no_tls() {
   echo_step "Installing PostgresDB Helm chart into default namespace"
-  postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  if [[ -z "${postgres_root_pw}" ]]; then
+    postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  fi
 
-  "${HELM}" repo update
+  #"${HELM}" repo update
   "${HELM}" install postgresdb bitnami/postgresql \
       --version 11.9.1 \
       --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
@@ -19,12 +21,21 @@ setup_postgresdb_no_tls() {
 
   "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 &
   PORT_FORWARD_PID=$!
+
+  while ! PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT 1;"; do
+      echo "Waiting for PostgresDB to be ready..."
+      sleep 2
+  done
 }
 
 setup_provider_config_postgres_no_tls() {
-  echo_step "creating ProviderConfig for PostgresDb with no TLS"
+  echo_step "creating ProviderConfig for PostgresDb with no TLS ${API_TYPE}"
+  ignoreNamespace="" # namespace is required for cluster-scoped resources
+  if [ "${API_TYPE}" = "namespaced" ]; then
+    ignoreNamespace="#"
+  fi
   local yaml="$( cat <<EOF
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
 kind: ProviderConfig
 metadata:
   name: default
@@ -33,7 +44,7 @@ spec:
   credentials:
     source: PostgreSQLConnectionSecret
     connectionSecretRef:
-      namespace: default
+      ${ignoreNamespace}namespace: default
       name: postgresdb-creds
 EOF
   )"
@@ -44,34 +55,34 @@ setup_postgresdb_tests(){
 # install provider resources
 echo_step "creating PostgresDB Database resource"
 # create DB
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/database.yaml
+"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
 
 echo_step "creating PostgresDB Role resource"
 # create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/role.yaml
+"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
 
 echo_step "creating PostgresDB Grant resource"
 # create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/grant.yaml
+"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
 
 echo_step "creating PostgresDB Schema resources"
 # create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/schema.yaml
+"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
 
 echo_step "check if Role is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/role.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
 echo_step_completed
 
 echo_step "check if database is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/database.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml > /dev/null
 echo_step_completed
 
 echo_step "check if grant is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/grant.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml > /dev/null
 echo_step_completed
 
 echo_step "check if schema is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml > /dev/null
 echo_step_completed
 }
 
@@ -149,7 +160,7 @@ check_observe_only_database(){
   echo_step "check if observe only database is preserved after deletion"
 
   # Delete the database kubernetes object, it should not delete the database
-  kubectl delete database.postgresql.sql.crossplane.io db-observe
+  "${KUBECTL}" delete database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io db-observe
 
   local datname
   datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
@@ -171,10 +182,10 @@ check_observe_only_database(){
 delete_postgresdb_resources(){
   # uninstall
   echo_step "uninstalling ${PROJECT_NAME}"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/grant.yaml"
-  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/postgresql/database.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/role.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/schema.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
   # ----------- cleaning postgres related resources

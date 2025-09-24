@@ -19,20 +19,26 @@ package controller
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplane/crossplane-runtime/pkg/controller"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mssql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/mysql"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql"
+	clustermssql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
+	clustermysql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
+	clusterpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql"
+	namespacedmssql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mssql"
+	namespacedmysql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mysql"
+	namespacedpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql"
 )
 
-// Setup creates all PostgreSQL controllers with the supplied logger and adds
+// Setup creates all controllers with the supplied logger and adds
 // them to the supplied manager.
 func Setup(mgr ctrl.Manager, l controller.Options) error {
 	for _, setup := range []func(ctrl.Manager, controller.Options) error{
-		mssql.Setup,
-		mysql.Setup,
-		postgresql.Setup,
+		clustermssql.Setup,
+		clustermysql.Setup,
+		clusterpostgresql.Setup,
+		namespacedmssql.Setup,
+		namespacedmysql.Setup,
+		namespacedpostgresql.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
