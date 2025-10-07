@@ -223,7 +223,7 @@ func matchingGrants(currentGrants []string, specGrants []string) bool {
 
 	return true
 }
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { //nolint:gocyclo
 	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
 	if !ok {
 		return managed.ExternalObservation{}, errors.New(errNotDefaultPrivileges)
@@ -255,7 +255,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDefaultPrivileges)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
 		var privilege string
 		if err := rows.Scan(&privilege); err != nil {
