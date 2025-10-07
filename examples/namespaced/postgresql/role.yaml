@@ -1,0 +1,53 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: parent-role
+  namespace: default
+spec:
+  forProvider:
+    connectionLimit: 10
+    privileges:
+      login: true
+    configurationParameters:
+      - name: 'statement_timeout'
+        value: '123'
+      - name: 'search_path'
+        value: '"$user",public'
+  writeConnectionSecretToRef:
+    name: example-parent-role-secret
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: example-role
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      createDb: true
+  writeConnectionSecretToRef:
+    name: example-role-secret
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: ownerrole
+  namespace: default
+spec:
+  writeConnectionSecretToRef:
+    name: ownerrole-secret
+  forProvider:
+    privileges:
+      createDb: true
+      login: true
+      createRole: true
+      inherit: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

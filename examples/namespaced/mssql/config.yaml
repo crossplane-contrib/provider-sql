@@ -1,0 +1,11 @@
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+  namespace: default
+spec:
+  credentials:
+    source: MSSQLConnectionSecret
+    connectionSecretRef:
+      name: db-conn
