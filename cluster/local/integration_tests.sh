@@ -390,12 +390,64 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --set auth.rootPassword="${MARIADB_ROOT_PW}" \
-      --wait
+  # Deploy MariaDB using official mariadb image
+  local yaml="$( cat <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: mariadb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:12
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: "${MARIADB_ROOT_PW}"
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - mariadb -uroot -p\${MARIADB_ROOT_PASSWORD} -e "SELECT 1"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: data
+        emptyDir: {}
+EOF
+  )"
+  echo "${yaml}" | "${KUBECTL}" apply -f -
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 setup_mariadb_tls() {
@@ -409,39 +461,95 @@ setup_mariadb_tls() {
       --from-file=client-cert.pem \
       --from-file=client-key.pem
 
-  local values=$(cat <<EOF
-auth:
-  rootPassword: ${MARIADB_ROOT_PW}
-primary:
-  extraFlags: "--ssl --require-secure-transport=ON --ssl-ca=/opt/bitnami/mariadb/certs/ca-cert.pem --ssl-cert=/opt/bitnami/mariadb/certs/server-cert.pem --ssl-key=/opt/bitnami/mariadb/certs/server-key.pem"
-  configurationSecret: mariadb-server-tls
-  extraVolumes:
-    - name: tls-certificates
-      secret:
-        secretName: mariadb-server-tls
-  extraVolumeMounts:
-    - name: tls-certificates
-      mountPath: /opt/bitnami/mariadb/certs
-      readOnly: true
-initdbScripts:
-  init.sql: |
+  # Create init script ConfigMap
+  "${KUBECTL}" create configmap mariadb-init-script --from-literal=init.sql="
     CREATE USER 'test'@'%' IDENTIFIED BY '${MARIADB_TEST_PW}' REQUIRE X509;
     GRANT ALL PRIVILEGES ON *.* TO 'test'@'%' WITH GRANT OPTION;
     FLUSH PRIVILEGES;
-EOF
-  )
+  "
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --values <(echo "$values") \
-      --wait
+  # Deploy MariaDB using official mariadb image with TLS
+  local yaml="$( cat <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: mariadb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:12
+        args:
+        - --ssl
+        - --require-secure-transport=ON
+        - --ssl-ca=/etc/mysql/certs/ca-cert.pem
+        - --ssl-cert=/etc/mysql/certs/server-cert.pem
+        - --ssl-key=/etc/mysql/certs/server-key.pem
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: "${MARIADB_ROOT_PW}"
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        - name: tls-certificates
+          mountPath: /etc/mysql/certs
+          readOnly: true
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - mariadb -uroot -p\${MARIADB_ROOT_PASSWORD} -e "SELECT 1"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: tls-certificates
+        secret:
+          secretName: mariadb-server-tls
+      - name: init-script
+        configMap:
+          name: mariadb-init-script
+EOF
+  )"
+  echo "${yaml}" | "${KUBECTL}" apply -f -
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 cleanup_mariadb() {
   echo_step "uninstalling MariaDB"
-  "${HELM}" uninstall mariadb
+  "${KUBECTL}" delete statefulset mariadb -n default
+  "${KUBECTL}" delete service mariadb -n default
+  "${KUBECTL}" delete configmap mariadb-init-script -n default --ignore-not-found=true
   "${KUBECTL}" delete secret mariadb-creds
 }
 

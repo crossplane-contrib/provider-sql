@@ -2,16 +2,69 @@
 set -e
 
 setup_postgresdb_no_tls() {
-  echo_step "Installing PostgresDB Helm chart into default namespace"
+  echo_step "Installing PostgresDB into default namespace"
   if [[ -z "${postgres_root_pw}" ]]; then
     postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
   fi
 
-  #"${HELM}" repo update
-  "${HELM}" install postgresdb bitnami/postgresql \
-      --version 11.9.1 \
-      --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
-      --wait
+  # Deploy PostgreSQL using official postgres image
+  local yaml="$( cat <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresdb-postgresql
+  namespace: default
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgresdb-postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresdb-postgresql
+  namespace: default
+spec:
+  serviceName: postgresdb-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresdb-postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresdb-postgresql
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:18
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "${postgres_root_pw}"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: data
+        emptyDir: {}
+EOF
+  )"
+  echo "${yaml}" | "${KUBECTL}" apply -f -
+
+  echo_step "Waiting for PostgreSQL to be ready"
+  "${KUBECTL}" wait --for=condition=ready pod -l app=postgresdb-postgresql --timeout=120s
 
   "${KUBECTL}" create secret generic postgresdb-creds \
       --from-literal username="postgres" \
@@ -196,8 +249,9 @@ delete_postgresdb_resources(){
   echo_step "uninstalling secret and provider config for postgres"
   "${KUBECTL}" delete secret postgresdb-creds
 
-  echo_step "Uninstalling PostgresDB Helm chart from default namespace"
-  "${HELM}" uninstall postgresdb
+  echo_step "Uninstalling PostgresDB from default namespace"
+  "${KUBECTL}" delete statefulset postgresdb-postgresql -n default
+  "${KUBECTL}" delete service postgresdb-postgresql -n default
 }
 
 integration_tests_postgres() {
