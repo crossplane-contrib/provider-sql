@@ -34,6 +34,7 @@ echo_error() {
 
 # ------------------------------
 projectdir="$( cd "$( dirname "${BASH_SOURCE[0]}")"/../.. && pwd )"
+scriptdir="$(dirname "$0")"
 
 # get the build environment variables from the special build.vars target in the main makefile
 eval $(make --no-print-directory -C ${projectdir} build.vars)
@@ -272,109 +273,12 @@ cleanup_tls_certs() {
 
 setup_provider_config_no_tls() {
   echo_step "creating ProviderConfig with no TLS ${API_TYPE}"
-  if [ "${API_TYPE}" == "namespaced" ]; then
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-#     namespace: default
-      name: mariadb-creds
-EOF
-  )"
-
-  else
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-EOF
-  )"
-  fi
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.notls.${API_TYPE}.yaml"
 }
 
 setup_provider_config_tls() {
   echo_step "creating ProviderConfig with TLS ${API_TYPE}"
-  if [ "${API_TYPE}" == "cluster" ]; then
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-  tls: custom
-  tlsConfig:
-    caCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: ca-cert.pem
-    clientCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-cert.pem
-    clientKey:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-key.pem
-    insecureSkipVerify: true
-EOF
-    )"
-  else
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-#     namespace: default
-      name: mariadb-creds
-  tls: custom
-  tlsConfig:
-    caCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: ca-cert.pem
-    clientCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-cert.pem
-    clientKey:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-key.pem
-    insecureSkipVerify: true
-EOF
-    )"
-  fi
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.tls.${API_TYPE}.yaml"
 }
 
 cleanup_provider_config() {
@@ -390,63 +294,10 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  # Deploy MariaDB using official mariadb image
-  local yaml="$( cat <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: mariadb
-  namespace: default
-spec:
-  ports:
-  - port: 3306
-    targetPort: 3306
-  selector:
-    app: mariadb
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mariadb
-  namespace: default
-spec:
-  serviceName: mariadb
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mariadb
-  template:
-    metadata:
-      labels:
-        app: mariadb
-    spec:
-      containers:
-      - name: mariadb
-        image: mariadb:12
-        env:
-        - name: MARIADB_ROOT_PASSWORD
-          value: "${MARIADB_ROOT_PW}"
-        ports:
-        - containerPort: 3306
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/mysql
-        readinessProbe:
-          exec:
-            command:
-            - bash
-            - -c
-            - mariadb -uroot -p\${MARIADB_ROOT_PASSWORD} -e "SELECT 1"
-          initialDelaySeconds: 10
-          periodSeconds: 5
-      volumes:
-      - name: data
-        emptyDir: {}
-EOF
-  )"
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
 
   echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
   "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
@@ -469,79 +320,10 @@ setup_mariadb_tls() {
   "
 
   # Deploy MariaDB using official mariadb image with TLS
-  local yaml="$( cat <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: mariadb
-  namespace: default
-spec:
-  ports:
-  - port: 3306
-    targetPort: 3306
-  selector:
-    app: mariadb
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mariadb
-  namespace: default
-spec:
-  serviceName: mariadb
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mariadb
-  template:
-    metadata:
-      labels:
-        app: mariadb
-    spec:
-      containers:
-      - name: mariadb
-        image: mariadb:12
-        args:
-        - --ssl
-        - --require-secure-transport=ON
-        - --ssl-ca=/etc/mysql/certs/ca-cert.pem
-        - --ssl-cert=/etc/mysql/certs/server-cert.pem
-        - --ssl-key=/etc/mysql/certs/server-key.pem
-        env:
-        - name: MARIADB_ROOT_PASSWORD
-          value: "${MARIADB_ROOT_PW}"
-        ports:
-        - containerPort: 3306
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/mysql
-        - name: tls-certificates
-          mountPath: /etc/mysql/certs
-          readOnly: true
-        - name: init-script
-          mountPath: /docker-entrypoint-initdb.d
-        readinessProbe:
-          exec:
-            command:
-            - bash
-            - -c
-            - mariadb -uroot -p\${MARIADB_ROOT_PASSWORD} -e "SELECT 1"
-          initialDelaySeconds: 10
-          periodSeconds: 5
-      volumes:
-      - name: data
-        emptyDir: {}
-      - name: tls-certificates
-        secret:
-          secretName: mariadb-server-tls
-      - name: init-script
-        configMap:
-          name: mariadb-init-script
-EOF
-  )"
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
 
   echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
   "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
