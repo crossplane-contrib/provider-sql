@@ -2,22 +2,20 @@
 set -e
 
 setup_postgresdb_no_tls() {
-  echo_step "Installing PostgresDB Helm chart into default namespace"
-  if [[ -z "${postgres_root_pw}" ]]; then
-    postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
-  fi
-
-  #"${HELM}" repo update
-  "${HELM}" install postgresdb bitnami/postgresql \
-      --version 11.9.1 \
-      --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
-      --wait
+  echo_step "Installing PostgresDB into default namespace"
+  postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 
   "${KUBECTL}" create secret generic postgresdb-creds \
       --from-literal username="postgres" \
       --from-literal password="${postgres_root_pw}" \
       --from-literal endpoint="postgresdb-postgresql.default.svc.cluster.local" \
       --from-literal port="5432"
+
+  scriptdir=$(dirname "$0")
+  "${KUBECTL}" apply -f "${scriptdir}/postgres.server.yaml"
+
+  echo_step "Waiting for PostgreSQL to be ready"
+  "${KUBECTL}" wait --for=condition=ready pod -l app=postgresdb-postgresql --timeout=120s
 
   "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 &
   PORT_FORWARD_PID=$!
@@ -30,60 +28,42 @@ setup_postgresdb_no_tls() {
 
 setup_provider_config_postgres_no_tls() {
   echo_step "creating ProviderConfig for PostgresDb with no TLS ${API_TYPE}"
-  ignoreNamespace="" # namespace is required for cluster-scoped resources
-  if [ "${API_TYPE}" = "namespaced" ]; then
-    ignoreNamespace="#"
-  fi
-  local yaml="$( cat <<EOF
-apiVersion: postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  sslMode: disable
-  credentials:
-    source: PostgreSQLConnectionSecret
-    connectionSecretRef:
-      ${ignoreNamespace}namespace: default
-      name: postgresdb-creds
-EOF
-  )"
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/postgres.providerconfig.${API_TYPE}.yaml"
 }
 
 setup_postgresdb_tests(){
-# install provider resources
-echo_step "creating PostgresDB Database resource"
-# create DB
-"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
+  # install provider resources
+  echo_step "creating PostgresDB Database resource"
+  # create DB
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
 
-echo_step "creating PostgresDB Role resource"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
+  echo_step "creating PostgresDB Role resource"
+  # create grant
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
 
-echo_step "creating PostgresDB Grant resource"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
+  echo_step "creating PostgresDB Grant resource"
+  # create grant
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
 
-echo_step "creating PostgresDB Schema resources"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
+  echo_step "creating PostgresDB Schema resources"
+  # create grant
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
 
-echo_step "check if Role is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
-echo_step_completed
+  echo_step "check if Role is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
+  echo_step_completed
 
-echo_step "check if database is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml > /dev/null
-echo_step_completed
+  echo_step "check if database is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml > /dev/null
+  echo_step_completed
 
-echo_step "check if grant is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml > /dev/null
-echo_step_completed
+  echo_step "check if grant is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml > /dev/null
+  echo_step_completed
 
-echo_step "check if schema is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml > /dev/null
-echo_step_completed
+  echo_step "check if schema is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml > /dev/null
+  echo_step_completed
 }
 
 check_all_roles_privileges() {
@@ -196,8 +176,9 @@ delete_postgresdb_resources(){
   echo_step "uninstalling secret and provider config for postgres"
   "${KUBECTL}" delete secret postgresdb-creds
 
-  echo_step "Uninstalling PostgresDB Helm chart from default namespace"
-  "${HELM}" uninstall postgresdb
+  echo_step "Uninstalling PostgresDB from default namespace"
+  "${KUBECTL}" delete statefulset postgresdb-postgresql -n default
+  "${KUBECTL}" delete service postgresdb-postgresql -n default
 }
 
 integration_tests_postgres() {

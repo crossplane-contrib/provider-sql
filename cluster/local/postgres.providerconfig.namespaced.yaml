@@ -1,0 +1,10 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  sslMode: disable
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      name: postgresdb-creds

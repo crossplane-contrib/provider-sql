@@ -34,6 +34,7 @@ echo_error() {
 
 # ------------------------------
 projectdir="$( cd "$( dirname "${BASH_SOURCE[0]}")"/../.. && pwd )"
+scriptdir="$(dirname "$0")"
 
 # get the build environment variables from the special build.vars target in the main makefile
 eval $(make --no-print-directory -C ${projectdir} build.vars)
@@ -272,109 +273,12 @@ cleanup_tls_certs() {
 
 setup_provider_config_no_tls() {
   echo_step "creating ProviderConfig with no TLS ${API_TYPE}"
-  if [ "${API_TYPE}" == "namespaced" ]; then
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-#     namespace: default
-      name: mariadb-creds
-EOF
-  )"
-
-  else
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-EOF
-  )"
-  fi
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.notls.${API_TYPE}.yaml"
 }
 
 setup_provider_config_tls() {
   echo_step "creating ProviderConfig with TLS ${API_TYPE}"
-  if [ "${API_TYPE}" == "cluster" ]; then
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-  tls: custom
-  tlsConfig:
-    caCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: ca-cert.pem
-    clientCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-cert.pem
-    clientKey:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-key.pem
-    insecureSkipVerify: true
-EOF
-    )"
-  else
-    local yaml="$( cat <<EOF
-apiVersion: mysql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-#     namespace: default
-      name: mariadb-creds
-  tls: custom
-  tlsConfig:
-    caCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: ca-cert.pem
-    clientCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-cert.pem
-    clientKey:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-key.pem
-    insecureSkipVerify: true
-EOF
-    )"
-  fi
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.tls.${API_TYPE}.yaml"
 }
 
 cleanup_provider_config() {
@@ -390,12 +294,11 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --set auth.rootPassword="${MARIADB_ROOT_PW}" \
-      --wait
+  "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 setup_mariadb_tls() {
@@ -409,39 +312,26 @@ setup_mariadb_tls() {
       --from-file=client-cert.pem \
       --from-file=client-key.pem
 
-  local values=$(cat <<EOF
-auth:
-  rootPassword: ${MARIADB_ROOT_PW}
-primary:
-  extraFlags: "--ssl --require-secure-transport=ON --ssl-ca=/opt/bitnami/mariadb/certs/ca-cert.pem --ssl-cert=/opt/bitnami/mariadb/certs/server-cert.pem --ssl-key=/opt/bitnami/mariadb/certs/server-key.pem"
-  configurationSecret: mariadb-server-tls
-  extraVolumes:
-    - name: tls-certificates
-      secret:
-        secretName: mariadb-server-tls
-  extraVolumeMounts:
-    - name: tls-certificates
-      mountPath: /opt/bitnami/mariadb/certs
-      readOnly: true
-initdbScripts:
-  init.sql: |
+  # Create init script ConfigMap
+  "${KUBECTL}" create configmap mariadb-init-script --from-literal=init.sql="
     CREATE USER 'test'@'%' IDENTIFIED BY '${MARIADB_TEST_PW}' REQUIRE X509;
     GRANT ALL PRIVILEGES ON *.* TO 'test'@'%' WITH GRANT OPTION;
     FLUSH PRIVILEGES;
-EOF
-  )
+  "
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --values <(echo "$values") \
-      --wait
+  # Deploy MariaDB using official mariadb image with TLS
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 cleanup_mariadb() {
   echo_step "uninstalling MariaDB"
-  "${HELM}" uninstall mariadb
+  "${KUBECTL}" delete statefulset mariadb -n default
+  "${KUBECTL}" delete service mariadb -n default
+  "${KUBECTL}" delete configmap mariadb-init-script -n default --ignore-not-found=true
   "${KUBECTL}" delete secret mariadb-creds
 }
 
