@@ -255,11 +255,12 @@ func TestObserve(t *testing.T) {
 			fields: fields{
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						// Set the auth plugin to the default value to match what the database would return
+						// Set the auth plugin to empty string (database will use its default)
+						// This avoids hardcoding mysql_native_password which is deprecated/removed
 						if len(dest) >= 5 {
 							if plugin, ok := dest[4].(**string); ok {
-								defaultPlugin := "mysql_native_password"
-								*plugin = &defaultPlugin
+								emptyPlugin := ""
+								*plugin = &emptyPlugin
 							}
 						}
 						return nil
@@ -627,7 +628,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+							AuthPlugin: pointer.StringPtr(""),
 						},
 					},
 				},
@@ -662,7 +663,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+							AuthPlugin: pointer.StringPtr(""),
 						},
 					},
 				},
@@ -696,7 +697,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+							AuthPlugin: pointer.StringPtr(""),
 						},
 					},
 				},
@@ -744,7 +745,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+							AuthPlugin: pointer.StringPtr(""),
 						},
 					},
 				},
@@ -823,7 +824,7 @@ func TestUpdate(t *testing.T) {
 								"MAX_CONNECTIONS_PER_HOUR 20",
 								"MAX_USER_CONNECTIONS 20",
 							},
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)), // default AuthPlugin value
+							AuthPlugin: pointer.StringPtr(""), // default AuthPlugin value
 						},
 					},
 				},
@@ -886,7 +887,7 @@ func TestUpdate(t *testing.T) {
 								"MAX_CONNECTIONS_PER_HOUR 0",
 								"MAX_USER_CONNECTIONS 0",
 							},
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)), // default AuthPlugin value
+							AuthPlugin: pointer.StringPtr(""), // default AuthPlugin value
 						},
 					},
 				},
@@ -961,7 +962,7 @@ func TestUpdate(t *testing.T) {
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
-							AuthPlugin: pointer.StringPtr(defaultAuthPlugin(nil)),
+							AuthPlugin: pointer.StringPtr(""),
 						},
 					},
 					Status: v1alpha1.UserStatus{

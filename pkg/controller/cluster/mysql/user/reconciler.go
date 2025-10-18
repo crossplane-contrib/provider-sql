@@ -317,9 +317,20 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptionsClauses []string, pw *string) error {
-	passwordSection := ""
-	if pw != nil {
-		passwordSection = fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
+	var identifiedClause string
+	
+	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
+	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
+	// This ensures compatibility with both MySQL and MariaDB
+	if plugin == "" {
+		if pw != nil {
+			identifiedClause = fmt.Sprintf("IDENTIFIED BY %s", mysql.QuoteValue(*pw))
+		}
+	} else {
+		identifiedClause = fmt.Sprintf("IDENTIFIED WITH %s", plugin)
+		if pw != nil {
+			identifiedClause += fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
+		}
 	}
 
 	resourceOptions := ""
@@ -328,11 +339,10 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 	}
 
 	query := fmt.Sprintf(
-		"CREATE USER %s@%s IDENTIFIED WITH %s%s%s",
+		"CREATE USER %s@%s %s%s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
-		plugin,
-		passwordSection,
+		identifiedClause,
 		resourceOptions,
 	)
 
@@ -396,16 +406,29 @@ func (c *external) applyAlterUserIfSomeFieldChanged(ctx context.Context, cr *v1a
 }
 
 func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, pw string) error {
-	passwordSection := ""
-	if pw != "" {
-		passwordSection = fmt.Sprintf(" BY %s", mysql.QuoteValue(pw))
+	var identifiedClause string
+	
+	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
+	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
+	// This ensures compatibility with both MySQL and MariaDB
+	if plugin == "" {
+		if pw != "" {
+			identifiedClause = fmt.Sprintf("IDENTIFIED BY %s", mysql.QuoteValue(pw))
+		} else {
+			// No password and no plugin means nothing to update
+			return nil
+		}
+	} else {
+		identifiedClause = fmt.Sprintf("IDENTIFIED WITH %s", plugin)
+		if pw != "" {
+			identifiedClause += fmt.Sprintf(" BY %s", mysql.QuoteValue(pw))
+		}
 	}
 
-	query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED WITH %s%s",
+	query := fmt.Sprintf("ALTER USER %s@%s %s",
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
-		plugin,
-		passwordSection,
+		identifiedClause,
 	)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
@@ -472,8 +495,11 @@ func checkAuthPluginChanged(cr *v1alpha1.User) bool {
 }
 
 func defaultAuthPlugin(authPlugin *string) string {
-	if authPlugin == nil {
-		return "mysql_native_password"
+	// nil or empty string means use the default plugin (let MySQL/MariaDB decide)
+	// This avoids hardcoding mysql_native_password which is deprecated in MySQL 8.0.34+
+	// and not supported in MariaDB
+	if authPlugin == nil || *authPlugin == "" {
+		return ""
 	}
 
 	return *authPlugin
