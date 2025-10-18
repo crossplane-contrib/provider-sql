@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
+	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 )
 
 const (
@@ -25,7 +26,7 @@ type mySQLDB struct {
 }
 
 // New returns a new MySQL database client.
-func New(creds map[string][]byte, tls *string) xsql.DB {
+func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
@@ -35,7 +36,7 @@ func New(creds map[string][]byte, tls *string) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
-	dsn := DSN(username, password, endpoint, port, *tls)
+	dsn := DSN(username, password, endpoint, port, *tls, binlog)
 
 	return mySQLDB{
 		dsn:      dsn,
@@ -46,10 +47,19 @@ func New(creds map[string][]byte, tls *string) xsql.DB {
 }
 
 // DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string) string {
+func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
+	if binlog != nil {
+		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
+			username,
+			password,
+			endpoint,
+			port,
+			tls,
+			strconv.FormatBool(*binlog))
+	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
 		username,
 		password,
@@ -128,4 +138,23 @@ func SplitUserHost(user string) (username, host string) {
 		host = parts[1]
 	}
 	return username, host
+}
+
+// ExecQuery declares the query to execute and its error value if it fails
+type ExecQuery struct {
+	// Query defines the sql statement to execute
+	Query string
+	// ErrorValue defines what error will be returned if the provided sql statement failed when executing
+	ErrorValue string
+}
+
+// ExecWrapper is a wrapper function for xsql.DB.Exec() that allows the execution of optional queries before and after the provided query
+func ExecWrapper(ctx context.Context, db xsql.DB, query ExecQuery) error {
+	if err := db.Exec(ctx, xsql.Query{
+		String: query.Query,
+	}); err != nil {
+		return errors.Wrap(err, query.ErrorValue)
+	}
+
+	return nil
 }

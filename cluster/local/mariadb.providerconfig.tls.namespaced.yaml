@@ -1,0 +1,27 @@
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: MySQLConnectionSecret
+    connectionSecretRef:
+      name: mariadb-creds
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: ca-cert.pem
+    clientCert:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: client-cert.pem
+    clientKey:
+      secretRef:
+        namespace: default
+        name: mariadb-creds
+        key: client-key.pem
+    insecureSkipVerify: true

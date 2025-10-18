@@ -20,17 +20,23 @@ package apis
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
-	mssql "github.com/crossplane-contrib/provider-sql/apis/mssql/v1alpha1"
-	mysql "github.com/crossplane-contrib/provider-sql/apis/mysql/v1alpha1"
-	postgresql "github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	clustermssql "github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
+	clustermysql "github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
+	clusterpostgresql "github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
+	namespacedmssql "github.com/crossplane-contrib/provider-sql/apis/namespaced/mssql/v1alpha1"
+	namespacedmysql "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
+	namespacedpostgresql "github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 )
 
 func init() {
 	// Register the types with the Scheme so the components can map objects to GroupVersionKinds and back
 	AddToSchemes = append(AddToSchemes,
-		mssql.SchemeBuilder.AddToScheme,
-		mysql.SchemeBuilder.AddToScheme,
-		postgresql.SchemeBuilder.AddToScheme,
+		clustermssql.SchemeBuilder.AddToScheme,
+		clustermysql.SchemeBuilder.AddToScheme,
+		clusterpostgresql.SchemeBuilder.AddToScheme,
+		namespacedmssql.SchemeBuilder.AddToScheme,
+		namespacedmysql.SchemeBuilder.AddToScheme,
+		namespacedpostgresql.SchemeBuilder.AddToScheme,
 	)
 }
 
