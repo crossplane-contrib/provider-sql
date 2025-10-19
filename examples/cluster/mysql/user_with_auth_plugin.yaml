@@ -18,7 +18,7 @@ spec:
 apiVersion: mysql.sql.crossplane.io/v1alpha1
 kind: User
 metadata:
-  name: example-sha2-user
+  name: example-caching-sha2-user
 spec:
   forProvider:
     authPlugin: caching_sha2_password
