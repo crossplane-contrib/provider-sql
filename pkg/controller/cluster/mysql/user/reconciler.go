@@ -276,36 +276,25 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
 	plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
+	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
 
-	pw, _, err := c.getPassword(ctx, cr)
-	if err != nil {
-		return managed.ExternalCreation{}, err
-	}
-
-	if pw == "" {
-		pw, err = password.Generate()
+	var pw *string
+	if checkUsePassword(cr) {
+		userPassword, _, err := c.getPassword(ctx, cr)
 		if err != nil {
 			return managed.ExternalCreation{}, err
 		}
+
+		if userPassword == "" {
+			userPassword, err = password.Generate()
+			if err != nil {
+				return managed.ExternalCreation{}, err
+			}
+		}
+		pw = &userPassword
 	}
 
-	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-
-	if checkUsePassword(cr) {
-		if err := c.executeCreateUserQuery(ctx, username, host, plugin, ro, &pw); err != nil {
-			return managed.ExternalCreation{}, err
-		}
-
-		if len(ro) != 0 {
-			cr.Status.AtProvider.ResourceOptionsAsClauses = ro
-		}
-
-		return managed.ExternalCreation{
-			ConnectionDetails: c.db.GetConnectionDetails(username, pw),
-		}, nil
-	}
-
-	if err := c.executeCreateUserQuery(ctx, username, host, plugin, ro, nil); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, plugin, ro, pw); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
@@ -313,25 +302,17 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
+	if pw != nil {
+		return managed.ExternalCreation{
+			ConnectionDetails: c.db.GetConnectionDetails(username, *pw),
+		}, nil
+	}
+
 	return managed.ExternalCreation{}, nil
 }
 
 func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptionsClauses []string, pw *string) error {
-	var identifiedClause string
-
-	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
-	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
-	// This ensures compatibility with both MySQL and MariaDB
-	if plugin == "" {
-		if pw != nil {
-			identifiedClause = fmt.Sprintf("IDENTIFIED BY %s", mysql.QuoteValue(*pw))
-		}
-	} else {
-		identifiedClause = fmt.Sprintf("IDENTIFIED WITH %s", plugin)
-		if pw != nil {
-			identifiedClause += fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
-		}
-	}
+	identifiedClause := buildIdentifiedClause(plugin, pw)
 
 	resourceOptions := ""
 	if len(resourceOptionsClauses) != 0 {
@@ -346,11 +327,7 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 		resourceOptions,
 	)
 
-	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}); err != nil {
-		return err
-	}
-
-	return nil
+	return mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser})
 }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
@@ -367,38 +344,61 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		return managed.ExternalUpdate{}, err
 	}
 
-	password, passwordChanged, err := getPassword(ctx, cr, c)
-	if err != nil {
+	password := ""
+	passwordChanged := false
+	if checkUsePassword(cr) {
+		password, passwordChanged, err = c.getPassword(ctx, cr)
+		if err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+	}
+
+	return c.applyUserChanges(ctx, cr, passwordChanged, roToAlter, username, host, plugin, password)
+}
+
+func (c *external) applyUserChanges(ctx context.Context, cr *v1alpha1.User, passwordChanged bool, roToAlter []string, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
+	// Handle resource options changes (separate ALTER USER statement)
+	if err := c.updateResourceOptionsIfChanged(ctx, cr, roToAlter, username, host); err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	return c.applyAlterUserIfSomeFieldChanged(ctx, cr, passwordChanged, roToAlter, username, host, plugin, password)
+	// Handle auth plugin and/or password changes (separate ALTER USER statement)
+	return c.updateAuthIfChanged(ctx, cr, passwordChanged, username, host, plugin, password)
 }
 
-func (c *external) applyAlterUserIfSomeFieldChanged(ctx context.Context, cr *v1alpha1.User, passwordChanged bool, roToAlter []string, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
-	// Handle resource options changes
-	if checkResourceOptionsChanged(roToAlter) {
-		resourceOptions := fmt.Sprintf(" WITH %s", strings.Join(roToAlter, " "))
-		query := fmt.Sprintf(
-			"ALTER USER %s@%s%s",
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-			resourceOptions,
-		)
-		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
-			return managed.ExternalUpdate{}, err
-		}
-		cr.Status.AtProvider.ResourceOptionsAsClauses = roToAlter
+func (c *external) updateResourceOptionsIfChanged(ctx context.Context, cr *v1alpha1.User, roToAlter []string, username string, host string) error {
+	if !checkResourceOptionsChanged(roToAlter) {
+		return nil
 	}
 
-	// Handle auth plugin and/or password changes
-	if (checkUsePassword(cr) && passwordChanged) || checkAuthPluginChanged(cr) {
-		if err := c.executeAlterUserQuery(ctx, username, host, plugin, password); err != nil {
-			return managed.ExternalUpdate{}, err
-		}
+	resourceOptions := fmt.Sprintf(" WITH %s", strings.Join(roToAlter, " "))
+	query := fmt.Sprintf(
+		"ALTER USER %s@%s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		resourceOptions,
+	)
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
+		return err
+	}
+	cr.Status.AtProvider.ResourceOptionsAsClauses = roToAlter
+	return nil
+}
+
+func (c *external) updateAuthIfChanged(ctx context.Context, cr *v1alpha1.User, passwordChanged bool, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
+	needsPasswordUpdate := checkUsePassword(cr) && passwordChanged
+	needsAuthPluginUpdate := checkAuthPluginChanged(cr)
+
+	if !needsPasswordUpdate && !needsAuthPluginUpdate {
+		return managed.ExternalUpdate{}, nil
 	}
 
-	if checkUsePassword(cr) && passwordChanged {
+	if err := c.executeAlterUserQuery(ctx, username, host, plugin, password); err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
+	// Return connection details if password was updated
+	if needsPasswordUpdate {
 		return managed.ExternalUpdate{ConnectionDetails: c.db.GetConnectionDetails(username, password)}, nil
 	}
 
@@ -406,23 +406,10 @@ func (c *external) applyAlterUserIfSomeFieldChanged(ctx context.Context, cr *v1a
 }
 
 func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, pw string) error {
-	var identifiedClause string
-
-	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
-	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
-	// This ensures compatibility with both MySQL and MariaDB
-	if plugin == "" {
-		if pw != "" {
-			identifiedClause = fmt.Sprintf("IDENTIFIED BY %s", mysql.QuoteValue(pw))
-		} else {
-			// No password and no plugin means nothing to update
-			return nil
-		}
-	} else {
-		identifiedClause = fmt.Sprintf("IDENTIFIED WITH %s", plugin)
-		if pw != "" {
-			identifiedClause += fmt.Sprintf(" BY %s", mysql.QuoteValue(pw))
-		}
+	identifiedClause := buildIdentifiedClause(plugin, &pw)
+	if identifiedClause == "" {
+		// No password and no plugin means nothing to update
+		return nil
 	}
 
 	query := fmt.Sprintf("ALTER USER %s@%s %s",
@@ -431,27 +418,26 @@ func (c *external) executeAlterUserQuery(ctx context.Context, username string, h
 		identifiedClause,
 	)
 
-	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
-		return err
-	}
-
-	return nil
+	return mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser})
 }
 
-func getPassword(ctx context.Context, cr *v1alpha1.User, c *external) (string, bool, error) {
-	password := ""
-	passwordChanged := false
-	if checkUsePassword(cr) {
-		pw, pwdChanged, err := c.getPassword(ctx, cr)
-		if err != nil {
-			return pw, pwdChanged, err
+// buildIdentifiedClause constructs the IDENTIFIED clause for CREATE/ALTER USER statements.
+// When plugin is empty (nil or ""), uses default auth: IDENTIFIED BY 'password'
+// When plugin is specified, uses: IDENTIFIED WITH plugin BY 'password'
+// This ensures compatibility with both MySQL and MariaDB
+func buildIdentifiedClause(plugin string, pw *string) string {
+	if plugin == "" {
+		if pw != nil && *pw != "" {
+			return fmt.Sprintf("IDENTIFIED BY %s", mysql.QuoteValue(*pw))
 		}
-
-		password = pw
-		passwordChanged = pwdChanged
+		return ""
 	}
 
-	return password, passwordChanged, nil
+	identifiedClause := fmt.Sprintf("IDENTIFIED WITH %s", plugin)
+	if pw != nil && *pw != "" {
+		identifiedClause += fmt.Sprintf(" BY %s", mysql.QuoteValue(*pw))
+	}
+	return identifiedClause
 }
 
 func getResourceOptionsToAlter(cr *v1alpha1.User) ([]string, error) {
