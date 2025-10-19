@@ -318,7 +318,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func (c *external) executeCreateUserQuery(ctx context.Context, username string, host string, plugin string, resourceOptionsClauses []string, pw *string) error {
 	var identifiedClause string
-	
+
 	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
 	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
 	// This ensures compatibility with both MySQL and MariaDB
@@ -407,7 +407,7 @@ func (c *external) applyAlterUserIfSomeFieldChanged(ctx context.Context, cr *v1a
 
 func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, pw string) error {
 	var identifiedClause string
-	
+
 	// When plugin is empty (nil or ""), use default auth: IDENTIFIED BY 'password'
 	// When plugin is specified, use: IDENTIFIED WITH plugin BY 'password'
 	// This ensures compatibility with both MySQL and MariaDB

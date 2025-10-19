@@ -28,7 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
@@ -529,8 +529,8 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							AuthPlugin:  pointer.StringPtr("authentication_ldap_simple"),
-							UsePassword: pointer.BoolPtr(false),
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
 						},
 					},
 				},
@@ -628,7 +628,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(""),
+							AuthPlugin: ptr.To(""),
 						},
 					},
 				},
@@ -663,7 +663,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(""),
+							AuthPlugin: ptr.To(""),
 						},
 					},
 				},
@@ -697,7 +697,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(""),
+							AuthPlugin: ptr.To(""),
 						},
 					},
 				},
@@ -745,7 +745,7 @@ func TestUpdate(t *testing.T) {
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr(""),
+							AuthPlugin: ptr.To(""),
 						},
 					},
 				},
@@ -809,10 +809,10 @@ func TestUpdate(t *testing.T) {
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
 							ResourceOptions: &v1alpha1.ResourceOptions{
-								MaxQueriesPerHour:     pointer.IntPtr(10),
-								MaxUpdatesPerHour:     pointer.IntPtr(10),
-								MaxConnectionsPerHour: pointer.IntPtr(10),
-								MaxUserConnections:    pointer.IntPtr(10),
+								MaxQueriesPerHour:     ptr.To(10),
+								MaxUpdatesPerHour:     ptr.To(10),
+								MaxConnectionsPerHour: ptr.To(10),
+								MaxUserConnections:    ptr.To(10),
 							},
 						},
 					},
@@ -824,7 +824,7 @@ func TestUpdate(t *testing.T) {
 								"MAX_CONNECTIONS_PER_HOUR 20",
 								"MAX_USER_CONNECTIONS 20",
 							},
-							AuthPlugin: pointer.StringPtr(""), // default AuthPlugin value
+							AuthPlugin: ptr.To(""), // default AuthPlugin value
 						},
 					},
 				},
@@ -887,7 +887,7 @@ func TestUpdate(t *testing.T) {
 								"MAX_CONNECTIONS_PER_HOUR 0",
 								"MAX_USER_CONNECTIONS 0",
 							},
-							AuthPlugin: pointer.StringPtr(""), // default AuthPlugin value
+							AuthPlugin: ptr.To(""), // default AuthPlugin value
 						},
 					},
 				},
@@ -922,13 +922,13 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							AuthPlugin:  pointer.StringPtr("authentication_ldap_simple"),
-							UsePassword: pointer.BoolPtr(false),
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
 						},
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr("authentication_ldap_simple"),
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
 						},
 					},
 				},
@@ -962,12 +962,12 @@ func TestUpdate(t *testing.T) {
 								},
 								Key: xpv1.ResourceCredentialsSecretPasswordKey,
 							},
-							AuthPlugin: pointer.StringPtr(""),
+							AuthPlugin: ptr.To(""),
 						},
 					},
 					Status: v1alpha1.UserStatus{
 						AtProvider: v1alpha1.UserObservation{
-							AuthPlugin: pointer.StringPtr("authentication_ldap_simple"),
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
 						},
 					},
 				},
