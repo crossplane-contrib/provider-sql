@@ -1,0 +1,51 @@
+---
+# Example: Namespaced User with custom authentication plugin (e.g., LDAP)
+# Some authentication plugins like authentication_ldap_simple don't require
+# passwords, so usePassword is set to false
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-ldap-user
+  namespace: default
+spec:
+  forProvider:
+    authPlugin: authentication_ldap_simple
+    usePassword: false  # LDAP authentication doesn't use a MySQL password
+  providerConfigRef:
+    name: example
+---
+# Example: Namespaced User with specific authentication plugin and password
+# For plugins that require passwords like caching_sha2_password
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-caching-sha2-user
+  namespace: default
+spec:
+  forProvider:
+    authPlugin: caching_sha2_password
+    passwordSecretRef:
+      name: example-pw
+      key: password
+  writeConnectionSecretToRef:
+    name: example-sha2-connection-secret
+  providerConfigRef:
+    name: example
+---
+# Example: Namespaced User without authPlugin specified (uses database server default)
+# This is the recommended approach for maximum compatibility
+# across different MySQL/MariaDB versions
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-default-user
+  namespace: default
+spec:
+  forProvider:
+    passwordSecretRef:
+      name: example-pw
+      key: password
+  writeConnectionSecretToRef:
+    name: example-default-connection-secret
+  providerConfigRef:
+    name: example

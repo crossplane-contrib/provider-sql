@@ -422,9 +422,6 @@ func (c *external) executeAlterUserQuery(ctx context.Context, username string, h
 }
 
 // buildIdentifiedClause constructs the IDENTIFIED clause for CREATE/ALTER USER statements.
-// When plugin is empty (nil or ""), uses default auth: IDENTIFIED BY 'password'
-// When plugin is specified, uses: IDENTIFIED WITH plugin BY 'password'
-// This ensures compatibility with both MySQL and MariaDB
 func buildIdentifiedClause(plugin string, pw *string) string {
 	if plugin == "" {
 		if pw != nil && *pw != "" {
