@@ -1,15 +1,13 @@
 module github.com/crossplane-contrib/provider-sql
 
-go 1.24.0
-
-toolchain go1.24.5
+go 1.24.7
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/crossplane/crossplane-runtime/v2 v2.0.0
 	github.com/crossplane/crossplane-tools v0.0.0-20250731192036-00d407d8b7ec
-	github.com/crossplane/upjet/v2 v2.0.0
+	github.com/crossplane/upjet/v2 v2.1.0
 	github.com/denisenkom/go-mssqldb v0.11.0
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/google/go-cmp v0.7.0
