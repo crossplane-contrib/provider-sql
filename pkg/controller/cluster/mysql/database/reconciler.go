@@ -47,35 +47,21 @@ const (
 	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
 
-	errNotDatabase = "managed resource is not a Database custom resource"
-	errSelectDB    = "cannot select database"
-	errCreateDB    = "cannot create database"
-	errDropDB      = "cannot drop database"
+	errSelectDB = "cannot select database"
+	errCreateDB = "cannot create database"
+	errDropDB   = "cannot drop database"
 
 	maxConcurrency = 5
 )
-
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.DatabaseGroupKind)
 
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -99,25 +85,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Database] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return nil, errors.New(errNotDatabase)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed.TypedExternalClient[*v1alpha1.Database], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerConfigName := cr.GetProviderConfigReference().Name
+	providerConfigName := mg.GetProviderConfigReference().Name
 	pc := &v1alpha1.ProviderConfig{}
 	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
@@ -141,22 +122,17 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog)}, nil
+	return &external{db: c.newDB(s.Data, tlsName, mg.Spec.ForProvider.BinLog)}, nil
 }
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Database] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDatabase)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalObservation, error) {
 	var name string
 	query := "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}}, &name)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(mg)}}, &name)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -164,7 +140,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDB)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists: true,
@@ -175,13 +151,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDatabase)
-	}
-
-	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalCreation, error) {
+	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}); err != nil {
 		return managed.ExternalCreation{}, err
@@ -190,7 +161,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalCreation{}, nil
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalUpdate, error) {
 	// TODO(negz): Support updates once we have anything to update.
 	return managed.ExternalUpdate{}, nil
 }
@@ -199,13 +170,8 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotDatabase)
-	}
-
-	query := "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(cr))
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalDelete, error) {
+	query := "DROP DATABASE IF EXISTS " + mysql.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropDB}); err != nil {
 		return managed.ExternalDelete{}, err

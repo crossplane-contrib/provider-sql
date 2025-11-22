@@ -66,12 +66,12 @@ func TestConnect(t *testing.T) {
 
 	type fields struct {
 		kube  client.Client
-		usage resource.Tracker
+		track func(context.Context, resource.ModernManaged) error
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Database
 	}
 
 	cases := map[string]struct {
@@ -80,17 +80,10 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotDatabase": {
-			reason: "An error should be returned if the managed resource is not a *Database",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotDatabase),
-		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return errBoom },
 			},
 			args: args{
 				mg: &v1alpha1.Database{},
@@ -100,7 +93,7 @@ func TestConnect(t *testing.T) {
 		"InvalidProviderConfigKind": {
 			reason: "An error should be returned if our ProviderConfig has an invalid kind",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.Database{
@@ -121,7 +114,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.Database{
@@ -143,7 +136,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.Database{
@@ -168,7 +161,7 @@ func TestConnect(t *testing.T) {
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.Database{
@@ -201,7 +194,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.Database{
@@ -224,7 +217,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -242,7 +235,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Database
 	}
 
 	type want struct {
@@ -256,15 +249,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotDatabase": {
-			reason: "An error should be returned if the managed resource is not a *Database",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDatabase),
-			},
-		},
 		"ErrNoDatabase": {
 			reason: "We should return ResourceExists: false when no database is found",
 			fields: fields{
@@ -337,7 +321,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Database
 	}
 
 	type want struct {
@@ -351,15 +335,6 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotDatabase": {
-			reason: "An error should be returned if the managed resource is not a *Database",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDatabase),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the database should be returned",
 			fields: fields{
@@ -413,7 +388,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Database
 	}
 
 	cases := map[string]struct {
@@ -422,13 +397,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotDatabase": {
-			reason: "An error should be returned if the managed resource is not a *Database",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotDatabase),
-		},
 		"ErrDropDB": {
 			reason: "Errors dropping a database should be returned",
 			fields: fields{

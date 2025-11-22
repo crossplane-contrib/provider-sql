@@ -51,7 +51,6 @@ const (
 	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
 
-	errNotGrant     = "managed resource is not a Grant custom resource"
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
 	errCurrentGrant = "cannot show current grants"
@@ -65,27 +64,13 @@ var (
 	grantRegex = regexp.MustCompile(`^GRANT (.+) ON (\S+)\.(\S+) TO \S+@\S+?(\sWITH GRANT OPTION)?$`)
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
-
 // Setup adds a controller that reconciles Grant managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.GrantGroupKind)
-
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
@@ -109,25 +94,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return nil, errors.New(errNotGrant)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.TypedExternalClient[*v1alpha1.Grant], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerConfigName := cr.GetProviderConfigReference().Name
+	providerConfigName := mg.GetProviderConfigReference().Name
 	pc := &v1alpha1.ProviderConfig{}
 	if err := c.kube.Get(ctx, types.NamespacedName{Name: providerConfigName}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
@@ -151,22 +131,17 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(s.Data, tlsName, cr.Spec.ForProvider.BinLog)}, nil
+	return &external{db: c.newDB(s.Data, tlsName, mg.Spec.ForProvider.BinLog)}, nil
 }
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Grant] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotGrant)
-	}
-
-	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
-	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
-	table := defaultIdentifier(cr.Spec.ForProvider.Table)
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalObservation, error) {
+	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
+	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
+	table := defaultIdentifier(mg.Spec.ForProvider.Table)
 
 	observedPrivileges, result, err := c.getPrivileges(ctx, username, host, dbname, table)
 	if err != nil {
@@ -176,12 +151,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return *result, nil
 	}
 
-	cr.Status.AtProvider.Privileges = observedPrivileges
+	mg.Status.AtProvider.Privileges = observedPrivileges
 
-	desiredPrivileges := cr.Spec.ForProvider.Privileges.ToStringSlice()
+	desiredPrivileges := mg.Spec.ForProvider.Privileges.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desiredPrivileges, observedPrivileges)
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
@@ -273,17 +248,12 @@ func (c *external) parseGrantRows(ctx context.Context, username, host, dbname, t
 	return privileges, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotGrant)
-	}
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalCreation, error) {
+	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
+	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
+	table := defaultIdentifier(mg.Spec.ForProvider.Table)
 
-	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
-	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
-	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
+	privileges, grantOption := getPrivilegesString(mg.Spec.ForProvider.Privileges.ToStringSlice())
 	query := createGrantQuery(privileges, dbname, username, host, table, grantOption)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateGrant}); err != nil {
@@ -292,18 +262,13 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalCreation{}, nil
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotGrant)
-	}
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalUpdate, error) {
+	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
+	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
+	table := defaultIdentifier(mg.Spec.ForProvider.Table)
 
-	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
-	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
-	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	observed := cr.Status.AtProvider.Privileges
-	desired := cr.Spec.ForProvider.Privileges.ToStringSlice()
+	observed := mg.Status.AtProvider.Privileges
+	desired := mg.Spec.ForProvider.Privileges.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desired, observed)
 
 	if len(toRevoke) > 0 {
@@ -383,17 +348,12 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotGrant)
-	}
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalDelete, error) {
+	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
+	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
+	table := defaultIdentifier(mg.Spec.ForProvider.Table)
 
-	username, host := mysql.SplitUserHost(*cr.Spec.ForProvider.User)
-	dbname := defaultIdentifier(cr.Spec.ForProvider.Database)
-	table := defaultIdentifier(cr.Spec.ForProvider.Table)
-
-	privileges, grantOption := getPrivilegesString(cr.Spec.ForProvider.Privileges.ToStringSlice())
+	privileges, grantOption := getPrivilegesString(mg.Spec.ForProvider.Privileges.ToStringSlice())
 	query := createRevokeQuery(privileges, dbname, username, host, table, grantOption)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errRevokeGrant}); err != nil {

@@ -48,7 +48,6 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotGrant     = "managed resource is not a Grant custom resource"
 	errSelectGrant  = "cannot select grant"
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -64,27 +63,13 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
-
 // Setup adds a controller that reconciles Grant managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.GrantGroupKind)
-
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -107,26 +92,21 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return nil, errors.New(errNotGrant)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.TypedExternalClient[*v1alpha1.Grant], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: mg.GetProviderConfigReference().Name}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -153,7 +133,7 @@ type external struct {
 	kube client.Client
 }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Grant] = &external{}
 
 type grantType string
 
@@ -340,17 +320,12 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	return errors.New(errUnknownGrant)
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotGrant)
-	}
-
-	if cr.Spec.ForProvider.Role == nil {
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalObservation, error) {
+	if mg.Spec.ForProvider.Role == nil {
 		return managed.ExternalObservation{}, errors.New(errNoRole)
 	}
 
-	gp := cr.Spec.ForProvider
+	gp := mg.Spec.ForProvider
 	var query xsql.Query
 	if err := selectGrantQuery(gp, &query); err != nil {
 		return managed.ExternalObservation{}, err
@@ -367,7 +342,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}
 
 	// Grants have no way of being 'not up to date' - if they exist, they are up to date
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
@@ -376,17 +351,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotGrant)
-	}
-
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalCreation, error) {
 	var queries []xsql.Query
 
-	cr.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv1.Creating())
 
-	if err := createGrantQueries(cr.Spec.ForProvider, &queries); err != nil {
+	if err := createGrantQueries(mg.Spec.ForProvider, &queries); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
 
@@ -394,7 +364,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalUpdate, error) {
 	// Update is a no-op, as permissions are fully revoked and then granted in the Create function,
 	// inside a transaction.
 	return managed.ExternalUpdate{}, nil
@@ -404,16 +374,12 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Grant)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotGrant)
-	}
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalDelete, error) {
 	var query xsql.Query
 
-	cr.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv1.Deleting())
 
-	err := deleteGrantQuery(cr.Spec.ForProvider, &query)
+	err := deleteGrantQuery(mg.Spec.ForProvider, &query)
 	if err != nil {
 		return managed.ExternalDelete{}, errors.Wrap(err, errRevokeGrant)
 	}
