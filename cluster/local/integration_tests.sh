@@ -178,11 +178,16 @@ setup_crossplane() {
   echo
   # we replace empty dir with our PVC so that the /cache dir in the kind node
   # container is exposed to the crossplane pod
-  "${HELM}" install crossplane --namespace crossplane-system crossplane-stable/crossplane --version ${chart_version} --wait --set packageCache.pvc=package-cache
+  # Disable the default ManagedResourceActivationPolicy that activates all resources,
+  # so we can test safe-start with selective activation policies.
+  "${HELM}" install crossplane --namespace crossplane-system crossplane-stable/crossplane --version ${chart_version} --wait --set packageCache.pvc=package-cache --set 'provider.defaultActivations={}'
 }
 
 setup_provider() {
   echo_step "installing provider"
+
+  echo_sub_step "applying ManagedResourceActivationPolicy to disable cluster-wide MSSQL"
+  "${KUBECTL}" apply -f "${projectdir}/examples/activation-policy-no-cluster-mssql.yaml"
 
   local yaml="$( cat <<EOF
 apiVersion: pkg.crossplane.io/v1beta1
@@ -220,6 +225,24 @@ EOF
 
   echo_step "waiting for provider to be installed"
   "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
+
+  echo_step "verifying cluster-wide MSSQL CRDs are NOT installed"
+  if "${KUBECTL}" get crd databases.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL Database CRD should not be installed"
+  fi
+  if "${KUBECTL}" get crd grants.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL Grant CRD should not be installed"
+  fi
+  if "${KUBECTL}" get crd users.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL User CRD should not be installed"
+  fi
+  echo_step_completed
+
+  echo_step "verifying namespaced MSSQL CRDs ARE installed"
+  "${KUBECTL}" get crd databases.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL Database CRD should be installed"
+  "${KUBECTL}" get crd grants.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL Grant CRD should be installed"
+  "${KUBECTL}" get crd users.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL User CRD should be installed"
+  echo_step_completed
 }
 
 cleanup_provider() {
@@ -227,6 +250,8 @@ cleanup_provider() {
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
   "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io debug-config
+  "${KUBECTL}" delete managedresourceactivationpolicy.apiextensions.crossplane.io disable-cluster-mssql --ignore-not-found=true
+  "${KUBECTL}" delete managedresourceactivationpolicy.apiextensions.crossplane.io enable-cluster-mssql --ignore-not-found=true
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
@@ -459,6 +484,33 @@ TLS=false API_TYPE="cluster" run_test integration_tests_postgres
 TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
 
 # no TLS=false variant - MSSQL uses built-in encryption
+# Enable cluster-wide MSSQL CRDs before running cluster MSSQL tests.
+# The initial activation policy excludes them to test safe-start.
+echo_step "creating activation policy to enable cluster-wide MSSQL"
+"${KUBECTL}" apply -f - <<EOF
+apiVersion: apiextensions.crossplane.io/v1alpha1
+kind: ManagedResourceActivationPolicy
+metadata:
+  name: enable-cluster-mssql
+spec:
+  activate:
+  - "*.mssql.sql.crossplane.io"
+EOF
+
+echo_step "waiting for cluster-wide MSSQL CRDs to be installed"
+timeout=60
+current=0
+step=3
+while ! "${KUBECTL}" get crd databases.mssql.sql.crossplane.io 2>/dev/null; do
+  echo "waiting another $step seconds for MSSQL CRDs..."
+  current=$((current + step))
+  if [[ $current -ge $timeout ]]; then
+    echo_error "timeout of ${timeout}s waiting for MSSQL CRDs"
+  fi
+  sleep $step
+done
+echo_step_completed
+
 TLS=true API_TYPE="cluster" run_test integration_tests_mssql
 TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
 

@@ -19,7 +19,7 @@ package controller
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
+	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
 	clustermssql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mssql"
 	clustermysql "github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql"
@@ -31,14 +31,32 @@ import (
 
 // Setup creates all controllers with the supplied logger and adds
 // them to the supplied manager.
-func Setup(mgr ctrl.Manager, l controller.Options) error {
-	for _, setup := range []func(ctrl.Manager, controller.Options) error{
+func Setup(mgr ctrl.Manager, l xpcontroller.Options) error {
+	for _, setup := range []func(ctrl.Manager, xpcontroller.Options) error{
 		clustermssql.Setup,
 		clustermysql.Setup,
 		clusterpostgresql.Setup,
 		namespacedmssql.Setup,
 		namespacedmysql.Setup,
 		namespacedpostgresql.Setup,
+	} {
+		if err := setup(mgr, l); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetupGated creates all controllers with gated initialization, waiting for
+// their required CRDs to be available before starting.
+func SetupGated(mgr ctrl.Manager, l xpcontroller.Options) error {
+	for _, setup := range []func(ctrl.Manager, xpcontroller.Options) error{
+		clustermssql.SetupGated,
+		clustermysql.SetupGated,
+		clusterpostgresql.SetupGated,
+		namespacedmssql.SetupGated,
+		namespacedmysql.SetupGated,
+		namespacedpostgresql.SetupGated,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err

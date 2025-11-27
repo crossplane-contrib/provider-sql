@@ -1,0 +1,14 @@
+apiVersion: apiextensions.crossplane.io/v1alpha1
+kind: ManagedResourceActivationPolicy
+metadata:
+  name: disable-cluster-mssql
+spec:
+  activate:
+  # Activate all MySQL resources (both cluster and namespaced)
+  - "*.mysql.sql.crossplane.io"
+  - "*.mysql.sql.m.crossplane.io"
+  # Activate all PostgreSQL resources (both cluster and namespaced)
+  - "*.postgresql.sql.crossplane.io"
+  - "*.postgresql.sql.m.crossplane.io"
+  # Activate only namespaced MSSQL resources (cluster-wide MSSQL is excluded)
+  - "*.mssql.sql.m.crossplane.io"
