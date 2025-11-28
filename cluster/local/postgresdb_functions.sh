@@ -181,6 +181,54 @@ delete_postgresdb_resources(){
   "${KUBECTL}" delete service postgresdb-postgresql -n default
 }
 
+setup_extension_test() {
+  # Test extensions (only if API_TYPE supports them)
+  echo_step "Testing PostgreSQL extensions"
+
+  # Apply extension resources
+  echo_sub_step "Creating PostgreSQL extensions"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+
+  # Wait for extensions to be ready
+  echo_sub_step "Waiting for extensions to be ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml" > /dev/null
+  echo_step_completed
+}
+
+check_extension_test() {
+  echo_step "Verifying PostgreSQL extensions"
+
+  # Check that extensions are ready
+  echo_sub_step "Checking extension status"
+  hstore_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/hstore-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+  ltree_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/ltree-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+
+  if [[ "$hstore_status" == "True" ]] && [[ "$ltree_status" == "True" ]]; then
+    echo_info "Extensions are Ready as expected"
+  else
+    echo_error "ERROR: Extensions are not Ready. hstore: $hstore_status, ltree: $ltree_status"
+  fi
+
+  # Verify extensions are installed in the database
+  echo_sub_step "Checking extensions in database"
+  hstore_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'hstore';")
+  ltree_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'ltree';")
+
+  if [[ "$hstore_installed" == "1" ]] && [[ "$ltree_installed" == "1" ]]; then
+    echo_info "Extensions are installed in database as expected"
+  else
+    echo_error "ERROR: Extensions not found in database. hstore: $hstore_installed, ltree: $ltree_installed"
+  fi
+
+  echo_step_completed
+}
+
+delete_extension_test() {
+  echo_step "Cleaning up PostgreSQL extensions"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+  echo_step_completed
+}
+
 integration_tests_postgres() {
   setup_postgresdb_no_tls
   setup_provider_config_postgres_no_tls
@@ -189,5 +237,8 @@ integration_tests_postgres() {
   check_observe_only_database
   check_all_roles_privileges
   check_schema_privileges
+  setup_extension_test
+  check_extension_test
+  delete_extension_test
   delete_postgresdb_resources
 }

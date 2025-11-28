@@ -356,12 +356,12 @@ func (in *ExtensionParameters) DeepCopyInto(out *ExtensionParameters) {
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(v1.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(v1.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 }
