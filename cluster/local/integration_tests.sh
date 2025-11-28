@@ -86,7 +86,7 @@ setup_cluster() {
   local cache_path="${projectdir}/.work/inttest-package-cache"
   mkdir -p "${cache_path}/xpkg.crossplane.io"
   echo "created cache dir at ${cache_path}"
-  "${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
+  "${CROSSPLANE_CLI}" xpkg extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
   chmod 644 "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
 
   local node_image="kindest/node:${KIND_NODE_IMAGE_TAG}"
