@@ -176,6 +176,12 @@ setup_crossplane() {
 setup_provider() {
   echo_step "installing provider"
 
+  echo_sub_step "applying ManagedResourceActivationPolicy to disable cluster-wide MSSQL"
+  "${KUBECTL}" apply -f "${projectdir}/examples/activation-policy-no-cluster-mssql.yaml"
+
+  echo_sub_step "deleting default ManagedResourceActivationPolicy that activates everything"
+  "${KUBECTL}" delete managedresourceactivationpolicy default --ignore-not-found=true
+
   local yaml="$( cat <<EOF
 apiVersion: pkg.crossplane.io/v1beta1
 kind: DeploymentRuntimeConfig
@@ -212,6 +218,24 @@ EOF
 
   echo_step "waiting for provider to be installed"
   "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
+
+  echo_step "verifying cluster-wide MSSQL CRDs are NOT installed"
+  if "${KUBECTL}" get crd databases.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL Database CRD should not be installed"
+  fi
+  if "${KUBECTL}" get crd grants.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL Grant CRD should not be installed"
+  fi
+  if "${KUBECTL}" get crd users.mssql.sql.crossplane.io 2>/dev/null; then
+    echo_error "cluster-wide MSSQL User CRD should not be installed"
+  fi
+  echo_step_completed
+
+  echo_step "verifying namespaced MSSQL CRDs ARE installed"
+  "${KUBECTL}" get crd databases.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL Database CRD should be installed"
+  "${KUBECTL}" get crd grants.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL Grant CRD should be installed"
+  "${KUBECTL}" get crd users.mssql.sql.m.crossplane.io || echo_error "namespaced MSSQL User CRD should be installed"
+  echo_step_completed
 }
 
 cleanup_provider() {
@@ -219,6 +243,7 @@ cleanup_provider() {
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
   "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io debug-config
+  "${KUBECTL}" delete managedresourceactivationpolicy.apiextensions.crossplane.io disable-cluster-mssql --ignore-not-found=true
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
