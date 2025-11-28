@@ -42,34 +42,21 @@ const (
 	errTrackUsage   = "cannot track ProviderConfig usage"
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
-	errNotDatabase = "managed resource is not a Database custom resource"
-	errSelectDB    = "cannot select database"
-	errCreateDB    = "cannot create database"
-	errDropDB      = "cannot drop database"
+	errSelectDB = "cannot select database"
+	errCreateDB = "cannot create database"
+	errDropDB   = "cannot drop database"
 
 	maxConcurrency = 5
 )
-
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.ProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.ModernManaged))
-}
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(namespacedv1alpha1.DatabaseGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newClient: mssql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newClient: mssql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -92,25 +79,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube      client.Client
-	usage     resource.Tracker
+	track     func(ctx context.Context, mg resource.ModernManaged) error
 	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*namespacedv1alpha1.Database] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*namespacedv1alpha1.Database)
-	if !ok {
-		return nil, errors.New(errNotDatabase)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.TypedExternalClient[*namespacedv1alpha1.Database], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +102,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*namespacedv1alpha1.Database] = &external{}
 
 func (c *external) Disconnect(ctx context.Context) error {
 	// Do we need to implement this? Clean up any db connections?
@@ -128,15 +110,10 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Database)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDatabase)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalObservation, error) {
 	var name string
 	query := "SELECT name FROM master.sys.databases WHERE name = @p1"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}}, &name)
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(mg)}}, &name)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -144,7 +121,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDB)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists: true,
@@ -155,28 +132,17 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-
-	cr, ok := mg.(*namespacedv1alpha1.Database)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDatabase)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mssql.QuoteIdentifier(meta.GetExternalName(cr))})
+func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalCreation, error) {
+	err := c.db.Exec(ctx, xsql.Query{String: "CREATE DATABASE " + mssql.QuoteIdentifier(meta.GetExternalName(mg))})
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
 }
 
-func (c *external) Update(_ context.Context, _ resource.Managed) (managed.ExternalUpdate, error) {
+func (c *external) Update(_ context.Context, _ *namespacedv1alpha1.Database) (managed.ExternalUpdate, error) {
 	// TODO(turkenh): Support updates once we have anything to update.
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Database)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotDatabase)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mssql.QuoteIdentifier(meta.GetExternalName(cr))})
+func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalDelete, error) {
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + mssql.QuoteIdentifier(meta.GetExternalName(mg))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropDB)
 }

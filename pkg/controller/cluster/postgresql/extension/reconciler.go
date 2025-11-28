@@ -47,7 +47,6 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotExtension    = "managed resource is not a Extension custom resource"
 	errSelectExtension = "cannot select extension"
 	errCreateExtension = "cannot create extension"
 	errDropExtension   = "cannot drop extension"
@@ -55,27 +54,13 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
-
 // Setup adds a controller that reconciles Extension managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.ExtensionGroupKind)
-
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -98,26 +83,21 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Extension] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Extension)
-	if !ok {
-		return nil, errors.New(errNotExtension)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Extension) (managed.TypedExternalClient[*v1alpha1.Extension], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: mg.GetProviderConfigReference().Name}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -136,8 +116,8 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 	// We do not want to create an extension on the default DB
 	// if the user was expecting a database name to be resolved.
-	if cr.Spec.ForProvider.Database != nil {
-		return &external{db: c.newDB(s.Data, *cr.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+	if mg.Spec.ForProvider.Database != nil {
+		return &external{db: c.newDB(s.Data, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
 	}
 
 	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode))}, nil
@@ -145,14 +125,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Extension] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Extension)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotExtension)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Extension) (managed.ExternalObservation, error) {
 	// If the Extension exists, it will have all of these properties.
 	observed := v1alpha1.ExtensionParameters{
 		Version: new(string),
@@ -165,7 +140,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	err := c.db.Scan(ctx, xsql.Query{
 		String:     query,
-		Parameters: []interface{}{cr.Spec.ForProvider.Extension},
+		Parameters: []interface{}{mg.Spec.ForProvider.Extension},
 	},
 		observed.Version,
 	)
@@ -179,39 +154,29 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectExtension)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
-		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
-		ResourceUpToDate:        upToDate(observed, cr.Spec.ForProvider),
+		ResourceLateInitialized: lateInit(observed, &mg.Spec.ForProvider),
+		ResourceUpToDate:        upToDate(observed, mg.Spec.ForProvider),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) { //nolint:gocyclo
-	cr, ok := mg.(*v1alpha1.Extension)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotExtension)
-	}
-
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Extension) (managed.ExternalCreation, error) { //nolint:gocyclo
 	var b strings.Builder
 	b.WriteString("CREATE EXTENSION IF NOT EXISTS ")
-	b.WriteString(pq.QuoteIdentifier(cr.Spec.ForProvider.Extension))
+	b.WriteString(pq.QuoteIdentifier(mg.Spec.ForProvider.Extension))
 
-	if cr.Spec.ForProvider.Version != nil {
+	if mg.Spec.ForProvider.Version != nil {
 		b.WriteString(" WITH VERSION ")
-		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Version))
+		b.WriteString(pq.QuoteIdentifier(*mg.Spec.ForProvider.Version))
 	}
 
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateExtension)
 }
 
-func (c *external) Update(_ context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
-	_, ok := mg.(*v1alpha1.Extension)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotExtension)
-	}
-
+func (c *external) Update(_ context.Context, mg *v1alpha1.Extension) (managed.ExternalUpdate, error) { //nolint:gocyclo
 	return managed.ExternalUpdate{}, nil
 }
 
@@ -219,13 +184,8 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Extension)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotExtension)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION IF EXISTS " + pq.QuoteIdentifier(cr.Spec.ForProvider.Extension)})
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Extension) (managed.ExternalDelete, error) {
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP EXTENSION IF EXISTS " + pq.QuoteIdentifier(mg.Spec.ForProvider.Extension)})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropExtension)
 }
 

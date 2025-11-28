@@ -60,16 +60,17 @@ func (m mockDB) GetConnectionDetails(username, password string) managed.Connecti
 
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
+	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
 	type fields struct {
 		kube  client.Client
-		usage resource.Tracker
+		track func(context.Context, resource.LegacyManaged) error
 		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Extension
 	}
 
 	cases := map[string]struct {
@@ -78,17 +79,10 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotExtension": {
-			reason: "An error should be returned if the managed resource is not a Extension",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotExtension),
-		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
+				track: func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom },
 			},
 			args: args{
 				mg: &v1alpha1.Extension{},
@@ -101,7 +95,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Extension{
@@ -123,7 +117,7 @@ func TestConnect(t *testing.T) {
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Extension{
@@ -150,7 +144,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Extension{
@@ -167,7 +161,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage, newDB: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -185,7 +179,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Extension
 	}
 
 	type want struct {
@@ -199,15 +193,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotExtension": {
-			reason: "An error should be returned if the managed resource is not a Extension",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotExtension),
-			},
-		},
 		"ErrNoExtension": {
 			reason: "We should return ResourceExists: false when no extension is found",
 			fields: fields{
@@ -318,7 +303,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Extension
 	}
 
 	type want struct {
@@ -332,15 +317,6 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotExtension": {
-			reason: "An error should be returned if the managed resource is not a Extension",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotExtension),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the extension should be returned",
 			fields: fields{
@@ -398,7 +374,7 @@ func TestUpdate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Extension
 	}
 
 	type want struct {
@@ -412,15 +388,6 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotExtension": {
-			reason: "An error should be returned if the managed resource is not a Extension",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotExtension),
-			},
-		},
 		"Success": {
 			reason: "No error should be returned when we successfully update a extension",
 			fields: fields{
@@ -466,7 +433,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Extension
 	}
 
 	cases := map[string]struct {
@@ -475,13 +442,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotExtension": {
-			reason: "An error should be returned if the managed resource is not a Extension",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotExtension),
-		},
 		"ErrDropExtension": {
 			reason: "Errors dropping a extension should be returned",
 			fields: fields{

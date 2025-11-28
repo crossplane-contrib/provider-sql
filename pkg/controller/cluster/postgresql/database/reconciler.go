@@ -51,7 +51,6 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotDatabase       = "managed resource is not a Database custom resource"
 	errSelectDB          = "cannot select database"
 	errCreateDB          = "cannot create database"
 	errAlterDBOwner      = "cannot alter database owner"
@@ -63,27 +62,13 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.DatabaseGroupKind)
-
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -106,26 +91,21 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Database] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return nil, errors.New(errNotDatabase)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed.TypedExternalClient[*v1alpha1.Database], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: mg.GetProviderConfigReference().Name}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -147,14 +127,9 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Database] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDatabase)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalObservation, error) {
 	// If the database exists, it will have all of these properties.
 	observed := v1alpha1.DatabaseParameters{
 		Owner:            new(string),
@@ -179,7 +154,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		"FROM pg_database AS db, pg_tablespace AS ts " +
 		"WHERE db.datname=$1 AND db.dattablespace = ts.oid"
 
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(cr)}},
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(mg)}},
 		observed.Owner,
 		observed.Encoding,
 		observed.LCCollate,
@@ -196,7 +171,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDB)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists: true,
@@ -204,101 +179,91 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		// NOTE(negz): The ordering is important here. We want to late init any
 		// values that weren't supplied before we determine if an update is
 		// required.
-		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
-		ResourceUpToDate:        upToDate(observed, cr.Spec.ForProvider),
+		ResourceLateInitialized: lateInit(observed, &mg.Spec.ForProvider),
+		ResourceUpToDate:        upToDate(observed, mg.Spec.ForProvider),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) { //nolint:gocyclo
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalCreation, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
 
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDatabase)
-	}
-
 	var b strings.Builder
 	b.WriteString("CREATE DATABASE ")
-	b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(cr)))
+	b.WriteString(pq.QuoteIdentifier(meta.GetExternalName(mg)))
 
-	if cr.Spec.ForProvider.Owner != nil {
+	if mg.Spec.ForProvider.Owner != nil {
 		b.WriteString(" OWNER ")
-		b.WriteString(pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))
+		b.WriteString(pq.QuoteIdentifier(*mg.Spec.ForProvider.Owner))
 	}
-	if cr.Spec.ForProvider.Template != nil {
+	if mg.Spec.ForProvider.Template != nil {
 		b.WriteString(" TEMPLATE ")
-		b.WriteString(quoteIfIdentifier(*cr.Spec.ForProvider.Template))
+		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Template))
 	}
-	if cr.Spec.ForProvider.Encoding != nil {
+	if mg.Spec.ForProvider.Encoding != nil {
 		b.WriteString(" ENCODING ")
-		b.WriteString(quoteIfLiteral(*cr.Spec.ForProvider.Encoding))
+		b.WriteString(quoteIfLiteral(*mg.Spec.ForProvider.Encoding))
 	}
-	if cr.Spec.ForProvider.LCCollate != nil {
+	if mg.Spec.ForProvider.LCCollate != nil {
 		b.WriteString(" LC_COLLATE ")
-		b.WriteString(quoteIfLiteral(*cr.Spec.ForProvider.LCCollate))
+		b.WriteString(quoteIfLiteral(*mg.Spec.ForProvider.LCCollate))
 	}
-	if cr.Spec.ForProvider.LCCType != nil {
+	if mg.Spec.ForProvider.LCCType != nil {
 		b.WriteString(" LC_CTYPE ")
-		b.WriteString(quoteIfLiteral(*cr.Spec.ForProvider.LCCType))
+		b.WriteString(quoteIfLiteral(*mg.Spec.ForProvider.LCCType))
 	}
-	if cr.Spec.ForProvider.Tablespace != nil {
+	if mg.Spec.ForProvider.Tablespace != nil {
 		b.WriteString(" TABLESPACE ")
-		b.WriteString(quoteIfIdentifier(*cr.Spec.ForProvider.Tablespace))
+		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Tablespace))
 	}
-	if cr.Spec.ForProvider.AllowConnections != nil {
-		b.WriteString(fmt.Sprintf(" ALLOW_CONNECTIONS %t", *cr.Spec.ForProvider.AllowConnections))
+	if mg.Spec.ForProvider.AllowConnections != nil {
+		b.WriteString(fmt.Sprintf(" ALLOW_CONNECTIONS %t", *mg.Spec.ForProvider.AllowConnections))
 	}
-	if cr.Spec.ForProvider.ConnectionLimit != nil {
-		b.WriteString(fmt.Sprintf(" CONNECTION LIMIT %d", *cr.Spec.ForProvider.ConnectionLimit))
+	if mg.Spec.ForProvider.ConnectionLimit != nil {
+		b.WriteString(fmt.Sprintf(" CONNECTION LIMIT %d", *mg.Spec.ForProvider.ConnectionLimit))
 	}
-	if cr.Spec.ForProvider.IsTemplate != nil {
-		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *cr.Spec.ForProvider.IsTemplate))
+	if mg.Spec.ForProvider.IsTemplate != nil {
+		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *mg.Spec.ForProvider.IsTemplate))
 	}
 
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateDB)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalUpdate, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
 
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotDatabase)
-	}
-
-	if cr.Spec.ForProvider.Owner != nil {
+	if mg.Spec.ForProvider.Owner != nil {
 		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s OWNER TO %s",
-			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			pq.QuoteIdentifier(*cr.Spec.ForProvider.Owner))}
+			pq.QuoteIdentifier(meta.GetExternalName(mg)),
+			pq.QuoteIdentifier(*mg.Spec.ForProvider.Owner))}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBOwner)
 		}
 	}
 
-	if cr.Spec.ForProvider.ConnectionLimit != nil {
+	if mg.Spec.ForProvider.ConnectionLimit != nil {
 		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT = %d",
-			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.ConnectionLimit)}
+			pq.QuoteIdentifier(meta.GetExternalName(mg)),
+			*mg.Spec.ForProvider.ConnectionLimit)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBConnLimit)
 		}
 	}
 
-	if cr.Spec.ForProvider.AllowConnections != nil {
+	if mg.Spec.ForProvider.AllowConnections != nil {
 		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s ALLOW_CONNECTIONS %t",
-			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.AllowConnections)}
+			pq.QuoteIdentifier(meta.GetExternalName(mg)),
+			*mg.Spec.ForProvider.AllowConnections)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBAllowConns)
 		}
 	}
 
-	if cr.Spec.ForProvider.IsTemplate != nil {
+	if mg.Spec.ForProvider.IsTemplate != nil {
 		query := xsql.Query{String: fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE %t",
-			pq.QuoteIdentifier(meta.GetExternalName(cr)),
-			*cr.Spec.ForProvider.IsTemplate)}
+			pq.QuoteIdentifier(meta.GetExternalName(mg)),
+			*mg.Spec.ForProvider.IsTemplate)}
 		if err := c.db.Exec(ctx, query); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errAlterDBIsTmpl)
 		}
@@ -311,13 +276,8 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Database)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotDatabase)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalDelete, error) {
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropDB)
 }
 

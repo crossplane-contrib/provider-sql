@@ -44,7 +44,6 @@ import (
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
-	errNotUser                = "managed resource is not a User custom resource"
 	errSelectUser             = "cannot select user"
 	errCreateUser             = "cannot create user %s"
 	errCreateLogin            = "cannot create login %s"
@@ -59,26 +58,14 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.ProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.ModernManaged))
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(namespacedv1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newClient: mssql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newClient: mssql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -101,33 +88,28 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube      client.Client
-	usage     resource.Tracker
+	track     func(ctx context.Context, mg resource.ModernManaged) error
 	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*namespacedv1alpha1.User] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return nil, errors.New(errNotUser)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (managed.TypedExternalClient[*namespacedv1alpha1.User], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
 	if err != nil {
 		return nil, err
 	}
 
-	userDB := c.newClient(providerInfo.SecretData, ptr.Deref(cr.Spec.ForProvider.Database, ""))
+	userDB := c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))
 	loginDB := userDB
-	if cr.Spec.ForProvider.LoginDatabase != nil {
-		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(cr.Spec.ForProvider.LoginDatabase, ""))
+	if mg.Spec.ForProvider.LoginDatabase != nil {
+		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
 	return &external{
@@ -143,20 +125,15 @@ type external struct {
 	kube    client.Client
 }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotUser)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalObservation, error) {
 	var name string
 
 	query := "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	err := c.userDB.Scan(ctx, xsql.Query{
 		String: query, Parameters: []interface{}{
-			meta.GetExternalName(cr),
+			meta.GetExternalName(mg),
 		},
 	}, &name)
 	if xsql.IsNoRows(err) {
@@ -166,9 +143,9 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
-	_, pwdChanged, err := c.getPassword(ctx, cr)
+	_, pwdChanged, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -179,13 +156,8 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotUser)
-	}
-
-	pw, _, err := c.getPassword(ctx, cr)
+func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
+	pw, _, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
@@ -196,38 +168,33 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
 	if err := c.loginDB.Exec(ctx, xsql.Query{
 		String: loginQuery,
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(cr))
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(mg))
 	}
 
-	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteIdentifier(meta.GetExternalName(cr)))
+	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteIdentifier(meta.GetExternalName(mg)))
 	if err := c.userDB.Exec(ctx, xsql.Query{
 		String: userQuery,
 	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(cr))
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
 	}
 
 	return managed.ExternalCreation{
-		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(mg), pw),
 	}, nil
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotUser)
-	}
-
-	pw, changed, err := c.getPassword(ctx, cr)
+func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
+	pw, changed, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
 	if changed {
-		query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(cr)), mssql.QuoteValue(pw))
+		query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
 		if err := c.loginDB.Exec(ctx, xsql.Query{
 			String: query,
 		}); err != nil {
@@ -235,7 +202,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 
 		return managed.ExternalUpdate{
-			ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(cr), pw),
+			ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(mg), pw),
 		}, nil
 	}
 	return managed.ExternalUpdate{}, nil
@@ -245,13 +212,8 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotUser)
-	}
-
-	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(cr)))
+func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalDelete, error) {
+	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(mg)))
 	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
 	if err != nil {
 		return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
@@ -264,7 +226,7 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
 		}
 		if err := c.userDB.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
-			return managed.ExternalDelete{}, errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(cr))
+			return managed.ExternalDelete{}, errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(mg))
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -272,15 +234,15 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 	}
 
 	if err := c.userDB.Exec(ctx, xsql.Query{
-		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
+		String: fmt.Sprintf("DROP USER IF EXISTS %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
 	}); err != nil {
-		return managed.ExternalDelete{}, errors.Wrapf(err, errDropUser, meta.GetExternalName(cr))
+		return managed.ExternalDelete{}, errors.Wrapf(err, errDropUser, meta.GetExternalName(mg))
 	}
 
 	if err := c.loginDB.Exec(ctx, xsql.Query{
-		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(cr))),
+		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
 	}); err != nil {
-		return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(cr))
+		return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(mg))
 	}
 
 	return managed.ExternalDelete{}, nil
