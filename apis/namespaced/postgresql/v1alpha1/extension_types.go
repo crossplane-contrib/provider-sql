@@ -17,15 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
-	reference "github.com/crossplane/crossplane-runtime/v2/pkg/reference"
-	errors "github.com/pkg/errors"
 )
 
 // ExtensionParameters are the configurable fields of a Extension.
@@ -50,12 +45,12 @@ type ExtensionParameters struct {
 	// DatabaseRef references the database object this extension is for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this extension is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
 }
 
 // ExtensionSpec defines the desired state of an Extension.
@@ -95,24 +90,4 @@ type ExtensionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Extension `json:"items"`
-}
-
-// ResolveReferences of this Extension
-func (mg *Extension) ResolveReferences(ctx context.Context, c client.Reader) error {
-	r := reference.NewAPIResolver(c, mg)
-
-	// Resolve spec.forProvider.database
-	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
-		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
-		Reference:    mg.Spec.ForProvider.DatabaseRef,
-		Selector:     mg.Spec.ForProvider.DatabaseSelector,
-		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
-		Extract:      reference.ExternalName(),
-	})
-	if err != nil {
-		return errors.Wrap(err, "spec.forProvider.database")
-	}
-	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
-	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
-	return nil
 }

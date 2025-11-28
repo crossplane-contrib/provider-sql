@@ -9,6 +9,7 @@ spec:
     version: "1.4"
     databaseRef:
       name: example
+      # namespace: default  # Optional - defaults to the same namespace as the Extension
   providerConfigRef:
     kind: ProviderConfig
     name: default
@@ -24,6 +25,7 @@ spec:
     version: "1.1"
     databaseRef:
       name: example
+      namespace: default  # Explicitly set namespace (demonstrates namespace scoping)
   providerConfigRef:
     kind: ProviderConfig
     name: default
