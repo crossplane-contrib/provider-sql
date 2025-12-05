@@ -36,6 +36,7 @@ type UserStatus struct {
 
 // UserParameters define the desired state of a MSSQL user instance.
 // +kubebuilder:validation:XValidation:rule="!(has(self.contained) && self.contained == true && (has(self.loginDatabase) || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector)))",message="contained users cannot specify loginDatabase, loginDatabaseRef, or loginDatabaseSelector"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.contained) || self.contained == oldSelf.contained",message="contained field is immutable after creation"
 type UserParameters struct {
 	// Database allows you to specify the name of the Database the USER is created for.
 	// +crossplane:generate:reference:type=Database

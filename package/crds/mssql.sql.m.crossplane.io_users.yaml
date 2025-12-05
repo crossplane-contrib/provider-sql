@@ -254,6 +254,8 @@ spec:
                     or loginDatabaseSelector
                   rule: '!(has(self.contained) && self.contained == true && (has(self.loginDatabase)
                     || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector)))'
+                - message: contained field is immutable after creation
+                  rule: '!has(oldSelf.contained) || self.contained == oldSelf.contained'
               managementPolicies:
                 default:
                 - '*'
