@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql
+  namespace: default
+spec:
+  ports:
+  - port: 1433
+    targetPort: 1433
+  selector:
+    app: mssql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mssql
+  namespace: default
+spec:
+  serviceName: mssql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mssql
+  template:
+    metadata:
+      labels:
+        app: mssql
+    spec:
+      containers:
+      - name: mssql
+        image: mcr.microsoft.com/mssql/server:2019-CU32-ubuntu-20.04
+        env:
+        - name: SA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mssql-creds
+              key: password
+        - name: ACCEPT_EULA
+          value: "Y"
+        - name: MSSQL_PID
+          value: "Developer"
+        ports:
+        - containerPort: 1433
+        volumeMounts:
+        - name: data
+          mountPath: /var/opt/mssql
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1"'
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1"'
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 2Gi
