@@ -51,6 +51,7 @@ K8S_CLUSTER="${K8S_CLUSTER:-${BUILD_REGISTRY}-inttests}"
 PACKAGE_NAME="provider-sql"
 MARIADB_ROOT_PW=$(openssl rand -base64 32)
 MARIADB_TEST_PW=$(openssl rand -base64 32)
+MSSQL_SA_PW="$(openssl rand -base64 16)Aa1!"  # MSSQL requires complex password
 
 # cleanup on exit
 if [ "$skipcleanup" != true ]; then
@@ -71,6 +72,13 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 source "$SCRIPT_DIR/postgresdb_functions.sh"
 if [ $? -ne 0 ]; then
   echo "postgresdb_functions.sh failed. Exiting."
+  exit 1
+fi
+
+# shellcheck source="$SCRIPT_DIR/mssqldb_functions.sh"
+source "$SCRIPT_DIR/mssqldb_functions.sh"
+if [ $? -ne 0 ]; then
+  echo "mssqldb_functions.sh failed. Exiting."
   exit 1
 fi
 
@@ -449,5 +457,9 @@ TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
 
 TLS=false API_TYPE="cluster" run_test integration_tests_postgres
 TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
+
+# no TLS=false variant - MSSQL uses built-in encryption
+TLS=true API_TYPE="cluster" run_test integration_tests_mssql
+TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
 
 integration_tests_end
