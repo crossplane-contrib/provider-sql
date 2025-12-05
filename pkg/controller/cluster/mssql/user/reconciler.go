@@ -185,18 +185,30 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 		}
 	}
 
-	loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
-	if err := c.loginDB.Exec(ctx, xsql.Query{
-		String: loginQuery,
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(mg))
-	}
+	// Check if this should be a contained database user
+	if mg.Spec.ForProvider.Contained != nil && *mg.Spec.ForProvider.Contained {
+		// Create contained database user directly without LOGIN
+		userQuery := fmt.Sprintf("CREATE USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
+		if err := c.userDB.Exec(ctx, xsql.Query{
+			String: userQuery,
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+		}
+	} else {
+		// Create traditional LOGIN + USER approach
+		loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
+		if err := c.loginDB.Exec(ctx, xsql.Query{
+			String: loginQuery,
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(mg))
+		}
 
-	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteIdentifier(meta.GetExternalName(mg)))
-	if err := c.userDB.Exec(ctx, xsql.Query{
-		String: userQuery,
-	}); err != nil {
-		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+		userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteIdentifier(meta.GetExternalName(mg)))
+		if err := c.userDB.Exec(ctx, xsql.Query{
+			String: userQuery,
+		}); err != nil {
+			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+		}
 	}
 
 	return managed.ExternalCreation{
@@ -211,11 +223,22 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 	}
 
 	if changed {
-		query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
-		if err := c.loginDB.Exec(ctx, xsql.Query{
-			String: query,
-		}); err != nil {
-			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+		if mg.Spec.ForProvider.Contained != nil && *mg.Spec.ForProvider.Contained {
+			// For contained users, use ALTER USER syntax
+			query := fmt.Sprintf("ALTER USER %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
+			if err := c.userDB.Exec(ctx, xsql.Query{
+				String: query,
+			}); err != nil {
+				return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+			}
+		} else {
+			// For traditional users, use ALTER LOGIN syntax
+			query := fmt.Sprintf("ALTER LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
+			if err := c.loginDB.Exec(ctx, xsql.Query{
+				String: query,
+			}); err != nil {
+				return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
+			}
 		}
 
 		return managed.ExternalUpdate{
@@ -229,25 +252,34 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.ExternalDelete, error) {
-	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(meta.GetExternalName(mg)))
+func (c *external) killLoginSessions(ctx context.Context, loginName string) error {
+	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(loginName))
 	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
 	if err != nil {
-		return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
+		return errors.Wrap(err, errCannotGetLogins)
 	}
 	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
 		var sessionID int
 		if err := rows.Scan(&sessionID); err != nil {
-			return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
+			return errors.Wrap(err, errCannotGetLogins)
 		}
 		if err := c.userDB.Exec(ctx, xsql.Query{String: fmt.Sprintf("KILL %d", sessionID)}); err != nil {
-			return managed.ExternalDelete{}, errors.Wrapf(err, errCannotKillLoginSession, sessionID, meta.GetExternalName(mg))
+			return errors.Wrapf(err, errCannotKillLoginSession, sessionID, loginName)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return managed.ExternalDelete{}, errors.Wrap(err, errCannotGetLogins)
+	return rows.Err()
+}
+
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.ExternalDelete, error) {
+	isContained := mg.Spec.ForProvider.Contained != nil && *mg.Spec.ForProvider.Contained
+
+	// Only kill sessions for traditional users with logins, not contained users
+	if !isContained {
+		if err := c.killLoginSessions(ctx, meta.GetExternalName(mg)); err != nil {
+			return managed.ExternalDelete{}, err
+		}
 	}
 
 	if err := c.userDB.Exec(ctx, xsql.Query{
@@ -256,10 +288,13 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 		return managed.ExternalDelete{}, errors.Wrapf(err, errDropUser, meta.GetExternalName(mg))
 	}
 
-	if err := c.loginDB.Exec(ctx, xsql.Query{
-		String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
-	}); err != nil {
-		return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(mg))
+	// Only drop LOGIN if this is not a contained user
+	if !isContained {
+		if err := c.loginDB.Exec(ctx, xsql.Query{
+			String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
+		}); err != nil {
+			return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(mg))
+		}
 	}
 
 	return managed.ExternalDelete{}, nil
