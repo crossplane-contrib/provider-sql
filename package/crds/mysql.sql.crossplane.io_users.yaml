@@ -77,7 +77,7 @@ spec:
                       If not specified (nil or empty string), the database server's default authentication plugin is used.
                       This allows compatibility with different MySQL/MariaDB versions and their default authentication methods.
                       Common plugins: caching_sha2_password (MySQL 8.0+), mysql_native_password, authentication_ldap_simple, etc.
-                    pattern: ^([a-z]+_)+[a-z]+$
+                    pattern: ^[a-z][a-z0-9_]*$
                     type: string
                   binlog:
                     description: BinLog defines whether the create, delete, update
