@@ -1,0 +1,36 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: example
+  namespace: default
+spec:
+  forProvider: {}
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: db1
+  namespace: default
+spec:
+  forProvider:
+    allowConnections: true
+    owner: "ownerrole"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: db-observe
+  namespace: default
+spec:
+  managementPolicies:
+  - Observe
+  forProvider: {}
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

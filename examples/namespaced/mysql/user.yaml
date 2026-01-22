@@ -1,0 +1,20 @@
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-user
+  namespace: default
+spec:
+  forProvider:
+    passwordSecretRef:
+      name: example-pw
+      key: password
+    resourceOptions:
+      maxQueriesPerHour: 1000
+      maxUpdatesPerHour: 1000
+      maxConnectionsPerHour: 100
+      maxUserConnections: 10
+  writeConnectionSecretToRef:
+    name: example-connection-secret
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

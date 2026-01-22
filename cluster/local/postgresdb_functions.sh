@@ -2,14 +2,8 @@
 set -e
 
 setup_postgresdb_no_tls() {
-  echo_step "Installing PostgresDB Helm chart into default namespace"
+  echo_step "Installing PostgresDB into default namespace"
   postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
-
-  "${HELM}" repo update
-  "${HELM}" install postgresdb bitnami/postgresql \
-      --version 11.9.1 \
-      --set global.postgresql.auth.postgresPassword="${postgres_root_pw}" \
-      --wait
 
   "${KUBECTL}" create secret generic postgresdb-creds \
       --from-literal username="postgres" \
@@ -17,27 +11,24 @@ setup_postgresdb_no_tls() {
       --from-literal endpoint="postgresdb-postgresql.default.svc.cluster.local" \
       --from-literal port="5432"
 
+  scriptdir=$(dirname "$0")
+  "${KUBECTL}" apply -f "${scriptdir}/postgres.server.yaml"
+
+  echo_step "Waiting for PostgreSQL to be ready"
+  "${KUBECTL}" wait --for=condition=ready pod -l app=postgresdb-postgresql --timeout=120s
+
   "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 | grep -v "Handling connection for" &
   PORT_FORWARD_PID=$!
+
+  while ! PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT 1;"; do
+      echo "Waiting for PostgresDB to be ready..."
+      sleep 2
+  done
 }
 
 setup_provider_config_postgres_no_tls() {
-  echo_step "creating ProviderConfig for PostgresDb with no TLS"
-  local yaml="$( cat <<EOF
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  sslMode: disable
-  credentials:
-    source: PostgreSQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: postgresdb-creds
-EOF
-  )"
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  echo_step "creating ProviderConfig for PostgresDb with no TLS ${API_TYPE}"
+  "${KUBECTL}" apply -f "${scriptdir}/postgres.providerconfig.${API_TYPE}.yaml"
 }
 
 create_grantable_objects() {
@@ -81,26 +72,26 @@ delete_grantable_objects() {
 }
 
 setup_postgresdb_tests(){
-# install provider resources
-echo_step "creating PostgresDB Database resource"
-# create DB
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/database.yaml
+  # install provider resources
+  echo_step "creating PostgresDB Database resource"
+  # create DB
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
 
-echo_step "creating PostgresDB Role resource"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/role.yaml
+  echo_step "creating PostgresDB Role resource"
+  # create grant
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
 
 echo_step "creating PostgresDB Schema resources"
 # create grant
 "${KUBECTL}" apply -f ${projectdir}/examples/postgresql/schema.yaml
 
-echo_step "check if Role is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/role.yaml
-echo_step_completed
+  echo_step "check if Role is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
+  echo_step_completed
 
-echo_step "check if database is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/database.yaml
-echo_step_completed
+  echo_step "check if database is ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml > /dev/null
+  echo_step_completed
 
 echo_step "check if schema is ready"
 "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
@@ -304,7 +295,7 @@ check_observe_only_database(){
   echo_step "check if observe only database is preserved after deletion"
 
   # Delete the database kubernetes object, it should not delete the database
-  kubectl delete database.postgresql.sql.crossplane.io db-observe
+  "${KUBECTL}" delete database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io db-observe
 
   local datname
   datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
@@ -342,10 +333,10 @@ delete_postgresdb_resources(){
 
   # uninstall
   echo_step "uninstalling ${PROJECT_NAME}"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/grant.yaml"
-  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/postgresql/database.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/role.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/postgresql/schema.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
   # ----------- cleaning postgres related resources
@@ -356,8 +347,57 @@ delete_postgresdb_resources(){
   echo_step "uninstalling secret and provider config for postgres"
   "${KUBECTL}" delete secret postgresdb-creds
 
-  echo_step "Uninstalling PostgresDB Helm chart from default namespace"
-  "${HELM}" uninstall postgresdb
+  echo_step "Uninstalling PostgresDB from default namespace"
+  "${KUBECTL}" delete statefulset postgresdb-postgresql -n default
+  "${KUBECTL}" delete service postgresdb-postgresql -n default
+}
+
+setup_extension_test() {
+  # Test extensions (only if API_TYPE supports them)
+  echo_step "Testing PostgreSQL extensions"
+
+  # Apply extension resources
+  echo_sub_step "Creating PostgreSQL extensions"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+
+  # Wait for extensions to be ready
+  echo_sub_step "Waiting for extensions to be ready"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml" > /dev/null
+  echo_step_completed
+}
+
+check_extension_test() {
+  echo_step "Verifying PostgreSQL extensions"
+
+  # Check that extensions are ready
+  echo_sub_step "Checking extension status"
+  hstore_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/hstore-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+  ltree_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/ltree-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+
+  if [[ "$hstore_status" == "True" ]] && [[ "$ltree_status" == "True" ]]; then
+    echo_info "Extensions are Ready as expected"
+  else
+    echo_error "ERROR: Extensions are not Ready. hstore: $hstore_status, ltree: $ltree_status"
+  fi
+
+  # Verify extensions are installed in the database
+  echo_sub_step "Checking extensions in database"
+  hstore_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'hstore';")
+  ltree_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'ltree';")
+
+  if [[ "$hstore_installed" == "1" ]] && [[ "$ltree_installed" == "1" ]]; then
+    echo_info "Extensions are installed in database as expected"
+  else
+    echo_error "ERROR: Extensions not found in database. hstore: $hstore_installed, ltree: $ltree_installed"
+  fi
+
+  echo_step_completed
+}
+
+delete_extension_test() {
+  echo_step "Cleaning up PostgreSQL extensions"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+  echo_step_completed
 }
 
 integration_tests_postgres() {
@@ -369,5 +409,8 @@ integration_tests_postgres() {
   check_all_roles_privileges
   check_all_schema_privileges
   check_custom_object_privileges
+  setup_extension_test
+  check_extension_test
+  delete_extension_test
   delete_postgresdb_resources
 }

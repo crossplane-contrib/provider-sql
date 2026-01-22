@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresdb-postgresql
+  namespace: default
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgresdb-postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresdb-postgresql
+  namespace: default
+spec:
+  serviceName: postgresdb-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresdb-postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresdb-postgresql
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:18
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresdb-creds
+              key: password
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: data
+        emptyDir: {}

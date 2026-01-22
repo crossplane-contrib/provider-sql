@@ -1,0 +1,22 @@
+# This DeploymentRuntimeConfig will override the provider-sql deployment tolerations.
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-sql
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers: []
+          tolerations:
+            - effect: NoSchedule
+              key: node.kubernetes.io/role
+              operator: Equal
+              value: crossplane
+            - effect: NoSchedule
+              key: node.kubernetes.io/arch
+              operator: Equal
+              value: arm64

@@ -34,6 +34,7 @@ echo_error() {
 
 # ------------------------------
 projectdir="$( cd "$( dirname "${BASH_SOURCE[0]}")"/../.. && pwd )"
+scriptdir="$(dirname "$0")"
 
 # get the build environment variables from the special build.vars target in the main makefile
 eval $(make --no-print-directory -C ${projectdir} build.vars)
@@ -62,6 +63,9 @@ if [ "$skipcleanup" != true ]; then
   trap cleanup EXIT
 fi
 
+# Global variable to control API type
+API_TYPE="cluster"
+
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 # shellcheck source="$SCRIPT_DIR/postgresdb_functions.sh"
 source "$SCRIPT_DIR/postgresdb_functions.sh"
@@ -80,10 +84,10 @@ setup_cluster() {
   echo_step "setting up local package cache"
 
   local cache_path="${projectdir}/.work/inttest-package-cache"
-  mkdir -p "${cache_path}"
+  mkdir -p "${cache_path}/xpkg.crossplane.io"
   echo "created cache dir at ${cache_path}"
-  "${UP}" alpha xpkg xp-extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/${PACKAGE_NAME}.gz"
-  chmod 644 "${cache_path}/${PACKAGE_NAME}.gz"
+  "${CROSSPLANE_CLI}" xpkg extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
+  chmod 644 "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
 
   local node_image="kindest/node:${KIND_NODE_IMAGE_TAG}"
   echo_step "creating k8s cluster using kind ${KIND_VERSION} and node image ${node_image}"
@@ -102,8 +106,8 @@ EOF
 
   echo_step "tag controller image and load it into kind cluster"
 
-  docker tag "${CONTROLLER_IMAGE}" "xpkg.upbound.io/${PACKAGE_NAME}"
-  "${KIND}" load docker-image "xpkg.upbound.io/${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
+  docker tag "${CONTROLLER_IMAGE}" "xpkg.crossplane.io/${PACKAGE_NAME}"
+  "${KIND}" load docker-image "xpkg.crossplane.io/${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
 
   echo_step "create crossplane-system namespace"
 
@@ -195,7 +199,7 @@ metadata:
 spec:
   runtimeConfigRef:
     name: debug-config
-  package: "${PACKAGE_NAME}"
+  package: "xpkg.crossplane.io/${PACKAGE_NAME}:latest"
   packagePullPolicy: Never
 EOF
   )"
@@ -268,64 +272,18 @@ cleanup_tls_certs() {
 }
 
 setup_provider_config_no_tls() {
-  echo_step "creating ProviderConfig with no TLS"
-  local yaml="$( cat <<EOF
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-EOF
-  )"
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  echo_step "creating ProviderConfig with no TLS ${API_TYPE}"
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.notls.${API_TYPE}.yaml"
 }
 
 setup_provider_config_tls() {
-  echo_step "creating ProviderConfig with TLS"
-  local yaml="$( cat <<EOF
-apiVersion: mysql.sql.crossplane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: MySQLConnectionSecret
-    connectionSecretRef:
-      namespace: default
-      name: mariadb-creds
-  tls: custom
-  tlsConfig:
-    caCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: ca-cert.pem
-    clientCert:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-cert.pem
-    clientKey:
-      secretRef:
-        namespace: default
-        name: mariadb-creds
-        key: client-key.pem
-    insecureSkipVerify: true
-EOF
-  )"
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
+  echo_step "creating ProviderConfig with TLS ${API_TYPE}"
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.providerconfig.tls.${API_TYPE}.yaml"
 }
 
 cleanup_provider_config() {
   echo_step "cleaning up ProviderConfig"
-  "${KUBECTL}" delete providerconfig.mysql.sql.crossplane.io default
+  "${KUBECTL}" delete providerconfig.mysql.sql.${APIGROUP_SUFFIX}crossplane.io default
 }
 
 setup_mariadb_no_tls() {
@@ -336,12 +294,11 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --set auth.rootPassword="${MARIADB_ROOT_PW}" \
-      --wait
+  "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 setup_mariadb_tls() {
@@ -355,59 +312,46 @@ setup_mariadb_tls() {
       --from-file=client-cert.pem \
       --from-file=client-key.pem
 
-  local values=$(cat <<EOF
-auth:
-  rootPassword: ${MARIADB_ROOT_PW}
-primary:
-  extraFlags: "--ssl --require-secure-transport=ON --ssl-ca=/opt/bitnami/mariadb/certs/ca-cert.pem --ssl-cert=/opt/bitnami/mariadb/certs/server-cert.pem --ssl-key=/opt/bitnami/mariadb/certs/server-key.pem"
-  configurationSecret: mariadb-server-tls
-  extraVolumes:
-    - name: tls-certificates
-      secret:
-        secretName: mariadb-server-tls
-  extraVolumeMounts:
-    - name: tls-certificates
-      mountPath: /opt/bitnami/mariadb/certs
-      readOnly: true
-initdbScripts:
-  init.sql: |
+  # Create init script ConfigMap
+  "${KUBECTL}" create configmap mariadb-init-script --from-literal=init.sql="
     CREATE USER 'test'@'%' IDENTIFIED BY '${MARIADB_TEST_PW}' REQUIRE X509;
     GRANT ALL PRIVILEGES ON *.* TO 'test'@'%' WITH GRANT OPTION;
     FLUSH PRIVILEGES;
-EOF
-  )
+  "
 
-  "${HELM}" repo add bitnami https://charts.bitnami.com/bitnami >/dev/null
-  "${HELM}" repo update
-  "${HELM}" install mariadb bitnami/mariadb \
-      --version 11.3.0 \
-      --values <(echo "$values") \
-      --wait
+  # Deploy MariaDB using official mariadb image with TLS
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
+
+  echo_step "Waiting for MariaDB to be ready"
+  "${KUBECTL}" wait --for=create pod mariadb-0
+  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
 }
 
 cleanup_mariadb() {
   echo_step "uninstalling MariaDB"
-  "${HELM}" uninstall mariadb
+  "${KUBECTL}" delete statefulset mariadb -n default
+  "${KUBECTL}" delete service mariadb -n default
+  "${KUBECTL}" delete configmap mariadb-init-script -n default --ignore-not-found=true
   "${KUBECTL}" delete secret mariadb-creds
 }
 
 test_create_database() {
   echo_step "test creating MySQL Database resource"
-  "${KUBECTL}" apply -f ${projectdir}/examples/mysql/database.yaml
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
   echo_step_completed
 }
 
 test_create_user() {
   echo_step "test creating MySQL User resource"
   local user_pw="asdf1234"
-  "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}"
-  "${KUBECTL}" apply -f ${projectdir}/examples/mysql/user.yaml
+  "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --save-config
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/user.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
   echo_step_completed
 
   echo_info "check if connection secret exists"
@@ -419,11 +363,11 @@ test_create_user() {
 test_update_user_password() {
   echo_step "test updating MySQL User password"
   local user_pw="newpassword"
-  "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --dry-run -oyaml | \
+  "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --dry-run=client --save-config -oyaml | \
     "${KUBECTL}" apply -f -
 
   # trigger reconcile
-  "${KUBECTL}" annotate -f ${projectdir}/examples/mysql/user.yaml reconcile=now
+  "${KUBECTL}" annotate -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml reconcile=now
 
   sleep 3
 
@@ -435,10 +379,10 @@ test_update_user_password() {
 
 test_create_grant() {
   echo_step "test creating MySQL Grant resource"
-  "${KUBECTL}" apply -f ${projectdir}/examples/mysql/grant_database.yaml
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/mysql/grant_database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
   echo_step_completed
 }
 
@@ -451,9 +395,9 @@ test_all() {
 
 cleanup_test_resources() {
   echo_step "cleaning up test resources"
-  "${KUBECTL}" delete -f ${projectdir}/examples/mysql/grant_database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/mysql/database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/mysql/user.yaml
+  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
   "${KUBECTL}" delete secret example-pw
 }
 
@@ -461,34 +405,49 @@ setup_cluster
 setup_crossplane
 setup_provider
 
-echo_step "--- INTEGRATION TESTS - NO TLS ---"
+integration_tests_mariadb() {
+  if [[ "${TLS}" == "true" ]]; then
+    setup_tls_certs
+    setup_mariadb_tls
+    setup_provider_config_tls
+  else
+    setup_mariadb_no_tls
+    setup_provider_config_no_tls
+  fi
 
-setup_mariadb_no_tls
-setup_provider_config_no_tls
+  test_all
 
-test_all
+  cleanup_test_resources
+  cleanup_provider_config
+  cleanup_mariadb
 
-cleanup_test_resources
-cleanup_provider_config
-cleanup_mariadb
+  if [[ "${TLS}" == "true" ]]; then
+    cleanup_tls_certs
+  fi
+}
 
-echo_step "--- INTEGRATION TESTS - TLS ---"
+run_test() {
+  APIGROUP_SUFFIX=""
+  if [ "${API_TYPE}" == "namespaced" ]; then
+    APIGROUP_SUFFIX="m."
+  fi
 
-setup_tls_certs
-setup_mariadb_tls
-setup_provider_config_tls
+  local testmain="$1"
 
-test_all
+  echo_step "--- TESTING $testmain $API_TYPE WITH TLS=$TLS ---"
+  start=$(date +%s)
 
-cleanup_test_resources
-cleanup_provider_config
-cleanup_mariadb
-cleanup_tls_certs
+  $testmain
 
-echo_step "--- INTEGRATION TESTS FOR MySQL ACCOMPLISHED SUCCESSFULLY ---"
+  duration=$(( $(date +%s) - start ))
+  echo_step "--- TESTING $testmain DONE IN ${duration}s ---"
+}
 
-echo_step "--- TESTING POSTGRESDB ---"
-integration_tests_postgres
-echo_step "--- INTEGRATION TESTS FOR POSTGRESDB ACCOMPLISHED SUCCESSFULLY ---"
+TLS=true API_TYPE="cluster" run_test integration_tests_mariadb
+TLS=true API_TYPE="namespaced" run_test integration_tests_mariadb
+TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
+
+TLS=false API_TYPE="cluster" run_test integration_tests_postgres
+TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
 
 integration_tests_end

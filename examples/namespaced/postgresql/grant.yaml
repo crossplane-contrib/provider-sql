@@ -1,0 +1,84 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-database
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - CREATE
+    withOption: GRANT
+    roleRef:
+      name: example-role
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-2-on-database
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - CONNECT
+      - TEMPORARY
+    roleRef:
+      name: example-role
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-membership
+  namespace: default
+spec:
+  forProvider:
+    withOption: ADMIN
+    roleRef:
+      name: example-role
+    memberOfRef:
+      name: parent-role
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: grant-postgres-an-owner-role
+  namespace: default
+spec:
+  forProvider:
+    role: "postgres"
+    memberOfRef:
+      name: "ownerrole"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: grant-owner-role-privilege-connect
+  namespace: default
+spec:
+  forProvider:
+    withOption: "GRANT"
+    privileges:
+      - CONNECT
+    roleRef:
+      name: "ownerrole"
+    databaseRef:
+      name: "db1"
+    revokePublicOnDb: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

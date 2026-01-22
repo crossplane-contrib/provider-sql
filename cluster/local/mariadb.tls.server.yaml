@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: mariadb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: default
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:12
+        args:
+        - --ssl
+        - --require-secure-transport=ON
+        - --ssl-ca=/etc/mysql/certs/ca-cert.pem
+        - --ssl-cert=/etc/mysql/certs/server-cert.pem
+        - --ssl-key=/etc/mysql/certs/server-key.pem
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-creds
+              key: password
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        - name: tls-certificates
+          mountPath: /etc/mysql/certs
+          readOnly: true
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+        readinessProbe:
+          exec:
+            command:
+            - bash
+            - -c
+            - mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -e "SELECT 1"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: tls-certificates
+        secret:
+          secretName: mariadb-server-tls
+      - name: init-script
+        configMap:
+          name: mariadb-init-script

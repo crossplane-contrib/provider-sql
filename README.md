@@ -75,3 +75,37 @@ Check the example:
 4. Run `make` to initialize the "build". Make submodules used for CI/CD.
 5. Run `make reviewable` to run code generation, linters, and tests.
 6. Commit, push, and PR.
+
+## Developing locally
+
+**Pre-requisite:** A Kubernetes cluster with Crossplane installed
+
+To run the `provider-helm` controller against your existing local cluster,
+simply run:
+
+```console
+make run
+```
+
+Since the controller is running outside of the local cluster, you need to make
+the API server accessible (on a separate terminal):
+
+```console
+sudo kubectl proxy --port=8081
+```
+
+Then we must prepare a `ProviderConfig` for the local cluster (assuming you are
+using `kind` for local development):
+
+```console
+KUBECONFIG=$(kind get kubeconfig | sed -e 's|server:\s*.*$|server: http://localhost:8081|g')
+kubectl -n crossplane-system create secret generic cluster-config --from-literal=kubeconfig="${KUBECONFIG}" 
+kubectl apply -f examples/provider-config/provider-config-with-secret.yaml
+```
+
+Now you can create `Release` resources with this `ProviderConfig`, for example
+[sample release.yaml](examples/sample/release.yaml).
+
+```console
+kubectl create -f examples/sample/release.yaml
+```

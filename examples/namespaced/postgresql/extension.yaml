@@ -1,0 +1,31 @@
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Extension
+metadata:
+  name: hstore-extension-db
+  namespace: default
+spec:
+  forProvider:
+    extension: hstore
+    version: "1.4"
+    databaseRef:
+      name: example
+      # namespace: default  # Optional - defaults to the same namespace as the Extension
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Extension
+metadata:
+  name: ltree-extension-db
+  namespace: default
+spec:
+  forProvider:
+    extension: ltree
+    version: "1.1"
+    databaseRef:
+      name: example
+      namespace: default  # Explicitly set namespace (demonstrates namespace scoping)
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
