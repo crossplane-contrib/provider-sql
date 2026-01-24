@@ -44,7 +44,6 @@ import (
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
-	errNotGrant        = "managed resource is not a Grant custom resource"
 	errGrant           = "cannot grant"
 	errRevoke          = "cannot revoke"
 	errCannotGetGrants = "cannot get current grants"
@@ -52,26 +51,14 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.ProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.ModernManaged))
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(namespacedv1alpha1.GrantGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newClient: mssql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newClient: mssql.New}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
@@ -95,43 +82,33 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube      client.Client
-	usage     resource.Tracker
+	track     func(ctx context.Context, mg resource.ModernManaged) error
 	newClient func(creds map[string][]byte, database string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*namespacedv1alpha1.Grant] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*namespacedv1alpha1.Grant)
-	if !ok {
-		return nil, errors.New(errNotGrant)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.TypedExternalClient[*namespacedv1alpha1.Grant], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
 	if err != nil {
 		return nil, err
 	}
 
-	return &external{db: c.newClient(providerInfo.SecretData, ptr.Deref(cr.Spec.ForProvider.Database, ""))}, nil
+	return &external{db: c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))}, nil
 }
 
 type external struct{ db xsql.DB }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*namespacedv1alpha1.Grant] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Grant)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotGrant)
-	}
-
-	permissions, err := c.getPermissions(ctx, cr)
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalObservation, error) {
+	permissions, err := c.getPermissions(ctx, mg)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
@@ -139,45 +116,35 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, nil
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
-	g, r := diffPermissions(cr.Spec.ForProvider.Permissions.ToStringSlice(), permissions)
+	g, r := diffPermissions(mg.Spec.ForProvider.Permissions.ToStringSlice(), permissions)
 	return managed.ExternalObservation{
 		ResourceExists:   true,
 		ResourceUpToDate: len(g) == 0 && len(r) == 0,
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Grant)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotGrant)
-	}
+func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalCreation, error) {
+	username := *mg.Spec.ForProvider.User
+	permissions := strings.Join(mg.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
 
-	username := *cr.Spec.ForProvider.User
-	permissions := strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
-
-	query := fmt.Sprintf("GRANT %s %s TO %s", permissions, onSchemaQuery(cr), mssql.QuoteIdentifier(username))
+	query := fmt.Sprintf("GRANT %s %s TO %s", permissions, onSchemaQuery(mg), mssql.QuoteIdentifier(username))
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errGrant)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Grant)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotGrant)
-	}
-
-	observed, err := c.getPermissions(ctx, cr)
+func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalUpdate, error) {
+	observed, err := c.getPermissions(ctx, mg)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
-	desired := cr.Spec.ForProvider.Permissions.ToStringSlice()
+	desired := mg.Spec.ForProvider.Permissions.ToStringSlice()
 	toGrant, toRevoke := diffPermissions(desired, observed)
 
 	if len(toRevoke) > 0 {
 		sort.Strings(toRevoke)
 		query := fmt.Sprintf("REVOKE %s %s FROM %s",
-			strings.Join(toRevoke, ", "), onSchemaQuery(cr), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+			strings.Join(toRevoke, ", "), onSchemaQuery(mg), mssql.QuoteIdentifier(*mg.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errRevoke)
 		}
@@ -185,7 +152,7 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	if len(toGrant) > 0 {
 		sort.Strings(toGrant)
 		query := fmt.Sprintf("GRANT %s %s TO %s",
-			strings.Join(toGrant, ", "), onSchemaQuery(cr), mssql.QuoteIdentifier(*cr.Spec.ForProvider.User))
+			strings.Join(toGrant, ", "), onSchemaQuery(mg), mssql.QuoteIdentifier(*mg.Spec.ForProvider.User))
 		if err = c.db.Exec(ctx, xsql.Query{String: query}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errGrant)
 		}
@@ -197,17 +164,12 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Grant)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotGrant)
-	}
-
-	username := *cr.Spec.ForProvider.User
+func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalDelete, error) {
+	username := *mg.Spec.ForProvider.User
 
 	query := fmt.Sprintf("REVOKE %s %s FROM %s",
-		strings.Join(cr.Spec.ForProvider.Permissions.ToStringSlice(), ", "),
-		onSchemaQuery(cr),
+		strings.Join(mg.Spec.ForProvider.Permissions.ToStringSlice(), ", "),
+		onSchemaQuery(mg),
 		mssql.QuoteIdentifier(username),
 	)
 	return managed.ExternalDelete{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errRevoke)

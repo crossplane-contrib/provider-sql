@@ -98,11 +98,11 @@ type ProviderConfig struct {
 
 // +kubebuilder:object:root=true
 
-// A ProviderConfigList contains a list of ClusterProviderConfig.
+// A ProviderConfigList contains a list of ProviderConfig.
 type ProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ClusterProviderConfig `json:"items"`
+	Items           []ProviderConfig `json:"items"`
 }
 
 // +kubebuilder:object:root=true

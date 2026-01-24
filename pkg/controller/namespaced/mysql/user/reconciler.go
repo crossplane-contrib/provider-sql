@@ -46,7 +46,6 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errTLSConfig    = "cannot load TLS config"
 
-	errNotUser                 = "managed resource is not a User custom resource"
 	errSelectUser              = "cannot select user"
 	errCreateUser              = "cannot create user"
 	errDropUser                = "cannot drop user"
@@ -57,26 +56,14 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.ProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.ModernManaged))
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(namespacedv1alpha1.UserGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -99,25 +86,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.ModernManaged) error
 	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*namespacedv1alpha1.User] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return nil, errors.New(errNotUser)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (managed.TypedExternalClient[*namespacedv1alpha1.User], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +110,7 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.T
 	}
 
 	return &external{
-		db:   c.newDB(providerInfo.SecretData, tlsName, cr.Spec.ForProvider.BinLog),
+		db:   c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }
@@ -138,7 +120,7 @@ type external struct {
 	kube client.Client
 }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}
 
 func handleClause(clause string, value *int, out *[]string) {
 	// If clause is not set (nil pointer), do not push a setting.
@@ -190,13 +172,8 @@ func changedResourceOptions(existing []string, desired []string) ([]string, erro
 	return out, nil
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotUser)
-	}
-
-	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalObservation, error) {
+	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 
 	observed := &namespacedv1alpha1.UserParameters{
 		AuthPlugin:      new(string),
@@ -231,36 +208,31 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	_, pwdChanged, err := c.getPassword(ctx, cr)
+	_, pwdChanged, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	cr.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
-	cr.Status.AtProvider.AuthPlugin = observed.AuthPlugin
+	mg.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
+	mg.Status.AtProvider.AuthPlugin = observed.AuthPlugin
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
-		ResourceUpToDate: !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
+		ResourceUpToDate: !pwdChanged && upToDate(observed, &mg.Spec.ForProvider),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotUser)
-	}
+func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
+	mg.SetConditions(xpv1.Creating())
 
-	cr.SetConditions(xpv1.Creating())
-
-	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
+	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
+	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
 
 	var pw *string
-	if checkUsePassword(cr) {
-		userPassword, _, err := c.getPassword(ctx, cr)
+	if checkUsePassword(mg) {
+		userPassword, _, err := c.getPassword(ctx, mg)
 		if err != nil {
 			return managed.ExternalCreation{}, err
 		}
@@ -274,12 +246,12 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 		pw = &userPassword
 	}
 
-	if err := c.executeCreateUserQuery(ctx, username, host, cr.Spec.ForProvider.AuthPlugin, ro, pw); err != nil {
+	if err := c.executeCreateUserQuery(ctx, username, host, mg.Spec.ForProvider.AuthPlugin, ro, pw); err != nil {
 		return managed.ExternalCreation{}, err
 	}
 
 	if len(ro) != 0 {
-		cr.Status.AtProvider.ResourceOptionsAsClauses = ro
+		mg.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
 	if pw != nil {
@@ -311,94 +283,48 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 	return mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser})
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotUser)
+func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
+	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
+	plugin := defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
+
+	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
+	rochanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	if err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
 	}
 
-	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
-	plugin := defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin)
+	if len(rochanged) > 0 {
+		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
 
-	roToAlter, err := getResourceOptionsToAlter(cr)
+		query := fmt.Sprintf(
+			"ALTER USER %s@%s %s",
+			mysql.QuoteValue(username),
+			mysql.QuoteValue(host),
+			resourceOptions,
+		)
+		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+
+		mg.Status.AtProvider.ResourceOptionsAsClauses = ro
+	}
+
+	connectionDetails, err := c.UpdatePassword(ctx, mg, username, host)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	password := ""
-	passwordChanged := false
-	if checkUsePassword(cr) {
-		password, passwordChanged, err = c.getPassword(ctx, cr)
-		if err != nil {
-			return managed.ExternalUpdate{}, err
-		}
-	}
-
-	return c.applyUserChanges(ctx, cr, passwordChanged, roToAlter, username, host, plugin, password)
-}
-
-func (c *external) applyUserChanges(ctx context.Context, cr *namespacedv1alpha1.User, passwordChanged bool, roToAlter []string, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
-	// Handle resource options changes (separate ALTER USER statement)
-	if err := c.updateResourceOptionsIfChanged(ctx, cr, roToAlter, username, host); err != nil {
-		return managed.ExternalUpdate{}, err
-	}
-
-	// Handle auth plugin and/or password changes (separate ALTER USER statement)
-	return c.updateAuthIfChanged(ctx, cr, passwordChanged, username, host, plugin, password)
-}
-
-func (c *external) updateResourceOptionsIfChanged(ctx context.Context, cr *namespacedv1alpha1.User, roToAlter []string, username string, host string) error {
-	if !checkResourceOptionsChanged(roToAlter) {
-		return nil
-	}
-
-	resourceOptions := fmt.Sprintf(" WITH %s", strings.Join(roToAlter, " "))
-	query := fmt.Sprintf(
-		"ALTER USER %s@%s%s",
-		mysql.QuoteValue(username),
-		mysql.QuoteValue(host),
-		resourceOptions,
-	)
-	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
-		return err
-	}
-	cr.Status.AtProvider.ResourceOptionsAsClauses = roToAlter
-	return nil
-}
-
-func (c *external) updateAuthIfChanged(ctx context.Context, cr *namespacedv1alpha1.User, passwordChanged bool, username string, host string, plugin string, password string) (managed.ExternalUpdate, error) {
-	needsPasswordUpdate := checkUsePassword(cr) && passwordChanged
-	needsAuthPluginUpdate := checkAuthPluginChanged(cr)
-
-	if !needsPasswordUpdate && !needsAuthPluginUpdate {
-		return managed.ExternalUpdate{}, nil
-	}
-
-	if err := c.executeAlterUserQuery(ctx, username, host, plugin, password); err != nil {
-		return managed.ExternalUpdate{}, err
-	}
-
-	// Return connection details if password was updated
-	if needsPasswordUpdate {
-		return managed.ExternalUpdate{ConnectionDetails: c.db.GetConnectionDetails(username, password)}, nil
-	}
-
-	return managed.ExternalUpdate{}, nil
+	return managed.ExternalUpdate{ConnectionDetails: connectionDetails}, nil
 }
 
 func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*namespacedv1alpha1.User)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotUser)
-	}
+func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalDelete, error) {
+	mg.SetConditions(xpv1.Deleting())
 
-	cr.SetConditions(xpv1.Deleting())
-
-	username, host := mysql.SplitUserHost(meta.GetExternalName(cr))
+	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 
 	query := fmt.Sprintf("DROP USER IF EXISTS %s@%s", mysql.QuoteValue(username), mysql.QuoteValue(host))
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errDropUser}); err != nil {
@@ -408,12 +334,12 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.Ext
 	return managed.ExternalDelete{}, nil
 }
 
-func checkUsePassword(cr *namespacedv1alpha1.User) bool {
-	if cr.Spec.ForProvider.UsePassword == nil {
+func checkUsePassword(mg *namespacedv1alpha1.User) bool {
+	if mg.Spec.ForProvider.UsePassword == nil {
 		return true
 	}
 
-	return *cr.Spec.ForProvider.UsePassword
+	return *mg.Spec.ForProvider.UsePassword
 }
 
 // defaultAuthPlugin returns the authentication plugin to use.
@@ -426,23 +352,23 @@ func defaultAuthPlugin(plugin *string) string {
 	return *plugin
 }
 
-func checkAuthPluginChanged(cr *namespacedv1alpha1.User) bool {
-	if cr.Status.AtProvider.AuthPlugin == nil {
+func checkAuthPluginChanged(mg *namespacedv1alpha1.User) bool {
+	if mg.Status.AtProvider.AuthPlugin == nil {
 		return true
 	}
 
-	if *cr.Status.AtProvider.AuthPlugin != defaultAuthPlugin(cr.Spec.ForProvider.AuthPlugin) {
+	if *mg.Status.AtProvider.AuthPlugin != defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin) {
 		return true
 	}
 
 	return false
 }
 
-func getResourceOptionsToAlter(cr *namespacedv1alpha1.User) ([]string, error) {
+func getResourceOptionsToAlter(mg *namespacedv1alpha1.User) ([]string, error) {
 	roToAlter := []string{}
 
-	ro := resourceOptionsToClauses(cr.Spec.ForProvider.ResourceOptions)
-	roChanged, err := changedResourceOptions(cr.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
+	roChanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
 	if err != nil {
 		return roToAlter, errors.Wrap(err, errUpdateUser)
 	}

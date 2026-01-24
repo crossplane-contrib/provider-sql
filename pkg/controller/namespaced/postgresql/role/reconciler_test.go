@@ -77,16 +77,17 @@ func (m mockDB) GetConnectionDetails(rolename, password string) managed.Connecti
 
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
+	nopUsage := func(ctx context.Context, mg resource.ModernManaged) error { return nil }
 
 	type fields struct {
 		kube  client.Client
-		usage resource.Tracker
+		track func(context.Context, resource.ModernManaged) error
 		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Role
 	}
 
 	cases := map[string]struct {
@@ -95,17 +96,10 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotRole": {
-			reason: "An error should be returned if the managed resource is not a *Role",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotRole),
-		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return errBoom },
 			},
 			args: args{
 				mg: &v1alpha1.Role{},
@@ -115,7 +109,7 @@ func TestConnect(t *testing.T) {
 		"InvalideProviderConfigKind": {
 			reason: "An error should be returned if our ProviderConfig kind is invalid",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -134,7 +128,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -159,7 +153,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -184,7 +178,7 @@ func TestConnect(t *testing.T) {
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -217,7 +211,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: nopUsage,
 			},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -240,7 +234,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage, newDB: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -259,7 +253,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Role
 	}
 
 	type want struct {
@@ -273,15 +267,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotRole": {
-			reason: "An error should be returned if the managed resource is not a *Role",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotRole),
-			},
-		},
 		"ErrNoRole": {
 			reason: "We should return ResourceExists: false when no role is found",
 			fields: fields{
@@ -442,7 +427,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Role
 	}
 
 	type want struct {
@@ -457,15 +442,6 @@ func TestCreate(t *testing.T) {
 		args      args
 		want      want
 	}{
-		"ErrNotRole": {
-			reason: "An error should be returned if the managed resource is not a *Role",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotRole),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the role should be returned",
 			fields: fields{
@@ -613,7 +589,7 @@ func TestUpdate(t *testing.T) {
 
 	type args struct {
 		ctx  context.Context
-		mg   resource.Managed
+		mg   *v1alpha1.Role
 		kube client.Client
 	}
 
@@ -628,15 +604,6 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotRole": {
-			reason: "An error should be returned if the managed resource is not a *Role",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotRole),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while updating the role should be returned",
 			fields: fields{
@@ -737,7 +704,9 @@ func TestUpdate(t *testing.T) {
 					},
 				},
 			},
-			want: want{},
+			want: want{
+				err: nil,
+			},
 		},
 		"UpdatePassword": {
 			reason: "The password must be updated",
@@ -1045,7 +1014,9 @@ func TestUpdate(t *testing.T) {
 					},
 				},
 			},
-			want: want{},
+			want: want{
+				err: nil,
+			},
 		},
 		"NoUpdateQueryNoChangedConfigurationParameters": {
 			reason: "We should not execute an SQL query if configuration parameters are unchanged.",
@@ -1144,7 +1115,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.Role
 	}
 
 	cases := map[string]struct {
@@ -1153,13 +1124,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotRole": {
-			reason: "An error should be returned if the managed resource is not a *Role",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotRole),
-		},
 		"ErrDropDB": {
 			reason: "Errors dropping a role should be returned",
 			fields: fields{

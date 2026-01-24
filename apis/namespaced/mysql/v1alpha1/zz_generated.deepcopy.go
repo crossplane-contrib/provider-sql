@@ -468,7 +468,7 @@ func (in *ProviderConfigList) DeepCopyInto(out *ProviderConfigList) {
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
-		*out = make([]ClusterProviderConfig, len(*in))
+		*out = make([]ProviderConfig, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

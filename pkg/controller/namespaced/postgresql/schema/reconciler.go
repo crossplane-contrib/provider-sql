@@ -44,7 +44,6 @@ import (
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
-	errNotSchema    = "managed resource is not a Schema custom resource"
 	errSelectSchema = "cannot select schema"
 	errCreateSchema = "cannot create schema"
 	errDropSchema   = "cannot drop schema"
@@ -54,26 +53,14 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.ProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.ModernManaged))
-}
-
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(namespacedv1alpha1.SchemaGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -94,39 +81,34 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*namespacedv1alpha1.Schema] = &connector{}
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.ModernManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*namespacedv1alpha1.Schema)
-	if !ok {
-		return nil, errors.New(errNotSchema)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.TypedExternalClient[*namespacedv1alpha1.Schema], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, cr)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
 	if err != nil {
 		return nil, err
 	}
 
-	if cr.Spec.ForProvider.Database == nil {
+	if mg.Spec.ForProvider.Database == nil {
 		return nil, errors.New(errNoDatabase)
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, *cr.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode))}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, *mg.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode))}, nil
 }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*namespacedv1alpha1.Schema] = &external{}
 
 type external struct{ db xsql.DB }
 
@@ -134,12 +116,7 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Schema)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotSchema)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.ExternalObservation, error) {
 	// If the Schema exists, it will have all of these properties.
 	observed := namespacedv1alpha1.SchemaParameters{
 		Role: new(string),
@@ -149,7 +126,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	err := c.db.Scan(ctx, xsql.Query{
 		String:     query,
-		Parameters: []interface{}{meta.GetExternalName(cr)},
+		Parameters: []interface{}{meta.GetExternalName(mg)},
 	},
 		observed.Role,
 	)
@@ -163,55 +140,40 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
-		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
-		ResourceUpToDate:        upToDate(observed, cr.Spec.ForProvider),
+		ResourceLateInitialized: lateInit(observed, &mg.Spec.ForProvider),
+		ResourceUpToDate:        upToDate(observed, mg.Spec.ForProvider),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) { //nolint:gocyclo
-	cr, ok := mg.(*namespacedv1alpha1.Schema)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotSchema)
-	}
-
+func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.ExternalCreation, error) { //nolint:gocyclo
 	var queries []xsql.Query
 
-	cr.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv1.Creating())
 
-	createSchemaQueries(cr.Spec.ForProvider, &queries, meta.GetExternalName(cr))
+	createSchemaQueries(mg.Spec.ForProvider, &queries, meta.GetExternalName(mg))
 
 	err := c.db.ExecTx(ctx, queries)
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateSchema)
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
-	cr, ok := mg.(*namespacedv1alpha1.Schema)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotSchema)
-	}
-
-	if cr.Spec.ForProvider.Role == nil {
+func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.ExternalUpdate, error) { //nolint:gocyclo
+	if mg.Spec.ForProvider.Role == nil {
 		return managed.ExternalUpdate{}, nil
 	}
 
 	var queries []xsql.Query
-	updateSchemaQueries(cr.Spec.ForProvider, &queries, meta.GetExternalName(cr))
+	updateSchemaQueries(mg.Spec.ForProvider, &queries, meta.GetExternalName(mg))
 
 	err := c.db.ExecTx(ctx, queries)
 	return managed.ExternalUpdate{}, errors.Wrap(err, errAlterSchema)
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*namespacedv1alpha1.Schema)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotSchema)
-	}
-
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP SCHEMA IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr))})
+func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.ExternalDelete, error) {
+	err := c.db.Exec(ctx, xsql.Query{String: "DROP SCHEMA IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropSchema)
 }
 

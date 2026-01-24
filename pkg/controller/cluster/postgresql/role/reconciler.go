@@ -53,7 +53,6 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errNotRole                 = "managed resource is not a Role custom resource"
 	errSelectRole              = "cannot select role"
 	errCreateRole              = "cannot create role"
 	errDropRole                = "cannot drop role"
@@ -65,27 +64,13 @@ const (
 	maxConcurrency = 5
 )
 
-// TODO(nateinaction): This looks wrong, can tracker creation be improved?
-type tracker struct {
-	tracker *resource.LegacyProviderConfigUsageTracker
-}
-
-var _ resource.Tracker = &tracker{}
-
-func (t *tracker) Track(ctx context.Context, mg resource.Managed) error {
-	return t.tracker.Track(ctx, mg.(resource.LegacyManaged))
-}
-
 // Setup adds a controller that reconciles Role managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.RoleGroupKind)
-
-	// This can only be a legacy tracker
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	trk := &tracker{tracker: t}
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), usage: trk, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -108,26 +93,21 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.LegacyManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-var _ managed.TypedExternalConnector[resource.Managed] = &connector{}
+var _ managed.TypedExternalConnector[*v1alpha1.Role] = &connector{}
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.TypedExternalClient[resource.Managed], error) {
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return nil, errors.New(errNotRole)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Role) (managed.TypedExternalClient[*v1alpha1.Role], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
 	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
+	if err := c.kube.Get(ctx, types.NamespacedName{Name: mg.GetProviderConfigReference().Name}, pc); err != nil {
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
@@ -155,7 +135,7 @@ type external struct {
 	kube client.Client
 }
 
-var _ managed.TypedExternalClient[resource.Managed] = &external{}
+var _ managed.TypedExternalClient[*v1alpha1.Role] = &external{}
 
 func negateClause(clause string, negate *bool, out *[]string) {
 	// If clause boolean is not set (nil pointer), do not push a setting.
@@ -209,12 +189,7 @@ func changedPrivs(existing []string, desired []string) ([]string, error) {
 	return out, nil
 }
 
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotRole)
-	}
-
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalObservation, error) {
 	observed := &v1alpha1.RoleParameters{
 		Privileges: v1alpha1.RolePrivilege{
 			SuperUser:   new(bool),
@@ -244,7 +219,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		xsql.Query{
 			String: query,
 			Parameters: []interface{}{
-				meta.GetExternalName(cr),
+				meta.GetExternalName(mg),
 			},
 		},
 		&observed.Privileges.SuperUser,
@@ -275,37 +250,32 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		}
 		observed.ConfigurationParameters = &rc
 	}
-	cr.Status.AtProvider.ConfigurationParameters = observed.ConfigurationParameters
+	mg.Status.AtProvider.ConfigurationParameters = observed.ConfigurationParameters
 
-	_, pwdChanged, err := c.getPassword(ctx, cr)
+	_, pwdChanged, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	// PrivilegesAsClauses is used as role status output
-	cr.Status.AtProvider.PrivilegesAsClauses = privilegesToClauses(observed.Privileges)
+	mg.Status.AtProvider.PrivilegesAsClauses = privilegesToClauses(observed.Privileges)
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
-		ResourceLateInitialized: lateInit(observed, &cr.Spec.ForProvider),
-		ResourceUpToDate:        !pwdChanged && upToDate(observed, &cr.Spec.ForProvider),
+		ResourceLateInitialized: lateInit(observed, &mg.Spec.ForProvider),
+		ResourceUpToDate:        !pwdChanged && upToDate(observed, &mg.Spec.ForProvider),
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotRole)
-	}
+func (c *external) Create(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalCreation, error) {
+	mg.SetConditions(xpv1.Creating())
 
-	cr.SetConditions(xpv1.Creating())
+	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
+	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
 
-	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
-	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
-
-	pw, _, err := c.getPassword(ctx, cr)
+	pw, _, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalCreation{}, err
 	}
@@ -333,39 +303,35 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	// PrivilegesAsClauses is used as role status output
 	// Update here so that state is reflected to the user prior to the next
 	// reconciler loop.
-	cr.Status.AtProvider.PrivilegesAsClauses = privs
-	if cr.Spec.ForProvider.ConfigurationParameters != nil {
-		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
+	mg.Status.AtProvider.PrivilegesAsClauses = privs
+	if mg.Spec.ForProvider.ConfigurationParameters != nil {
+		for _, v := range *mg.Spec.ForProvider.ConfigurationParameters {
 			if err := c.db.Exec(ctx, xsql.Query{
 				String: fmt.Sprintf("ALTER ROLE %s set %s=%s", crn, pq.QuoteIdentifier(v.Name), pq.QuoteIdentifier(v.Value)),
 			}); err != nil {
 				return managed.ExternalCreation{}, errors.Wrap(err, errSetRoleConfigs)
 			}
 		}
-		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
+		mg.Status.AtProvider.ConfigurationParameters = mg.Spec.ForProvider.ConfigurationParameters
 	}
 
 	return managed.ExternalCreation{
-		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 	}, nil
 }
 
-func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) { //nolint:gocyclo
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalUpdate, error) { //nolint:gocyclo
 	// NOTE(benagricola): This is just a touch over the cyclomatic complexity
 	// limit, but is unlikely to become more complex unless new role features
 	// are added. Think about splitting this method up if new functionality
 	// is desired.
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return managed.ExternalUpdate{}, errors.New(errNotRole)
-	}
 
-	pw, pwchanged, err := c.getPassword(ctx, cr)
+	pw, pwchanged, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
 	}
 
-	crn := pq.QuoteIdentifier(meta.GetExternalName(cr))
+	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if pwchanged {
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -375,8 +341,8 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 		}
 	}
 
-	privs := privilegesToClauses(cr.Spec.ForProvider.Privileges)
-	cp, err := changedPrivs(cr.Status.AtProvider.PrivilegesAsClauses, privs)
+	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
+	cp, err := changedPrivs(mg.Status.AtProvider.PrivilegesAsClauses, privs)
 
 	if err != nil {
 		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
@@ -393,18 +359,18 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// PrivilegesAsClauses is used as role status output
 	// Update here so that state is reflected to the user prior to the next
 	// reconciler loop.
-	cr.Status.AtProvider.PrivilegesAsClauses = privs
+	mg.Status.AtProvider.PrivilegesAsClauses = privs
 
 	// Checks if current role configuration parameters differs from desired state.
 	// If difference, reset all parameters and apply desired parameters in a transaction
-	if cr.Spec.ForProvider.ConfigurationParameters != nil && !cmp.Equal(cr.Status.AtProvider.ConfigurationParameters, cr.Spec.ForProvider.ConfigurationParameters,
+	if mg.Spec.ForProvider.ConfigurationParameters != nil && !cmp.Equal(mg.Status.AtProvider.ConfigurationParameters, mg.Spec.ForProvider.ConfigurationParameters,
 		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
 		q := make([]xsql.Query, 0)
 		q = append(q, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s RESET ALL", crn),
 		})
 		// search_path="$user", public is valid so need to handle that
-		for _, v := range *cr.Spec.ForProvider.ConfigurationParameters {
+		for _, v := range *mg.Spec.ForProvider.ConfigurationParameters {
 			sb := strings.Builder{}
 			values := strings.Split(v.Value, ",")
 			for i, v := range values {
@@ -421,9 +387,9 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
 		// Update state to reflect the current configuration parameters
-		cr.Status.AtProvider.ConfigurationParameters = cr.Spec.ForProvider.ConfigurationParameters
+		mg.Status.AtProvider.ConfigurationParameters = mg.Spec.ForProvider.ConfigurationParameters
 	}
-	cl := cr.Spec.ForProvider.ConnectionLimit
+	cl := mg.Spec.ForProvider.ConnectionLimit
 	if cl != nil {
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s CONNECTION LIMIT %d", crn, int64(*cl)),
@@ -435,20 +401,16 @@ func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.Ext
 	// Only update connection details if password is changed
 	if pwchanged {
 		return managed.ExternalUpdate{
-			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(cr), pw),
+			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 		}, nil
 	}
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) (managed.ExternalDelete, error) {
-	cr, ok := mg.(*v1alpha1.Role)
-	if !ok {
-		return managed.ExternalDelete{}, errors.New(errNotRole)
-	}
-	cr.SetConditions(xpv1.Deleting())
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalDelete, error) {
+	mg.SetConditions(xpv1.Deleting())
 	err := c.db.Exec(ctx, xsql.Query{
-		String: "DROP ROLE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(cr)),
+		String: "DROP ROLE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg)),
 	})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropRole)
 }

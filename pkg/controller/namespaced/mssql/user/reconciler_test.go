@@ -88,13 +88,13 @@ func TestConnect(t *testing.T) {
 
 	type fields struct {
 		kube  client.Client
-		usage resource.Tracker
+		track func(context.Context, resource.ModernManaged) error
 		newDB func(creds map[string][]byte, database string) xsql.DB
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.User
 	}
 
 	type want struct {
@@ -108,19 +108,10 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotUser),
-			},
-		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return errBoom },
 			},
 			args: args{
 				mg: &v1alpha1.User{},
@@ -132,7 +123,7 @@ func TestConnect(t *testing.T) {
 		"ErrInvalidProviderConfigKind": {
 			reason: "An error should be returned if our ProviderConfigReference kind is invalid",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -153,7 +144,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -180,7 +171,7 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -207,7 +198,7 @@ func TestConnect(t *testing.T) {
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -242,7 +233,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -280,7 +271,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
 			},
 			args: args{
@@ -323,7 +314,7 @@ func TestConnect(t *testing.T) {
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
 			},
 			args: args{
@@ -354,7 +345,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage, newClient: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newClient: tc.fields.newDB}
 			ec, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -385,7 +376,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.User
 	}
 
 	type want struct {
@@ -399,15 +390,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotUser),
-			},
-		},
 		"ErrNoUser": {
 			reason: "We should return ResourceExists: false when no user is found",
 			fields: fields{
@@ -529,7 +511,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.User
 	}
 
 	type want struct {
@@ -544,15 +526,6 @@ func TestCreate(t *testing.T) {
 		args      args
 		want      want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotUser),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the user should be returned",
 			fields: fields{
@@ -682,7 +655,7 @@ func TestUpdate(t *testing.T) {
 
 	type args struct {
 		ctx  context.Context
-		mg   resource.Managed
+		mg   *v1alpha1.User
 		kube client.Client
 	}
 
@@ -697,15 +670,6 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotUser),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while updating the user should be returned",
 			fields: fields{
@@ -898,7 +862,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.User
 	}
 
 	cases := map[string]struct {
@@ -907,13 +871,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotUser": {
-			reason: "An error should be returned if the managed resource is not a *User",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotUser),
-		},
 		"ErrDropDB": {
 			reason: "Errors dropping a user should be returned",
 			fields: fields{
