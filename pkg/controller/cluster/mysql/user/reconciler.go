@@ -333,6 +333,52 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 	return managed.ExternalUpdate{ConnectionDetails: connectionDetails}, nil
 }
 
+// UpdatePassword updates the password and/or auth plugin for a user if either has changed
+func (c *external) UpdatePassword(ctx context.Context, mg *v1alpha1.User, username string, host string) (managed.ConnectionDetails, error) {
+	pw, pwChanged, err := c.getPassword(ctx, mg)
+	if err != nil {
+		return nil, err
+	}
+
+	pluginChanged := false
+	desiredPlugin := defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
+	if mg.Status.AtProvider.AuthPlugin != nil {
+		observedPlugin := defaultAuthPlugin(mg.Status.AtProvider.AuthPlugin)
+		pluginChanged = desiredPlugin != observedPlugin
+	}
+
+	if !pwChanged && !pluginChanged {
+		return nil, nil
+	}
+
+	if err := c.executeAlterUserQuery(ctx, username, host, desiredPlugin, pw); err != nil {
+		return nil, err
+	}
+
+	if pwChanged {
+		return c.db.GetConnectionDetails(username, pw), nil
+	}
+
+	return nil, nil
+}
+
+// executeAlterUserQuery executes an ALTER USER statement to update password/plugin
+func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, pw string) error {
+	identifiedClause := buildIdentifiedClause(plugin, &pw)
+	if identifiedClause == "" {
+		// No password and no plugin means nothing to update
+		return nil
+	}
+
+	query := fmt.Sprintf("ALTER USER %s@%s %s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		identifiedClause,
+	)
+
+	return mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser})
+}
+
 // buildIdentifiedClause constructs the IDENTIFIED clause for CREATE/ALTER USER statements.
 func buildIdentifiedClause(plugin string, pw *string) string {
 	if plugin == "" {
@@ -355,22 +401,6 @@ func checkUsePassword(mg *v1alpha1.User) bool {
 	}
 
 	return *mg.Spec.ForProvider.UsePassword
-}
-
-func checkResourceOptionsChanged(roToAlter []string) bool {
-	return len(roToAlter) > 0
-}
-
-func checkAuthPluginChanged(mg *v1alpha1.User) bool {
-	if mg.Status.AtProvider.AuthPlugin == nil {
-		return true
-	}
-
-	if *mg.Status.AtProvider.AuthPlugin != defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin) {
-		return true
-	}
-
-	return false
 }
 
 func defaultAuthPlugin(authPlugin *string) string {

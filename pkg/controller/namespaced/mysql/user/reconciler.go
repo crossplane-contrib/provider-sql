@@ -285,7 +285,6 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
-	plugin := defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
 
 	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
 	rochanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
@@ -352,36 +351,33 @@ func defaultAuthPlugin(plugin *string) string {
 	return *plugin
 }
 
-func checkAuthPluginChanged(mg *namespacedv1alpha1.User) bool {
-	if mg.Status.AtProvider.AuthPlugin == nil {
-		return true
-	}
-
-	if *mg.Status.AtProvider.AuthPlugin != defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin) {
-		return true
-	}
-
-	return false
-}
-
-func getResourceOptionsToAlter(mg *namespacedv1alpha1.User) ([]string, error) {
-	roToAlter := []string{}
-
-	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
-	roChanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
+// UpdatePassword updates the password and/or auth plugin for a user if either has changed
+func (c *external) UpdatePassword(ctx context.Context, mg *namespacedv1alpha1.User, username string, host string) (managed.ConnectionDetails, error) {
+	pw, pwChanged, err := c.getPassword(ctx, mg)
 	if err != nil {
-		return roToAlter, errors.Wrap(err, errUpdateUser)
+		return nil, err
 	}
 
-	if len(roChanged) > 0 {
-		roToAlter = ro
+	pluginChanged := false
+	desiredPlugin := defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
+	if mg.Status.AtProvider.AuthPlugin != nil {
+		observedPlugin := defaultAuthPlugin(mg.Status.AtProvider.AuthPlugin)
+		pluginChanged = desiredPlugin != observedPlugin
 	}
 
-	return roToAlter, nil
-}
+	if !pwChanged && !pluginChanged {
+		return nil, nil
+	}
 
-func checkResourceOptionsChanged(roToAlter []string) bool {
-	return len(roToAlter) > 0
+	if err := c.executeAlterUserQuery(ctx, username, host, desiredPlugin, pw); err != nil {
+		return nil, err
+	}
+
+	if pwChanged {
+		return c.db.GetConnectionDetails(username, pw), nil
+	}
+
+	return nil, nil
 }
 
 func (c *external) executeAlterUserQuery(ctx context.Context, username string, host string, plugin string, pw string) error {
