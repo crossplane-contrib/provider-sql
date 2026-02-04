@@ -21,12 +21,13 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/config"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/database"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/extension"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/grant"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/role"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/schema"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/config"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/database"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/default_privileges"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/extension"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/grant"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/role"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/schema"
 )
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds
@@ -39,6 +40,7 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 		grant.Setup,
 		extension.Setup,
 		schema.Setup,
+		default_privileges.Setup,
 	} {
 		if err := setup(mgr, o); err != nil {
 			return err
