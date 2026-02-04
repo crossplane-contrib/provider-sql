@@ -57,7 +57,7 @@ type ProviderCredentials struct {
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
-	ConnectionSecretRef xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef *xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.

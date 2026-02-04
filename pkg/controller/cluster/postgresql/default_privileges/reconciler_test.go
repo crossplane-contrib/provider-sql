@@ -14,33 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package grant
+package default_privileges
 
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"sort"
 	"testing"
 
-	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
-	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
 
 type mockDB struct {
@@ -73,17 +68,16 @@ func (m mockDB) GetConnectionDetails(username, password string) managed.Connecti
 
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
-	nopUsage := func(ctx context.Context, mg resource.ModernManaged) error { return nil }
 
 	type fields struct {
 		kube  client.Client
-		track func(context.Context, resource.ModernManaged) error
+		track func(context.Context, resource.LegacyManaged) error
 		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  *v1alpha1.Grant
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	cases := map[string]struct {
@@ -95,28 +89,12 @@ func TestConnect(t *testing.T) {
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				track: func(ctx context.Context, mg resource.ModernManaged) error { return errBoom },
+				track: func(ctx context.Context, mg resource.LegacyManaged) error { return errBoom },
 			},
 			args: args{
-				mg: &v1alpha1.Grant{},
+				mg: &v1alpha1.DefaultPrivileges{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
-		},
-		"InvalideProviderConfigKind": {
-			reason: "An error should be returned if our ProviderConfig kind is invalid",
-			fields: fields{
-				track: nopUsage,
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
-						},
-					},
-				},
-			},
-			want: provErrors.InvalidProviderConfigKindError("Invalid"),
 		},
 		"ErrGetProviderConfig": {
 			reason: "An error should be returned if we can't get our ProviderConfig",
@@ -124,74 +102,40 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				track: nopUsage,
+				track: func(ctx context.Context, mg resource.LegacyManaged) error { return nil },
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-					},
-					Spec: v1alpha1.GrantSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
-								Kind: v1alpha1.ProviderConfigKind,
-								Name: "example",
-							},
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
 			},
-			want: provErrors.GetProviderConfigError(errBoom),
-		},
-		"ErrGetClusterProviderConfig": {
-			reason: "An error should be returned if we can't get our ClusterProviderConfig",
-			fields: fields{
-				kube: &test.MockClient{
-					MockGet: test.NewMockGetFn(errBoom),
-				},
-				track: nopUsage,
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
-								Kind: v1alpha1.ClusterProviderConfigKind,
-								Name: "example",
-							},
-						},
-					},
-				},
-			},
-			want: provErrors.GetClusterProviderConfigError(errBoom),
+			want: errors.Wrap(errBoom, errGetPC),
 		},
 		"ErrMissingConnectionSecret": {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
 			fields: fields{
 				kube: &test.MockClient{
-					// We call get to populate the Role struct, then again
+					// We call get to populate the Grant struct, then again
 					// to populate the (empty) ProviderConfig struct, resulting
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				track: nopUsage,
+				track: func(ctx context.Context, mg resource.LegacyManaged) error { return nil },
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-					},
-					Spec: v1alpha1.GrantSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
-								Kind: v1alpha1.ProviderConfigKind,
-								Name: "example",
-							},
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
 			},
-			want: provErrors.MissingSecretRefError(),
+			want: errors.New(errNoSecretRef),
 		},
 		"ErrGetConnectionSecret": {
 			reason: "An error should be returned if we can't get our ProviderConfig's connection secret",
@@ -200,31 +144,25 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
 						return nil
 					}),
 				},
-				track: nopUsage,
+				track: func(ctx context.Context, mg resource.LegacyManaged) error { return nil },
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "default",
-					},
-					Spec: v1alpha1.GrantSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
-								Kind: v1alpha1.ProviderConfigKind,
-								Name: "example",
-							},
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
 						},
 					},
 				},
 			},
-			want: provErrors.GetSecretError(errBoom),
+			want: errors.Wrap(errBoom, errGetSecret),
 		},
 	}
 
@@ -241,7 +179,7 @@ func TestConnect(t *testing.T) {
 
 func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
-	goa := v1alpha1.GrantOptionAdmin
+	// goa := v1alpha1.GrantOptionAdmin
 	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
@@ -250,7 +188,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  *v1alpha1.Grant
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -264,24 +202,36 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"ErrNotGrant": {
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotDefaultPrivileges),
+			},
+		},
 		"SuccessNoGrant": {
-			reason: "We should return ResourceExists: false when no grant is found",
+			reason: "We should return ResourceExists: false when no default grant is found",
 			fields: fields{
 				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						// Default value is false, so just return
-						bv := dest[0].(*bool)
-						*bv = false
+						// Default value is empty, so we don't need to do anything here
 						return nil
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
@@ -291,70 +241,29 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
-		"AllMapsToExpandedPrivileges": {
-			reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						privileges := q.Parameters[3]
-
-						privs, ok := privileges.(*pq.StringArray)
-						if !ok {
-							return fmt.Errorf("expected Scan parameter to be pq.StringArray, got %T", privileges)
-						}
-
-						// The order is not guaranteed, so sort the slices before comparing
-						sort.Strings(*privs)
-
-						// Return if there's a diff between the expected and actual privileges
-						diff := cmp.Diff(&pq.StringArray{"CONNECT", "CREATE", "TEMPORARY"}, privileges)
-
-						bv := dest[0].(*bool)
-						*bv = diff == ""
-
-						// Extra logging in case this test is going to fail
-						if diff != "" {
-							t.Logf("expected empty diff, got: %s", diff)
-						}
-
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("test-example"),
-							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
-			},
-		},
 		"ErrSelectGrant": {
-			reason: "We should return any errors encountered while trying to show the grant",
+			reason: "We should return any errors encountered while trying to show the default grant",
 			fields: fields{
 				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						r := sqlmock.NewRows([]string{"PRIVILEGE"}).
+							AddRow("UPDATE").
+							AddRow("SELECT")
+						return mockRowsToSQLRows(r), errBoom
+					},
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						return errBoom
 					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
 							WithOption: &gog,
 						},
@@ -362,58 +271,41 @@ func TestObserve(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errSelectGrant),
+				err: errors.Wrap(errBoom, errSelectDefaultPrivileges),
 			},
 		},
-		"SuccessRoleDb": {
-			reason: "We should return no error if we can find our role-db grant",
+		"DefaultPrivilegesFound": {
+			reason: "We should return no error if we can find the right permissions in the default grant",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
-						return nil
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						r := sqlmock.NewRows([]string{"PRIVILEGE"}).
+							AddRow("UPDATE").
+							AddRow("SELECT")
+						return mockRowsToSQLRows(r), nil
 					},
+					// MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+					// 	if len(dest) == 0 {
+					// 		runtime.Breakpoint()
+					// 		return nil
+					// 	}
+					// 	// populate the dest slice with the expected values
+					// 	// so we can compare them in the test
+					// 	*dest[0].(*string) = "SELECT"
+					// 	return nil
+					// },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
+							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
 							WithOption: &gog,
-						},
-					},
-				},
-			},
-			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
-			},
-		},
-		"SuccessRoleMembership": {
-			reason: "We should return no error if we can find our role-membership grant",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = true
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Role:       ptr.To("testrole"),
-							MemberOf:   ptr.To("parentrole"),
-							WithOption: &goa,
 						},
 					},
 				},
@@ -442,6 +334,17 @@ func TestObserve(t *testing.T) {
 	}
 }
 
+func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
+	db, mock, _ := sqlmock.New()
+	mock.ExpectQuery("select").WillReturnRows(mockRows)
+	rows, err := db.Query("select")
+	if err != nil {
+		println("%v", err)
+		return nil
+	}
+	return rows
+}
+
 func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
 
@@ -451,7 +354,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  *v1alpha1.Grant
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -465,42 +368,57 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"ErrNotGrant": {
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotDefaultPrivileges),
+			},
+		},
 		"ErrExec": {
-			reason: "Any errors encountered while creating the grant should be returned",
+			reason: "Any errors encountered while creating the default grant should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return errBoom },
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("TABLE"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
 				},
 			},
 			want: want{
-				err: errors.Wrap(errBoom, errCreateGrant),
+				err: errors.Wrap(errBoom, errCreateDefaultPrivileges),
 			},
 		},
 		"Success": {
-			reason: "No error should be returned when we successfully create a grant",
+			reason: "No error should be returned when we successfully create a default grant",
 			fields: fields{
 				db: &mockDB{
-					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						return nil
+					},
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							TargetRole: ptr.To("target-role"),
+							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
+							ObjectType: ptr.To("TABLE"),
 						},
 					},
 				},
@@ -532,7 +450,7 @@ func TestUpdate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  *v1alpha1.Grant
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -547,11 +465,11 @@ func TestUpdate(t *testing.T) {
 		want   want
 	}{
 		"ErrNoOp": {
-			reason: "Update is a no-op, make sure we dont throw an error *Grant",
+			reason: "Update is a no-op, make sure we dont throw an error *DefaultPrivileges",
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
@@ -590,7 +508,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  *v1alpha1.Grant
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	cases := map[string]struct {
@@ -599,8 +517,15 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrDropGrant": {
-			reason: "Errors dropping a grant should be returned",
+		"ErrNotDefaultPrivileges": {
+			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
+			args: args{
+				mg: nil,
+			},
+			want: errors.New(errNotDefaultPrivileges),
+		},
+		"ErrDropDefaultPrivileges": {
+			reason: "Errors dropping default privileges should be returned",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
@@ -609,27 +534,31 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							ObjectType: ptr.To("SEQUENCE"),
+							TargetRole: ptr.To("target-role"),
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errRevokeGrant),
+			want: errors.Wrap(errBoom, errRevokeDefaultPrivileges),
 		},
 		"Success": {
-			reason: "No error should be returned if the grant was revoked",
+			reason: "No error should be returned if the default grant was revoked",
 			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							ObjectType: ptr.To("SEQUENCE"),
+							TargetRole: ptr.To("target-role"),
 						},
 					},
 				},

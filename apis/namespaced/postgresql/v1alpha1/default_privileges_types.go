@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,8 +29,8 @@ type DefaultPrivileges struct {
 
 // A DefaultPrivilegesSpec defines the desired state of a Default Grant.
 type DefaultPrivilegesSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DefaultPrivilegesParameters `json:"forProvider"`
+	xpv2.ManagedResourceSpec `json:",inline"`
+	ForProvider              DefaultPrivilegesParameters `json:"forProvider"`
 }
 
 // A DefaultPrivilegesStatus represents the observed state of a Grant.

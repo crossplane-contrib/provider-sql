@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
@@ -30,10 +30,12 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
-	"github.com/crossplane/crossplane-runtime/pkg/resource"
-	"github.com/crossplane/crossplane-runtime/pkg/test"
+	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -71,13 +73,13 @@ func TestConnect(t *testing.T) {
 
 	type fields struct {
 		kube  client.Client
-		usage resource.Tracker
+		track func(context.Context, resource.ModernManaged) error
 		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 	}
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	cases := map[string]struct {
@@ -96,7 +98,7 @@ func TestConnect(t *testing.T) {
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return errBoom }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return errBoom },
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{},
@@ -109,13 +111,13 @@ func TestConnect(t *testing.T) {
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(errBoom),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
 					Spec: v1alpha1.DefaultPrivilegesSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &xpv1.ProviderConfigReference{},
 						},
 					},
 				},
@@ -131,13 +133,13 @@ func TestConnect(t *testing.T) {
 					// in a ProviderConfig with a nil connection secret.
 					MockGet: test.NewMockGetFn(nil),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
 					Spec: v1alpha1.DefaultPrivilegesSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &xpv1.ProviderConfigReference{},
 						},
 					},
 				},
@@ -151,20 +153,20 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.LocalSecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
 						return nil
 					}),
 				},
-				usage: resource.TrackerFn(func(ctx context.Context, mg resource.Managed) error { return nil }),
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
 					Spec: v1alpha1.DefaultPrivilegesSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &xpv1.ProviderConfigReference{},
 						},
 					},
 				},
@@ -175,7 +177,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, usage: tc.fields.usage, newDB: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -195,7 +197,7 @@ func TestObserve(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -361,7 +363,7 @@ func TestCreate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -457,7 +459,7 @@ func TestUpdate(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	type want struct {
@@ -515,7 +517,7 @@ func TestDelete(t *testing.T) {
 
 	type args struct {
 		ctx context.Context
-		mg  resource.Managed
+		mg  *v1alpha1.DefaultPrivileges
 	}
 
 	cases := map[string]struct {
@@ -582,7 +584,7 @@ func TestDelete(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := external{db: tc.fields.db}
-			err := e.Delete(tc.args.ctx, tc.args.mg)
+			_, err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
