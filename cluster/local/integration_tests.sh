@@ -396,6 +396,41 @@ test_update_database_charset() {
   sleep 10
 }
 
+test_remove_database_charset() {
+  echo_step "test removing charset/collation from spec leaves database unchanged"
+
+  # Remove charset and collation from the spec (set forProvider to only have empty fields)
+  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type json \
+    -p '[{"op":"remove","path":"/spec/forProvider/defaultCharacterSet"},{"op":"remove","path":"/spec/forProvider/defaultCollation"}]'
+
+  # Wait for the controller to reconcile -- late init should re-populate the fields
+  sleep 15
+
+  echo_info "check database resource is still Ready"
+  "${KUBECTL}" wait --timeout 30s --for condition=Ready database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db
+  echo_step_completed
+
+  echo_info "check charset/collation unchanged in MariaDB"
+  local charset collation
+  charset=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_character_set_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+
+  charset=$(echo "${charset}" | tr -d '[:space:]')
+  collation=$(echo "${collation}" | tr -d '[:space:]')
+
+  echo_info "charset=${charset}, collation=${collation}"
+
+  if [ "${charset}" != "utf8mb4" ]; then
+    echo_error "expected charset utf8mb4 after field removal but got ${charset}"
+  fi
+  if [ "${collation}" != "utf8mb4_bin" ]; then
+    echo_error "expected collation utf8mb4_bin after field removal but got ${collation}"
+  fi
+  echo_step_completed
+}
+
 test_create_user() {
   echo_step "test creating MySQL User resource"
   local user_pw="asdf1234"
@@ -442,6 +477,7 @@ test_all() {
   test_create_database
   test_database_charset
   test_update_database_charset
+  test_remove_database_charset
   test_create_user
   test_update_user_password
   test_create_grant

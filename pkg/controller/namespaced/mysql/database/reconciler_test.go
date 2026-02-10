@@ -354,6 +354,29 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessLateInitAfterFieldRemoval": {
+			reason: "When charset/collation are removed from spec, observed values should be late-initialized back and resource stays up to date",
+			fields: fields{
+				db: mockDB{
+					MockScan: mockScanRow("testdb", "utf8mb4", "utf8mb4_bin"),
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        true,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
