@@ -204,7 +204,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}

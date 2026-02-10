@@ -27,10 +27,11 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -38,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
 
 type mockDB struct {
@@ -88,13 +90,6 @@ func TestConnect(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotDefaultPrivileges),
-		},
 		"ErrTrackProviderConfigUsage": {
 			reason: "An error should be returned if we can't track our ProviderConfig usage",
 			fields: fields{
@@ -104,6 +99,22 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.DefaultPrivileges{},
 			},
 			want: errors.Wrap(errBoom, errTrackPCUsage),
+		},
+		"InvalideProviderConfigKind": {
+			reason: "An error should be returned if our ProviderConfig kind is invalid",
+			fields: fields{
+				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
+			},
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+						},
+					},
+				},
+			},
+			want: provErrors.InvalidProviderConfigKindError("Invalid"),
 		},
 		"ErrGetProviderConfig": {
 			reason: "An error should be returned if we can't get our ProviderConfig",
@@ -115,14 +126,20 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &xpv1.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetPC),
+			want: provErrors.GetProviderConfigError(errBoom),
 		},
 		"ErrMissingConnectionSecret": {
 			reason: "An error should be returned if our ProviderConfig doesn't specify a connection secret",
@@ -137,14 +154,20 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &xpv1.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
-			want: errors.New(errNoSecretRef),
+			want: provErrors.MissingSecretRefError(),
 		},
 		"ErrGetConnectionSecret": {
 			reason: "An error should be returned if we can't get our ProviderConfig's connection secret",
@@ -153,7 +176,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.LocalSecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -164,14 +187,20 @@ func TestConnect(t *testing.T) {
 			},
 			args: args{
 				mg: &v1alpha1.DefaultPrivileges{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &xpv1.ProviderConfigReference{},
+							ProviderConfigReference: &common.ProviderConfigReference{
+								Kind: v1alpha1.ProviderConfigKind,
+								Name: "example",
+							},
 						},
 					},
 				},
 			},
-			want: errors.Wrap(errBoom, errGetSecret),
+			want: provErrors.GetSecretError(errBoom),
 		},
 	}
 
@@ -211,15 +240,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDefaultPrivileges),
-			},
-		},
 		"SuccessNoGrant": {
 			reason: "We should return ResourceExists: false when no default grant is found",
 			fields: fields{
@@ -377,15 +397,6 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDefaultPrivileges),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the default grant should be returned",
 			fields: fields{
@@ -526,13 +537,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotDefaultPrivileges": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotDefaultPrivileges),
-		},
 		"ErrDropDefaultPrivileges": {
 			reason: "Errors dropping default privileges should be returned",
 			fields: fields{
