@@ -46,6 +46,7 @@ const (
 	errSelectDB = "cannot select database"
 	errCreateDB = "cannot create database"
 	errDropDB   = "cannot drop database"
+	errUpdateDB = "cannot update database"
 
 	maxConcurrency = 5
 )
@@ -112,9 +113,9 @@ type external struct{ db xsql.DB }
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Database] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalObservation, error) {
-	var name string
-	query := "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?"
-	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(mg)}}, &name)
+	var name, charset, collation string
+	query := "SELECT schema_name, default_character_set_name, default_collation_name FROM information_schema.schemata WHERE schema_name = ?"
+	err := c.db.Scan(ctx, xsql.Query{String: query, Parameters: []interface{}{meta.GetExternalName(mg)}}, &name, &charset, &collation)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
@@ -122,19 +123,39 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Database)
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectDB)
 	}
 
+	upToDate := true
+	lateInitialized := false
+
+	if mg.Spec.ForProvider.DefaultCharacterSet != nil {
+		if *mg.Spec.ForProvider.DefaultCharacterSet != charset {
+			upToDate = false
+		}
+	} else if charset != "" {
+		mg.Spec.ForProvider.DefaultCharacterSet = &charset
+		lateInitialized = true
+	}
+
+	if mg.Spec.ForProvider.DefaultCollation != nil {
+		if *mg.Spec.ForProvider.DefaultCollation != collation {
+			upToDate = false
+		}
+	} else if collation != "" {
+		mg.Spec.ForProvider.DefaultCollation = &collation
+		lateInitialized = true
+	}
+
 	mg.SetConditions(xpv1.Available())
 
 	return managed.ExternalObservation{
-		ResourceExists: true,
-
-		// TODO(negz): Support these when we have anything to update.
-		ResourceLateInitialized: false,
-		ResourceUpToDate:        true,
+		ResourceExists:          true,
+		ResourceLateInitialized: lateInitialized,
+		ResourceUpToDate:        upToDate,
 	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalCreation, error) {
 	query := "CREATE DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(mg))
+	query += charsetClause(mg.Spec.ForProvider.DefaultCharacterSet, mg.Spec.ForProvider.DefaultCollation)
 
 	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateDB}); err != nil {
 		return managed.ExternalCreation{}, err
@@ -144,12 +165,30 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) 
 }
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalUpdate, error) {
-	// TODO(negz): Support updates once we have anything to update.
+	query := "ALTER DATABASE " + mysql.QuoteIdentifier(meta.GetExternalName(mg))
+	query += charsetClause(mg.Spec.ForProvider.DefaultCharacterSet, mg.Spec.ForProvider.DefaultCollation)
+
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateDB}); err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
 	return managed.ExternalUpdate{}, nil
 }
 
 func (c *external) Disconnect(ctx context.Context) error {
 	return nil
+}
+
+// charsetClause builds the CHARACTER SET / COLLATE suffix for CREATE or ALTER DATABASE.
+func charsetClause(charset, collation *string) string {
+	var clause string
+	if charset != nil {
+		clause += " CHARACTER SET " + mysql.QuoteValue(*charset)
+	}
+	if collation != nil {
+		clause += " COLLATE " + mysql.QuoteValue(*collation)
+	}
+	return clause
 }
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalDelete, error) {

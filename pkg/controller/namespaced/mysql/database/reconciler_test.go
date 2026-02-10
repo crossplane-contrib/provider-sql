@@ -219,6 +219,19 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+func ptrStr(s string) *string { return &s }
+
+func mockScanRow(name, charset, collation string) func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+	return func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+		if len(dest) >= 3 {
+			*dest[0].(*string) = name
+			*dest[1].(*string) = charset
+			*dest[2].(*string) = collation
+		}
+		return nil
+	}
+}
+
 func TestObserve(t *testing.T) {
 	errBoom := errors.New("boom")
 
@@ -274,7 +287,7 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can successfully select our database",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockScan: mockScanRow("testdb", "utf8mb4", "utf8mb4_bin"),
 				},
 			},
 			args: args{
@@ -284,6 +297,58 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{
 					ResourceExists:          true,
 					ResourceUpToDate:        true,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessUpToDate": {
+			reason: "ResourceUpToDate should be true when desired charset/collation match the observed values",
+			fields: fields{
+				db: mockDB{
+					MockScan: mockScanRow("testdb", "utf8mb4", "utf8mb4_bin"),
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							DefaultCharacterSet: ptrStr("utf8mb4"),
+							DefaultCollation:    ptrStr("utf8mb4_bin"),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        true,
+					ResourceLateInitialized: false,
+				},
+				err: nil,
+			},
+		},
+		"SuccessNotUpToDate": {
+			reason: "ResourceUpToDate should be false when desired charset differs from the observed value",
+			fields: fields{
+				db: mockDB{
+					MockScan: mockScanRow("testdb", "latin1", "latin1_swedish_ci"),
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							DefaultCharacterSet: ptrStr("utf8mb4"),
+							DefaultCollation:    ptrStr("utf8mb4_bin"),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
 					ResourceLateInitialized: false,
 				},
 				err: nil,
@@ -318,8 +383,9 @@ func TestCreate(t *testing.T) {
 	}
 
 	type want struct {
-		c   managed.ExternalCreation
-		err error
+		c     managed.ExternalCreation
+		err   error
+		query string
 	}
 
 	cases := map[string]struct {
@@ -356,10 +422,41 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessWithCharsetAndCollation": {
+			reason: "The CREATE statement should include CHARACTER SET and COLLATE when specified",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							DefaultCharacterSet: ptrStr("utf8mb4"),
+							DefaultCollation:    ptrStr("utf8mb4_bin"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:   nil,
+				query: "CREATE DATABASE `` CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin'",
+			},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			var lastQuery string
+			if tc.want.query != "" {
+				origDB := tc.fields.db.(*mockDB)
+				origExec := origDB.MockExec
+				origDB.MockExec = func(ctx context.Context, q xsql.Query) error {
+					lastQuery = q.String
+					return origExec(ctx, q)
+				}
+			}
 			e := external{db: tc.fields.db}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
@@ -367,6 +464,107 @@ func TestCreate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.query != "" {
+				if diff := cmp.Diff(tc.want.query, lastQuery); diff != "" {
+					t.Errorf("\n%s\ne.Create(...): -want query, +got query:\n%s\n", tc.reason, diff)
+				}
+			}
+		})
+	}
+}
+
+func TestUpdate(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		db xsql.DB
+	}
+
+	type args struct {
+		ctx context.Context
+		mg  *v1alpha1.Database
+	}
+
+	type want struct {
+		u     managed.ExternalUpdate
+		err   error
+		query string
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"ErrExec": {
+			reason: "Any errors encountered while updating the database should be returned",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							DefaultCharacterSet: ptrStr("utf8mb4"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errUpdateDB),
+			},
+		},
+		"SuccessWithCharsetAndCollation": {
+			reason: "The ALTER statement should include CHARACTER SET and COLLATE when specified",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							DefaultCharacterSet: ptrStr("utf8mb4"),
+							DefaultCollation:    ptrStr("utf8mb4_bin"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:   nil,
+				query: "ALTER DATABASE `` CHARACTER SET 'utf8mb4' COLLATE 'utf8mb4_bin'",
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var lastQuery string
+			if tc.want.query != "" {
+				origDB := tc.fields.db.(*mockDB)
+				origExec := origDB.MockExec
+				origDB.MockExec = func(ctx context.Context, q xsql.Query) error {
+					lastQuery = q.String
+					return origExec(ctx, q)
+				}
+			}
+			e := external{db: tc.fields.db}
+			got, err := e.Update(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.u, got); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.query != "" {
+				if diff := cmp.Diff(tc.want.query, lastQuery); diff != "" {
+					t.Errorf("\n%s\ne.Update(...): -want query, +got query:\n%s\n", tc.reason, diff)
+				}
 			}
 		})
 	}
