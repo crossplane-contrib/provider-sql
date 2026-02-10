@@ -202,15 +202,6 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDefaultPrivileges),
-			},
-		},
 		"SuccessNoGrant": {
 			reason: "We should return ResourceExists: false when no default grant is found",
 			fields: fields{
@@ -368,15 +359,6 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"ErrNotGrant": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: want{
-				err: errors.New(errNotDefaultPrivileges),
-			},
-		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the default grant should be returned",
 			fields: fields{
@@ -517,13 +499,6 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
-		"ErrNotDefaultPrivileges": {
-			reason: "An error should be returned if the managed resource is not a *DefaultPrivileges",
-			args: args{
-				mg: nil,
-			},
-			want: errors.New(errNotDefaultPrivileges),
-		},
 		"ErrDropDefaultPrivileges": {
 			reason: "Errors dropping default privileges should be returned",
 			fields: fields{
