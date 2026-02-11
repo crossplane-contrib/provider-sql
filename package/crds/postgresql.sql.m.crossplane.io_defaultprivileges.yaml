@@ -179,7 +179,9 @@ spec:
                     minItems: 1
                     type: array
                   role:
-                    description: Role to which default privileges are granted
+                    description: |-
+                      Role is the role that will receive the default privileges (the grantee).
+                      Maps to TO in ALTER DEFAULT PRIVILEGES ... GRANT ... TO role.
                     type: string
                   roleRef:
                     description: RoleRef to which default privileges are granted.
@@ -267,7 +269,9 @@ spec:
                     type: string
                   targetRole:
                     description: |-
-                      TargetRole is the role who owns objects on which the default privileges are granted.
+                      TargetRole is the role whose future objects will have default privileges applied.
+                      When this role creates new objects, the specified privileges are automatically
+                      granted. Maps to FOR ROLE in ALTER DEFAULT PRIVILEGES.
                       See https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html
                     type: string
                   withOption:
