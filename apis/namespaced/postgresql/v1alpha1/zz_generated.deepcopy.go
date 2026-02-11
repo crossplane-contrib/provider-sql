@@ -366,12 +366,12 @@ func (in *DefaultPrivilegesParameters) DeepCopyInto(out *DefaultPrivilegesParame
 	}
 	if in.RoleRef != nil {
 		in, out := &in.RoleRef, &out.RoleRef
-		*out = new(v1.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.RoleSelector != nil {
 		in, out := &in.RoleSelector, &out.RoleSelector
-		*out = new(v1.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Database != nil {
@@ -381,12 +381,12 @@ func (in *DefaultPrivilegesParameters) DeepCopyInto(out *DefaultPrivilegesParame
 	}
 	if in.DatabaseRef != nil {
 		in, out := &in.DatabaseRef, &out.DatabaseRef
-		*out = new(v1.Reference)
+		*out = new(v1.NamespacedReference)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.DatabaseSelector != nil {
 		in, out := &in.DatabaseSelector, &out.DatabaseSelector
-		*out = new(v1.Selector)
+		*out = new(v1.NamespacedSelector)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Schema != nil {

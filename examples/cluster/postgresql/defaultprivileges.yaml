@@ -1,0 +1,113 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: owner-role
+spec:
+  deletionPolicy: Orphan
+  writeConnectionSecretToRef:
+    name: owner-role-secret
+    namespace: default
+  forProvider:
+    privileges:
+      createDb: true
+      login: true
+      createRole: true
+      inherit: true
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: writer-role
+spec:
+  forProvider:
+    connectionLimit: 10
+    privileges:
+      login: true
+  writeConnectionSecretToRef:
+    name: writer-role-secret
+    namespace: default
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: reader-role
+spec:
+  forProvider:
+    connectionLimit: 10
+    privileges:
+      login: true
+  writeConnectionSecretToRef:
+    name: reader-role-secret
+    namespace: default
+---
+# When owner-role creates new tables, grant full DML to writer-role
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: writer-tables
+spec:
+  forProvider:
+    objectType: table
+    roleRef:
+      name: writer-role
+    targetRole: owner-role
+    privileges:
+      - SELECT
+      - INSERT
+      - UPDATE
+      - DELETE
+      - TRUNCATE
+    schema: public
+    databaseRef:
+      name: example
+---
+# When owner-role creates new functions, grant EXECUTE to writer-role
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: writer-functions
+spec:
+  forProvider:
+    objectType: function
+    roleRef:
+      name: writer-role
+    targetRole: owner-role
+    privileges:
+      - EXECUTE
+    schema: public
+    databaseRef:
+      name: example
+---
+# When owner-role creates new tables, grant SELECT to reader-role
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: reader-tables
+spec:
+  forProvider:
+    objectType: table
+    roleRef:
+      name: reader-role
+    targetRole: owner-role
+    privileges:
+      - SELECT
+    schema: public
+    databaseRef:
+      name: example
+---
+# When owner-role creates new functions, grant EXECUTE to reader-role
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: reader-functions
+spec:
+  forProvider:
+    objectType: function
+    roleRef:
+      name: reader-role
+    targetRole: owner-role
+    privileges:
+      - EXECUTE
+    schema: public
+    databaseRef:
+      name: example

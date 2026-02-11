@@ -44,7 +44,9 @@ type DefaultPrivilegesParameters struct {
 	// +optional
 	Privileges GrantPrivileges `json:"privileges,omitempty"`
 
-	// TargetRole is the role who owns objects on which the default privileges are granted.
+	// TargetRole is the role whose future objects will have default privileges applied.
+	// When this role creates new objects, the specified privileges are automatically
+	// granted. Maps to FOR ROLE in ALTER DEFAULT PRIVILEGES.
 	// See https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html
 	// +required
 	TargetRole *string `json:"targetRole"`
@@ -61,8 +63,10 @@ type DefaultPrivilegesParameters struct {
 	// +optional
 	WithOption *GrantOption `json:"withOption,omitempty"`
 
-	// Role to which default privileges are granted
+	// Role is the role that will receive the default privileges (the grantee).
+	// Maps to TO in ALTER DEFAULT PRIVILEGES ... GRANT ... TO role.
 	// +optional
+	// +crossplane:generate:reference:type=Role
 	Role *string `json:"role,omitempty"`
 
 	// RoleRef to which default privileges are granted.
@@ -77,6 +81,7 @@ type DefaultPrivilegesParameters struct {
 
 	// Database in which the default privileges are applied
 	// +optional
+	// +crossplane:generate:reference:type=Database
 	Database *string `json:"database,omitempty"`
 
 	// DatabaseRef references the database object this default grant it for.

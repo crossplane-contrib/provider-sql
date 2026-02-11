@@ -105,7 +105,14 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 		return nil, err
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode))}, nil
+	// Connect to the specific database if provided, otherwise use the default.
+	// ALTER DEFAULT PRIVILEGES is per-database, so we must connect to the target database.
+	database := providerInfo.DefaultDatabase
+	if mg.Spec.ForProvider.Database != nil {
+		database = *mg.Spec.ForProvider.Database
+	}
+
+	return &external{db: c.newDB(providerInfo.SecretData, database, clients.ToString(providerInfo.SSLMode))}, nil
 }
 
 type external struct {
@@ -175,15 +182,13 @@ func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 func deleteDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
 	roleName := pq.QuoteIdentifier(*gp.Role)
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
-	objectType := objectTypes[*gp.ObjectType]
 
 	query := strings.TrimSpace(fmt.Sprintf(
-		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %s TO %s %s",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %sS FROM %s",
 		targetRoleName,
 		inSchema(&gp),
-		objectType,
+		*gp.ObjectType,
 		roleName,
-		withOption(gp.WithOption),
 	))
 
 	q.String = query
