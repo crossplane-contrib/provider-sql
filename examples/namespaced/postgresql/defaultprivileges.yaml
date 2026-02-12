@@ -1,23 +1,26 @@
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Role
 metadata:
   name: owner-role
+  namespace: default
 spec:
-  deletionPolicy: Orphan
-  writeConnectionSecretToRef:
-    name: owner-role-secret
-    namespace: default
   forProvider:
     privileges:
       createDb: true
       login: true
       createRole: true
       inherit: true
+  writeConnectionSecretToRef:
+    name: owner-role-secret
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Role
 metadata:
   name: writer-role
+  namespace: default
 spec:
   forProvider:
     connectionLimit: 10
@@ -25,12 +28,15 @@ spec:
       login: true
   writeConnectionSecretToRef:
     name: writer-role-secret
-    namespace: default
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Role
 metadata:
   name: reader-role
+  namespace: default
 spec:
   forProvider:
     connectionLimit: 10
@@ -38,13 +44,16 @@ spec:
       login: true
   writeConnectionSecretToRef:
     name: reader-role-secret
-    namespace: default
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 # When owner-role creates new tables, grant full DML to writer-role
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: DefaultPrivileges
 metadata:
   name: writer-tables
+  namespace: default
 spec:
   forProvider:
     objectType: table
@@ -60,12 +69,16 @@ spec:
     schema: public
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 # When owner-role creates new functions, grant EXECUTE to writer-role
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: DefaultPrivileges
 metadata:
   name: writer-functions
+  namespace: default
 spec:
   forProvider:
     objectType: function
@@ -77,12 +90,16 @@ spec:
     schema: public
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 # When owner-role creates new tables, grant SELECT to reader-role
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: DefaultPrivileges
 metadata:
   name: reader-tables
+  namespace: default
 spec:
   forProvider:
     objectType: table
@@ -94,12 +111,16 @@ spec:
     schema: public
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
 ---
 # When owner-role creates new functions, grant EXECUTE to reader-role
-apiVersion: postgresql.sql.crossplane.io/v1alpha1
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: DefaultPrivileges
 metadata:
   name: reader-functions
+  namespace: default
 spec:
   forProvider:
     objectType: function
@@ -111,3 +132,6 @@ spec:
     schema: public
     databaseRef:
       name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

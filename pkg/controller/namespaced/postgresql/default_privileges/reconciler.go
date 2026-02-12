@@ -24,29 +24,26 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
-	xpcontroller "github.com/crossplane/crossplane-runtime/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/pkg/event"
-	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
-	"github.com/crossplane/crossplane-runtime/pkg/resource"
+	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
-	"github.com/crossplane-contrib/provider-sql/apis/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
 )
 
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errGetPC        = "cannot get ProviderConfig"
-	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
 
 	errNotDefaultPrivileges    = "managed resource is not a Grant custom resource"
 	errSelectDefaultPrivileges = "cannot select default privileges"
@@ -67,13 +64,20 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.DefaultPrivilegesGroupKind)
 
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DefaultPrivilegesGroupVersionKind),
-		managed.WithExternalConnecter(&connector{kube: mgr.GetClient(), usage: t, newDB: postgresql.New}),
+
+	reconcilerOptions := []managed.ReconcilerOption{
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
-
+		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
+	}
+	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
+		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
+	}
+	r := managed.NewReconciler(mgr,
+		resource.ManagedKind(v1alpha1.DefaultPrivilegesGroupVersionKind),
+		reconcilerOptions...,
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.DefaultPrivileges{}).
@@ -85,48 +89,34 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 type connector struct {
 	kube  client.Client
-	usage resource.Tracker
+	track func(ctx context.Context, mg resource.ModernManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
-func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
-	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
-	if !ok {
-		return nil, errors.New(errNotDefaultPrivileges)
-	}
-
-	if err := c.usage.Track(ctx, mg); err != nil {
+func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.TypedExternalClient[*v1alpha1.DefaultPrivileges], error) {
+	if err := c.track(ctx, mg); err != nil {
 		return nil, errors.Wrap(err, errTrackPCUsage)
 	}
 
 	// ProviderConfigReference could theoretically be nil, but in practice the
 	// DefaultProviderConfig initializer will set it before we get here.
-	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: cr.GetProviderConfigReference().Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
+	providerInfo, err := provider.GetProviderConfig(ctx, c.kube, mg)
+	if err != nil {
+		return nil, err
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
-	ref := pc.Spec.Credentials.ConnectionSecretRef
-	if ref == nil {
-		return nil, errors.New(errNoSecretRef)
+	// Connect to the specific database if provided, otherwise use the default.
+	// ALTER DEFAULT PRIVILEGES is per-database, so we must connect to the target database.
+	database := providerInfo.DefaultDatabase
+	if mg.Spec.ForProvider.Database != nil {
+		database = *mg.Spec.ForProvider.Database
 	}
 
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
-		return nil, errors.Wrap(err, errGetSecret)
-	}
-	return &external{
-		db:   c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
-		kube: c.kube,
-	}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, database, clients.ToString(providerInfo.SSLMode))}, nil
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	db xsql.DB
 }
 
 var (
@@ -192,15 +182,13 @@ func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 func deleteDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
 	roleName := pq.QuoteIdentifier(*gp.Role)
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
-	objectType := objectTypes[*gp.ObjectType]
 
 	query := strings.TrimSpace(fmt.Sprintf(
-		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %s TO %s %s",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %sS FROM %s",
 		targetRoleName,
 		inSchema(&gp),
-		objectType,
+		*gp.ObjectType,
 		roleName,
-		withOption(gp.WithOption),
 	))
 
 	q.String = query
@@ -223,25 +211,25 @@ func matchingGrants(currentGrants []string, specGrants []string) bool {
 
 	return true
 }
-func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) { //nolint:gocyclo
-	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
-	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotDefaultPrivileges)
-	}
 
-	if cr.Spec.ForProvider.Role == nil {
+func (c *external) Disconnect(ctx context.Context) error {
+	return nil
+}
+
+func (c *external) Observe(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalObservation, error) { //nolint:gocyclo
+	if mg.Spec.ForProvider.Role == nil {
 		return managed.ExternalObservation{}, errors.New(errNoRole)
 	}
 
-	if cr.Spec.ForProvider.TargetRole == nil {
+	if mg.Spec.ForProvider.TargetRole == nil {
 		return managed.ExternalObservation{}, errors.New(errNoTargetRole)
 	}
 
-	if cr.Spec.ForProvider.ObjectType == nil {
+	if mg.Spec.ForProvider.ObjectType == nil {
 		return managed.ExternalObservation{}, errors.New(errNoObjectType)
 	}
 
-	gp := cr.Spec.ForProvider
+	gp := mg.Spec.ForProvider
 	var query xsql.Query
 	selectDefaultPrivilegesQuery(gp, &query)
 
@@ -275,7 +263,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
-	cr.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv1.Available())
 
 	resourceMatches := matchingGrants(defaultPrivileges, gp.Privileges.ToStringSlice())
 	return managed.ExternalObservation{
@@ -289,19 +277,15 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 	}, nil
 }
 
-func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
-	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
-	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotDefaultPrivileges)
-	}
+func (c *external) Create(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalCreation, error) {
 
-	cr.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv1.Creating())
 
 	var createQuery xsql.Query
-	createDefaultPrivilegesQuery(cr.Spec.ForProvider, &createQuery)
+	createDefaultPrivilegesQuery(mg.Spec.ForProvider, &createQuery)
 
 	var deleteQuery xsql.Query
-	deleteDefaultPrivilegesQuery(cr.Spec.ForProvider, &deleteQuery)
+	deleteDefaultPrivilegesQuery(mg.Spec.ForProvider, &deleteQuery)
 
 	err := c.db.ExecTx(ctx, []xsql.Query{
 		deleteQuery, createQuery,
@@ -311,22 +295,18 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 }
 
 func (c *external) Update(
-	ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
+	ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalUpdate, error) {
 	// Update is a no-op, as permissions are fully revoked and then granted in the Create function,
 	// inside a transaction. Same approach as the grant resource.
 	return managed.ExternalUpdate{}, nil
 }
 
-func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
-	cr, ok := mg.(*v1alpha1.DefaultPrivileges)
-	if !ok {
-		return errors.New(errNotDefaultPrivileges)
-	}
+func (c *external) Delete(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalDelete, error) {
 	var query xsql.Query
 
-	cr.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv1.Deleting())
 
-	deleteDefaultPrivilegesQuery(cr.Spec.ForProvider, &query)
+	deleteDefaultPrivilegesQuery(mg.Spec.ForProvider, &query)
 
-	return errors.Wrap(c.db.Exec(ctx, query), errRevokeDefaultPrivileges)
+	return managed.ExternalDelete{}, errors.Wrap(c.db.Exec(ctx, query), errRevokeDefaultPrivileges)
 }
