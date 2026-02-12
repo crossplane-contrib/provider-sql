@@ -18,7 +18,7 @@ import (
 // +kubebuilder:printcolumn:name="SCHEMA",type="string",JSONPath=".spec.forProvider.schema"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
-// +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
+// +kubebuilder:resource:scope=Namespaced,categories={crossplane,managed,sql}
 type DefaultPrivileges struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
