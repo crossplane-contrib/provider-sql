@@ -305,8 +305,7 @@ setup_mariadb_no_tls() {
   "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
 
   echo_step "Waiting for MariaDB to be ready"
-  "${KUBECTL}" wait --for=create pod mariadb-0
-  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
+  "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
 }
 
 setup_mariadb_tls() {
@@ -331,8 +330,7 @@ setup_mariadb_tls() {
   "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
 
   echo_step "Waiting for MariaDB to be ready"
-  "${KUBECTL}" wait --for=create pod mariadb-0
-  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
+  "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
 }
 
 cleanup_mariadb() {

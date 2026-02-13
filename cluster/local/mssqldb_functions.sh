@@ -16,8 +16,7 @@ setup_mssql() {
   "${KUBECTL}" apply -f ${scriptdir}/mssql.server.yaml
 
   echo_step "Waiting for MSSQL Server to be ready"
-  "${KUBECTL}" wait --for=create pod mssql-0
-  "${KUBECTL}" wait --for=condition=ready pod -l app=mssql --timeout=300s
+  "${KUBECTL}" rollout status statefulset/mssql --timeout=300s
 
   # Wait a bit more for MSSQL to be fully ready for connections
   sleep 30
