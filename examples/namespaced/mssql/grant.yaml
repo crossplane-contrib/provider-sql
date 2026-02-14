@@ -4,6 +4,9 @@ metadata:
   name: example-grant
   namespace: default
 spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
   forProvider:
     permissions:
       # CONNECT permission is added by default when user created. So, make sure

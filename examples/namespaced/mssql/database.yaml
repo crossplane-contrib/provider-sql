@@ -3,4 +3,7 @@ kind: Database
 metadata:
   name: example-db
   namespace: default
-spec: {}
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
