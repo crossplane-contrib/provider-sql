@@ -11,6 +11,12 @@ updates:
     - dependency-name: "github.com/crossplane/crossplane-tools"
     - dependency-name: "sigs.k8s.io/*"
     - dependency-name: "k8s.io/*"
+- package-ecosystem: docker
+  directory: "/cluster/images/provider-sql"
+  schedule:
+    interval: monthly
+  commit-message:
+    prefix: "chore: "
 - package-ecosystem: "github-actions"
   directory: "/"
   schedule:
