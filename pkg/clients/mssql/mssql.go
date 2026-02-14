@@ -121,7 +121,7 @@ func (c mssqlDB) GetConnectionDetails(username, password string) managed.Connect
 
 // QuoteIdentifier for mssql queries
 func QuoteIdentifier(id string) string {
-	return "[" + id + "]"
+	return "[" + strings.ReplaceAll(id, "]", "]]") + "]"
 }
 
 // QuoteValue for mssql queries
