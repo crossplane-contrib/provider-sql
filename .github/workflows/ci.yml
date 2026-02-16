@@ -132,6 +132,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: detect-noop
     if: needs.detect-noop.outputs.noop != 'true'
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -174,6 +177,7 @@ jobs:
       - name: Publish Unit Test Coverage
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
+          use_oidc: true
           flags: unittests
           files: _output/tests/linux_amd64/coverage.txt
 
