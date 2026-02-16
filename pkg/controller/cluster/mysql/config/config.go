@@ -46,3 +46,9 @@ func Setup(mgr ctrl.Manager, o controller.Options) error {
 			providerconfig.WithLogger(o.Logger.WithValues("controller", name)),
 			providerconfig.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name)))))
 }
+
+// SetupGated adds a controller that reconciles ProviderConfigs.
+// ProviderConfig resources are always available, so this is equivalent to Setup.
+func SetupGated(mgr ctrl.Manager, o controller.Options) error {
+	return Setup(mgr, o)
+}

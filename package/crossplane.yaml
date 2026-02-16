@@ -30,3 +30,6 @@ metadata:
     friendly-kind-name.meta.crossplane.io/role.postgresql.sql.crossplane.io: Role
     friendly-kind-name.meta.crossplane.io/user.mysql.sql.crossplane.io: User
     friendly-kind-name.meta.crossplane.io/defaultprivileges.postgresql.sql.crossplane.io: DefaultPrivileges
+spec:
+  capabilities:
+  - safe-start

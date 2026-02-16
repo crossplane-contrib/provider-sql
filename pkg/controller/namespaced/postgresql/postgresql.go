@@ -19,7 +19,7 @@ package postgresql
 import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/controller"
+	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/config"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/database"
@@ -27,20 +27,39 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/extension"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/grant"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/role"
-	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/schema"
+	schemacontroller "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/schema"
 )
 
 // Setup creates all PostgreSQL controllers with the supplied logger and adds
 // them to the supplied manager.
-func Setup(mgr ctrl.Manager, o controller.Options) error {
-	for _, setup := range []func(ctrl.Manager, controller.Options) error{
+func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
+	for _, setup := range []func(ctrl.Manager, xpcontroller.Options) error{
 		config.Setup,
 		database.Setup,
 		role.Setup,
 		grant.Setup,
 		extension.Setup,
-		schema.Setup,
+		schemacontroller.Setup,
 		default_privileges.Setup,
+	} {
+		if err := setup(mgr, o); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetupGated creates all PostgreSQL controllers with gated initialization,
+// waiting for their required CRDs to be available before starting.
+func SetupGated(mgr ctrl.Manager, o xpcontroller.Options) error {
+	for _, setup := range []func(ctrl.Manager, xpcontroller.Options) error{
+		config.SetupGated,
+		database.SetupGated,
+		role.SetupGated,
+		grant.SetupGated,
+		extension.SetupGated,
+		schemacontroller.SetupGated,
+		default_privileges.SetupGated,
 	} {
 		if err := setup(mgr, o); err != nil {
 			return err
