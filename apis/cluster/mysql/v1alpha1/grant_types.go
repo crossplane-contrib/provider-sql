@@ -29,7 +29,7 @@ type GrantSpec struct {
 }
 
 // GrantPrivilege represents a privilege to be granted
-// +kubebuilder:validation:Pattern:=^[A-Z_ ]+$
+// +kubebuilder:validation:Pattern:="^[A-Za-z0-9_,() ]+$"
 type GrantPrivilege string
 
 // If Privileges are specified, we should have at least one

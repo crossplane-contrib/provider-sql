@@ -9,8 +9,12 @@ spec:
       - DROP
       - INSERT
       - SELECT
+      - UPDATE (status, updated_at)
     table: example-table
     userRef:
       name: example-user
     databaseRef:
       name: example-db
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

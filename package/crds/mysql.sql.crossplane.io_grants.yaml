@@ -170,7 +170,7 @@ spec:
                       See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
                     items:
                       description: GrantPrivilege represents a privilege to be granted
-                      pattern: ^[A-Z_ ]+$
+                      pattern: ^[A-Za-z0-9_,() ]+$
                       type: string
                     minItems: 1
                     type: array

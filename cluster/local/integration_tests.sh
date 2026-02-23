@@ -373,10 +373,15 @@ test_update_user_password() {
 
 test_create_grant() {
   echo_step "test creating MySQL Grant resource"
+  "${KUBECTL}" exec mariadb-0 -- bash -c \
+  'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "CREATE TABLE \`example-db\`.\`example-table\` (id INT, status VARCHAR(50), updated_at TIMESTAMP);"'
+
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
 
   echo_info "check if is ready"
   "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
   echo_step_completed
 }
 
@@ -393,6 +398,7 @@ test_all() {
 cleanup_test_resources() {
   echo_step "cleaning up test resources"
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
   "${KUBECTL}" delete secret example-pw
