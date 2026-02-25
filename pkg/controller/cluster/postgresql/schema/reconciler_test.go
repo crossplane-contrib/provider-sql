@@ -19,6 +19,7 @@ package schema
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
@@ -473,10 +474,11 @@ func TestDelete(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		reason string
-		fields fields
-		args   args
-		want   error
+		reason        string
+		fields        fields
+		args          args
+		want          error
+		wantQueryLike string
 	}{
 		"ErrDropSchema": {
 			reason: "Errors dropping a schema should be returned",
@@ -498,6 +500,110 @@ func TestDelete(t *testing.T) {
 				},
 			},
 			want: errors.Wrap(errBoom, errDropSchema),
+		},
+		"DropBehaviorDefaultRestrict": {
+			reason: "When dropBehavior is nil, it should default to RESTRICT",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "RESTRICT") {
+							t.Errorf("Expected query to contain RESTRICT, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database:     ptr.To("db"),
+							DropBehavior: nil,
+						},
+					},
+				},
+			},
+			want:          nil,
+			wantQueryLike: "RESTRICT",
+		},
+		"DropBehaviorExplicitRestrict": {
+			reason: "When dropBehavior is explicitly set to RESTRICT, it should use RESTRICT",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "RESTRICT") {
+							t.Errorf("Expected query to contain RESTRICT, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database:     ptr.To("db"),
+							DropBehavior: ptr.To(v1alpha1.DropBehaviorRestrict),
+						},
+					},
+				},
+			},
+			want:          nil,
+			wantQueryLike: "RESTRICT",
+		},
+		"DropBehaviorCascade": {
+			reason: "When dropBehavior is set to CASCADE, it should use CASCADE",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "CASCADE") {
+							t.Errorf("Expected query to contain CASCADE, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database:     ptr.To("db"),
+							DropBehavior: ptr.To(v1alpha1.DropBehaviorCascade),
+						},
+					},
+				},
+			},
+			want:          nil,
+			wantQueryLike: "CASCADE",
+		},
+		"DropSchemaWithIfExists": {
+			reason: "Drop statement should include IF EXISTS clause",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "IF EXISTS") {
+							t.Errorf("Expected query to contain IF EXISTS, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Schema{
+					ObjectMeta: cr.ObjectMeta,
+					Spec: v1alpha1.SchemaSpec{
+						ForProvider: v1alpha1.SchemaParameters{
+							Database:     ptr.To("db"),
+							DropBehavior: ptr.To(v1alpha1.DropBehaviorRestrict),
+						},
+					},
+				},
+			},
+			want:          nil,
+			wantQueryLike: "IF EXISTS",
 		},
 	}
 

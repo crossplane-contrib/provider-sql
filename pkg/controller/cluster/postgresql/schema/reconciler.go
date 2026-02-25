@@ -18,6 +18,7 @@ package schema
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/lib/pq"
@@ -189,7 +190,12 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Schema) (managed.Ext
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Schema) (managed.ExternalDelete, error) {
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP SCHEMA IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))})
+	dropBehavior := mg.Spec.ForProvider.DropBehavior
+	if dropBehavior == nil {
+		defaultBehavior := v1alpha1.DropBehaviorRestrict
+		dropBehavior = &defaultBehavior
+	}
+	err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("DROP SCHEMA IF EXISTS %s %s", pq.QuoteIdentifier(meta.GetExternalName(mg)), string(*dropBehavior))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropSchema)
 }
 

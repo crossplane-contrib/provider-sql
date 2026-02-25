@@ -148,6 +148,17 @@ spec:
                             type: string
                         type: object
                     type: object
+                  dropBehavior:
+                    default: RESTRICT
+                    description: |-
+                      DropBehavior configures deletion behavior: CASCADE will Automatically drop objects
+                      (tables, functions, etc.) that are contained in the schema, and in turn all objects that depend
+                      on those objects.
+                      The default setting of RESTRICT will refuse to drop the schema if it contains any objects.
+                    enum:
+                    - CASCADE
+                    - RESTRICT
+                    type: string
                   revokePublicOnSchema:
                     description: RevokePublicOnSchema apply a "REVOKE ALL ON SCHEMA
                       public FROM public" statement
