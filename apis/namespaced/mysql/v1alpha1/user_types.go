@@ -42,6 +42,18 @@ type UserParameters struct {
 	// +optional
 	PasswordSecretRef *xpv1.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 
+	// AuthPlugin specifies the authentication plugin to use for the user.
+	// If not specified (nil or empty string), the database server's default authentication plugin is used.
+	// Common values include "mysql_native_password", "caching_sha2_password", "authentication_ldap_simple".
+	// See https://dev.mysql.com/doc/refman/8.0/en/authentication-plugins.html
+	// +optional
+	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
+	AuthPlugin *string `json:"authPlugin,omitempty"`
+
+	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true
+	// +optional
+	UsePassword *bool `json:"usePassword,omitempty" default:"true"`
+
 	// ResourceOptions sets account specific resource limits.
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
 	// +optional
@@ -73,6 +85,9 @@ type ResourceOptions struct {
 
 // A UserObservation represents the observed state of a MySQL user.
 type UserObservation struct {
+	// AuthPlugin is the authentication plugin currently configured for the user
+	AuthPlugin *string `json:"authPlugin,omitempty"`
+
 	// ResourceOptionsAsClauses represents the applied resource options
 	ResourceOptionsAsClauses []string `json:"resourceOptionsAsClauses,omitempty"`
 }
