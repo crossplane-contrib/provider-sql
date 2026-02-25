@@ -86,6 +86,17 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+// SetupGated adds a controller that reconciles User managed resources
+// with gated initialization, waiting for the resource's CRD to be available.
+func SetupGated(mgr ctrl.Manager, o xpcontroller.Options) error {
+	o.Gate.Register(func() {
+		if err := Setup(mgr, o); err != nil {
+			mgr.GetLogger().Error(err, "unable to setup controller", "gvk", namespacedv1alpha1.UserGroupVersionKind)
+		}
+	}, namespacedv1alpha1.UserGroupVersionKind)
+	return nil
+}
+
 type connector struct {
 	kube      client.Client
 	track     func(ctx context.Context, mg resource.ModernManaged) error

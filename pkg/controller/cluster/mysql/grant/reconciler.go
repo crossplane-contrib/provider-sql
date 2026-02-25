@@ -92,6 +92,17 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+// SetupGated adds a controller that reconciles Grant managed resources
+// with gated initialization, waiting for the resource's CRD to be available.
+func SetupGated(mgr ctrl.Manager, o xpcontroller.Options) error {
+	o.Gate.Register(func() {
+		if err := Setup(mgr, o); err != nil {
+			mgr.GetLogger().Error(err, "unable to setup controller", "gvk", v1alpha1.GrantGroupVersionKind)
+		}
+	}, v1alpha1.GrantGroupVersionKind)
+	return nil
+}
+
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error

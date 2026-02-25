@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -25,18 +26,50 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/alecthomas/kingpin/v2"
+	authv1 "k8s.io/api/authorization/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/gate"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/ratelimiter"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/customresourcesgate"
 
 	"github.com/crossplane-contrib/provider-sql/apis"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller"
 )
+
+// canWatchCRD checks if the provider has the necessary RBAC permissions to watch CustomResourceDefinitions.
+// This is used to determine if we can use the SafeStart pattern with gated controller initialization.
+func canWatchCRD(ctx context.Context, c client.Client) (bool, error) {
+	for _, verb := range []string{"get", "list", "watch"} {
+		review := &authv1.SelfSubjectAccessReview{
+			Spec: authv1.SelfSubjectAccessReviewSpec{
+				ResourceAttributes: &authv1.ResourceAttributes{
+					Group:    apiextensionsv1.GroupName,
+					Resource: "customresourcedefinitions",
+					Verb:     verb,
+				},
+			},
+		}
+
+		if err := c.Create(ctx, review); err != nil {
+			return false, err
+		}
+
+		if !review.Status.Allowed {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
 
 func main() {
 	var (
@@ -73,6 +106,7 @@ func main() {
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
 	kingpin.FatalIfError(apis.AddToScheme(mgr.GetScheme()), "Cannot add SQL APIs to scheme")
+	kingpin.FatalIfError(apiextensionsv1.AddToScheme(mgr.GetScheme()), "Cannot add CRD types to scheme")
 
 	o := xpcontroller.Options{
 		Logger:                  log,
@@ -86,6 +120,23 @@ func main() {
 		log.Info("Beta feature enabled", "flag", feature.EnableBetaManagementPolicies)
 	}
 
-	kingpin.FatalIfError(controller.Setup(mgr, o), "Cannot setup SQL controllers")
+	// Check if we have permission to watch CRDs for SafeStart support
+	ctx := context.Background()
+	canWatch, err := canWatchCRD(ctx, mgr.GetClient())
+	switch {
+	case err != nil:
+		log.Info("Failed to check CRD watch permissions, using immediate controller setup", "error", err)
+		kingpin.FatalIfError(controller.Setup(mgr, o), "Cannot setup SQL controllers")
+	case canWatch:
+		log.Info("SafeStart enabled: using gated controller initialization")
+		o.Gate = new(gate.Gate[schema.GroupVersionKind])
+
+		kingpin.FatalIfError(customresourcesgate.Setup(mgr, o), "Cannot setup CRD gate")
+		kingpin.FatalIfError(controller.SetupGated(mgr, o), "Cannot setup SQL controllers")
+	default:
+		log.Info("SafeStart disabled: insufficient CRD watch permissions, using immediate controller setup")
+		kingpin.FatalIfError(controller.Setup(mgr, o), "Cannot setup SQL controllers")
+	}
+
 	kingpin.FatalIfError(mgr.Start(ctrl.SetupSignalHandler()), "Cannot start controller manager")
 }
