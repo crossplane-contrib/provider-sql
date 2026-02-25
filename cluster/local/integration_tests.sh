@@ -44,8 +44,6 @@ eval $(make --no-print-directory -C ${projectdir} build.vars)
 SAFEHOSTARCH="${SAFEHOSTARCH:-amd64}"
 CONTROLLER_IMAGE="${BUILD_REGISTRY}/${PROJECT_NAME}-${SAFEHOSTARCH}"
 
-version_tag="$(cat ${projectdir}/_output/version)"
-# tag as latest version to load into kind cluster
 K8S_CLUSTER="${K8S_CLUSTER:-${BUILD_REGISTRY}-inttests}"
 
 PACKAGE_NAME="provider-sql"
@@ -89,80 +87,10 @@ integration_tests_end() {
 }
 
 setup_cluster() {
-  echo_step "setting up local package cache"
-
-  local cache_path="${projectdir}/.work/inttest-package-cache"
-  mkdir -p "${cache_path}/xpkg.crossplane.io"
-  echo "created cache dir at ${cache_path}"
-  "${CROSSPLANE_CLI}" xpkg extract --from-xpkg "${OUTPUT_DIR}"/xpkg/linux_"${SAFEHOSTARCH}"/"${PACKAGE_NAME}"-"${VERSION}".xpkg -o "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
-  chmod 644 "${cache_path}/xpkg.crossplane.io/${PACKAGE_NAME}:latest.gz"
-
   local node_image="kindest/node:${KIND_NODE_IMAGE_TAG}"
   echo_step "creating k8s cluster using kind ${KIND_VERSION} and node image ${node_image}"
 
-  local config="$( cat <<EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  extraMounts:
-  - hostPath: "${cache_path}/"
-    containerPath: /cache
-EOF
-  )"
-  echo "${config}" | "${KIND}" create cluster --name="${K8S_CLUSTER}" --wait=5m --image="${node_image}" --config=-
-
-  echo_step "tag controller image and load it into kind cluster"
-
-  docker tag "${CONTROLLER_IMAGE}" "xpkg.crossplane.io/${PACKAGE_NAME}"
-  "${KIND}" load docker-image "xpkg.crossplane.io/${PACKAGE_NAME}" --name="${K8S_CLUSTER}"
-
-  echo_step "create crossplane-system namespace"
-
-  "${KUBECTL}" create ns crossplane-system
-
-  echo_step "create persistent volume for mounting package-cache"
-
-  local pv_yaml="$( cat <<EOF
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: package-cache
-  labels:
-    type: local
-spec:
-  storageClassName: manual
-  capacity:
-    storage: 5Mi
-  accessModes:
-    - ReadWriteOnce
-  hostPath:
-    path: "/cache"
-EOF
-  )"
-
-  echo "${pv_yaml}" | "${KUBECTL}" create -f -
-
-  echo_step "create persistent volume claim for mounting package-cache"
-
-  local pvc_yaml="$( cat <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: package-cache
-  namespace: crossplane-system
-spec:
-  accessModes:
-    - ReadWriteOnce
-  volumeName: package-cache
-  storageClassName: manual
-  resources:
-    requests:
-      storage: 1Mi
-EOF
-  )"
-
-  echo "${pvc_yaml}" | "${KUBECTL}" create -f -
+  "${KIND}" create cluster --name="${K8S_CLUSTER}" --wait=5m --image="${node_image}"
 }
 
 cleanup_cluster() {
@@ -170,53 +98,26 @@ cleanup_cluster() {
 }
 
 setup_crossplane() {
-  echo_step "installing crossplane from stable channel"
+  local channel="${CROSSPLANE_HELM_CHANNEL:-stable}"
+  echo_step "installing crossplane from ${channel} channel"
 
-  "${HELM}" repo add crossplane-stable https://charts.crossplane.io/stable/ --force-update
-  local chart_version="$("${HELM}" search repo crossplane-stable/crossplane | awk 'FNR == 2 {print $2}')"
+  "${HELM}" repo add crossplane-channel "https://charts.crossplane.io/${channel}/" --force-update
+
+  local chart_version="${CROSSPLANE_HELM_CHART_VERSION:-}"
+  if [ -z "${chart_version}" ]; then
+    chart_version="$("${HELM}" search repo crossplane-channel/crossplane | awk 'FNR == 2 {print $2}')"
+  fi
   echo_info "using crossplane version ${chart_version}"
   echo
-  # we replace empty dir with our PVC so that the /cache dir in the kind node
-  # container is exposed to the crossplane pod
-  "${HELM}" install crossplane --namespace crossplane-system crossplane-stable/crossplane --version ${chart_version} --wait --set packageCache.pvc=package-cache
+
+  "${HELM}" install crossplane --namespace crossplane-system --create-namespace \
+    crossplane-channel/crossplane \
+    --version "${chart_version}" --wait
 }
 
 setup_provider() {
-  echo_step "installing provider"
-
-  local yaml="$( cat <<EOF
-apiVersion: pkg.crossplane.io/v1beta1
-kind: DeploymentRuntimeConfig
-metadata:
-  name: debug-config
-spec:
-  deploymentTemplate:
-    spec:
-      selector: {}
-      template:
-        spec:
-          containers:
-            - name: package-runtime
-              args:
-                - --debug
----
-apiVersion: pkg.crossplane.io/v1
-kind: Provider
-metadata:
-  name: "${PACKAGE_NAME}"
-spec:
-  runtimeConfigRef:
-    name: debug-config
-  package: "xpkg.crossplane.io/${PACKAGE_NAME}:latest"
-  packagePullPolicy: Never
-EOF
-  )"
-
-  echo "${yaml}" | "${KUBECTL}" apply -f -
-
-  # printing the cache dir contents can be useful for troubleshooting failures
-  echo_step "check kind node cache dir contents"
-  docker exec "${K8S_CLUSTER}-control-plane" ls -la /cache
+  echo_step "deploying provider via local.xpkg.deploy"
+  make -C "${projectdir}" local.xpkg.deploy.provider.${PACKAGE_NAME} KIND_CLUSTER_NAME="${K8S_CLUSTER}"
 
   echo_step "waiting for provider to be installed"
   "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
@@ -226,7 +127,7 @@ cleanup_provider() {
   echo_step "uninstalling provider"
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
-  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io debug-config
+  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io runtimeconfig-${PACKAGE_NAME}
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
@@ -472,10 +373,15 @@ test_update_user_password() {
 
 test_create_grant() {
   echo_step "test creating MySQL Grant resource"
+  "${KUBECTL}" exec mariadb-0 -- bash -c \
+  'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "CREATE TABLE \`example-db\`.\`example-table\` (id INT, status VARCHAR(50), updated_at TIMESTAMP);"'
+
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
 
   echo_info "check if is ready"
   "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
   echo_step_completed
 }
 
@@ -492,6 +398,7 @@ test_all() {
 cleanup_test_resources() {
   echo_step "cleaning up test resources"
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
+  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
   "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
   "${KUBECTL}" delete secret example-pw
@@ -500,6 +407,11 @@ cleanup_test_resources() {
 setup_cluster
 setup_crossplane
 setup_provider
+
+if [ "${QUICK_TEST:-}" == "true" ]; then
+  echo_success "Quick test passed: provider is healthy and running."
+  exit 0
+fi
 
 integration_tests_mariadb() {
   if [[ "${TLS}" == "true" ]]; then
