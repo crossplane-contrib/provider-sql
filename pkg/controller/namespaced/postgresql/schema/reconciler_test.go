@@ -531,11 +531,10 @@ func TestDelete(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		reason        string
-		fields        fields
-		args          args
-		want          error
-		wantQueryLike string
+		reason string
+		fields fields
+		args   args
+		want   error
 	}{
 		"ErrDropSchema": {
 			reason: "Errors dropping a schema should be returned",
@@ -581,8 +580,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want:          nil,
-			wantQueryLike: "RESTRICT",
+			want: nil,
 		},
 		"DropBehaviorExplicitRestrict": {
 			reason: "When dropBehavior is explicitly set to RESTRICT, it should use RESTRICT",
@@ -607,8 +605,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want:          nil,
-			wantQueryLike: "RESTRICT",
+			want: nil,
 		},
 		"DropBehaviorCascade": {
 			reason: "When dropBehavior is set to CASCADE, it should use CASCADE",
@@ -633,8 +630,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want:          nil,
-			wantQueryLike: "CASCADE",
+			want: nil,
 		},
 		"DropSchemaWithIfExists": {
 			reason: "Drop statement should include IF EXISTS clause",
@@ -659,8 +655,7 @@ func TestDelete(t *testing.T) {
 					},
 				},
 			},
-			want:          nil,
-			wantQueryLike: "IF EXISTS",
+			want: nil,
 		},
 	}
 
