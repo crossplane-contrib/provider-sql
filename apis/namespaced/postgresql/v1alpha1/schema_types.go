@@ -23,6 +23,14 @@ import (
 	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 )
 
+// DropBehavior sets the method that is used to drop a schema
+type DropBehavior string
+
+const (
+	DropBehaviorRestrict DropBehavior = "RESTRICT"
+	DropBehaviorCascade  DropBehavior = "CASCADE"
+)
+
 // A SchemaSpec defines the desired state of a Schema.
 type SchemaSpec struct {
 	xpv2.ManagedResourceSpec `json:",inline"`
@@ -64,6 +72,15 @@ type SchemaParameters struct {
 	// RevokePublicOnSchema apply a "REVOKE ALL ON SCHEMA public FROM public" statement
 	// +optional
 	RevokePublicOnSchema *bool `json:"revokePublicOnSchema,omitempty" default:"false"`
+
+	// DropBehavior configures deletion behavior: CASCADE will automatically drop
+	// objects (tables, functions, etc.) that are contained in the schema, and in
+	// turn all objects that depend on those objects. The default setting of
+	// RESTRICT will refuse to drop the schema if it contains any objects.
+	// +kubebuilder:validation:Enum=CASCADE;RESTRICT
+	// +kubebuilder:default:=RESTRICT
+	// +optional
+	DropBehavior *DropBehavior `json:"dropBehavior,omitempty"`
 }
 
 // A SchemaStatus represents the observed state of a Schema.
