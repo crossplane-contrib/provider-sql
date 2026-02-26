@@ -72,10 +72,10 @@ type SchemaParameters struct {
 	// +optional
 	RevokePublicOnSchema *bool `json:"revokePublicOnSchema,omitempty" default:"false"`
 
-	// DropBehavior configures deletion behavior: CASCADE will automatically drop objects
-	// (tables, functions, etc.) that are contained in the schema, and in turn all objects that depend
-	// on those objects.
-	// The default setting of RESTRICT will refuse to drop the schema if it contains any objects.
+	// DropBehavior configures deletion behavior: CASCADE will automatically drop
+	// objects (tables, functions, etc.) that are contained in the schema, and in
+	// turn all objects that depend on those objects. The default setting of
+	// RESTRICT will refuse to drop the schema if it contains any objects.
 	// +kubebuilder:validation:Enum=CASCADE;RESTRICT
 	// +kubebuilder:default:=RESTRICT
 	// +optional
