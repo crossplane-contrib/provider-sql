@@ -51,6 +51,7 @@ K8S_CLUSTER="${K8S_CLUSTER:-${BUILD_REGISTRY}-inttests}"
 PACKAGE_NAME="provider-sql"
 MARIADB_ROOT_PW=$(openssl rand -base64 32)
 MARIADB_TEST_PW=$(openssl rand -base64 32)
+MSSQL_SA_PW="$(openssl rand -base64 16)Aa1!"  # MSSQL requires complex password
 
 # cleanup on exit
 if [ "$skipcleanup" != true ]; then
@@ -71,6 +72,13 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 source "$SCRIPT_DIR/postgresdb_functions.sh"
 if [ $? -ne 0 ]; then
   echo "postgresdb_functions.sh failed. Exiting."
+  exit 1
+fi
+
+# shellcheck source="$SCRIPT_DIR/mssqldb_functions.sh"
+source "$SCRIPT_DIR/mssqldb_functions.sh"
+if [ $? -ne 0 ]; then
+  echo "mssqldb_functions.sh failed. Exiting."
   exit 1
 fi
 
@@ -297,8 +305,7 @@ setup_mariadb_no_tls() {
   "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
 
   echo_step "Waiting for MariaDB to be ready"
-  "${KUBECTL}" wait --for=create pod mariadb-0
-  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
+  "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
 }
 
 setup_mariadb_tls() {
@@ -323,8 +330,7 @@ setup_mariadb_tls() {
   "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
 
   echo_step "Waiting for MariaDB to be ready"
-  "${KUBECTL}" wait --for=create pod mariadb-0
-  "${KUBECTL}" wait --for=condition=ready pod -l app=mariadb --timeout=120s
+  "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
 }
 
 cleanup_mariadb() {
@@ -341,6 +347,93 @@ test_create_database() {
 
   echo_info "check if is ready"
   "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  echo_step_completed
+}
+
+test_database_charset() {
+  echo_step "test database has correct charset and collation"
+
+  local charset collation
+  charset=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_character_set_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+
+  charset=$(echo "${charset}" | tr -d '[:space:]')
+  collation=$(echo "${collation}" | tr -d '[:space:]')
+
+  echo_info "charset=${charset}, collation=${collation}"
+
+  if [ "${charset}" != "utf8mb4" ]; then
+    echo_error "expected charset utf8mb4 but got ${charset}"
+  fi
+  if [ "${collation}" != "utf8mb4_bin" ]; then
+    echo_error "expected collation utf8mb4_bin but got ${collation}"
+  fi
+  echo_step_completed
+}
+
+test_update_database_charset() {
+  echo_step "test updating MySQL Database charset and collation"
+
+  # Patch the database to use a different collation
+  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+    -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_general_ci"}}}'
+
+  # Wait for the controller to reconcile the change
+  sleep 15
+
+  echo_info "check if collation was updated in MariaDB"
+  local collation
+  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+  collation=$(echo "${collation}" | tr -d '[:space:]')
+
+  echo_info "collation=${collation}"
+
+  if [ "${collation}" != "utf8mb4_general_ci" ]; then
+    echo_error "expected collation utf8mb4_general_ci after update but got ${collation}"
+  fi
+  echo_step_completed
+
+  # Restore original collation for subsequent tests
+  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+    -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_bin"}}}'
+  sleep 10
+}
+
+test_remove_database_charset() {
+  echo_step "test removing charset/collation from spec leaves database unchanged"
+
+  # Remove charset and collation from the spec (set forProvider to only have empty fields)
+  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type json \
+    -p '[{"op":"remove","path":"/spec/forProvider/defaultCharacterSet"},{"op":"remove","path":"/spec/forProvider/defaultCollation"}]'
+
+  # Wait for the controller to reconcile -- late init should re-populate the fields
+  sleep 15
+
+  echo_info "check database resource is still Ready"
+  "${KUBECTL}" wait --timeout 30s --for condition=Ready database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db
+  echo_step_completed
+
+  echo_info "check charset/collation unchanged in MariaDB"
+  local charset collation
+  charset=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_character_set_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
+
+  charset=$(echo "${charset}" | tr -d '[:space:]')
+  collation=$(echo "${collation}" | tr -d '[:space:]')
+
+  echo_info "charset=${charset}, collation=${collation}"
+
+  if [ "${charset}" != "utf8mb4" ]; then
+    echo_error "expected charset utf8mb4 after field removal but got ${charset}"
+  fi
+  if [ "${collation}" != "utf8mb4_bin" ]; then
+    echo_error "expected collation utf8mb4_bin after field removal but got ${collation}"
+  fi
   echo_step_completed
 }
 
@@ -388,6 +481,9 @@ test_create_grant() {
 
 test_all() {
   test_create_database
+  test_database_charset
+  test_update_database_charset
+  test_remove_database_charset
   test_create_user
   test_update_user_password
   test_create_grant
@@ -449,5 +545,9 @@ TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
 
 TLS=false API_TYPE="cluster" run_test integration_tests_postgres
 TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
+
+# no TLS=false variant - MSSQL uses built-in encryption
+TLS=true API_TYPE="cluster" run_test integration_tests_mssql
+TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
 
 integration_tests_end

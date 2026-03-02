@@ -13,6 +13,50 @@ import (
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ResolveReferences of this DefaultPrivileges.
+func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
+
+	var rsp reference.ResolutionResponse
+	var err error
+
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
+		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
+		Reference:    mg.Spec.ForProvider.RoleRef,
+		Selector:     mg.Spec.ForProvider.RoleSelector,
+		To: reference.To{
+			List:    &RoleList{},
+			Managed: &Role{},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "mg.Spec.ForProvider.Role")
+	}
+	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
+
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
+		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+		To: reference.To{
+			List:    &DatabaseList{},
+			Managed: &Database{},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "mg.Spec.ForProvider.Database")
+	}
+	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+
+	return nil
+}
+
 // ResolveReferences of this Extension.
 func (mg *Extension) ResolveReferences(ctx context.Context, c client.Reader) error {
 	r := reference.NewAPIResolver(c, mg)

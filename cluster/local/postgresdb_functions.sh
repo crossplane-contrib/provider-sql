@@ -15,7 +15,7 @@ setup_postgresdb_no_tls() {
   "${KUBECTL}" apply -f "${scriptdir}/postgres.server.yaml"
 
   echo_step "Waiting for PostgreSQL to be ready"
-  "${KUBECTL}" wait --for=condition=ready pod -l app=postgresdb-postgresql --timeout=120s
+  "${KUBECTL}" rollout status statefulset/postgresdb-postgresql --timeout=120s
 
   "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 &
   PORT_FORWARD_PID=$!

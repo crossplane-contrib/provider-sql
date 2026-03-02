@@ -40,6 +40,16 @@ type DatabaseParameters struct {
 	// BinLog defines whether the create, delete, update operations of this database are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"binlog,omitempty"`
+
+	// DefaultCharacterSet defines the default character set for this database.
+	// See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+	// +optional
+	DefaultCharacterSet *string `json:"defaultCharacterSet,omitempty"`
+
+	// DefaultCollation defines the default collation for this database.
+	// See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+	// +optional
+	DefaultCollation *string `json:"defaultCollation,omitempty"`
 }
 
 // +kubebuilder:object:root=true

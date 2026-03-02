@@ -13,6 +13,7 @@ Please see [GOVERNANCE.md] for governance guidelines and responsibilities.
 * Javier Palomo ([jvrplmlmn](https://github.com/jvrplmlmn))
 * Iain Lane ([iainlane](https://github.com/iainlane))
 * Carl Henrik Lunde ([chlunde](https://github.com/chlunde))
+* J. Fernández ([fernandezcuesta](https://github.com/fernandezcuesta))
 
 ## Emeritus maintainers
 
