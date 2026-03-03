@@ -20,6 +20,7 @@ metadata:
   namespace: default
 spec:
   forProvider:
+    dropBehavior: CASCADE
     revokePublicOnSchema: true
     databaseRef:
       name: db1
