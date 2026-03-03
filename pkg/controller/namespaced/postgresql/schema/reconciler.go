@@ -174,12 +174,11 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Schema) (m
 }
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.ExternalDelete, error) {
-	dropBehavior := mg.Spec.ForProvider.DropBehavior
-	if dropBehavior == nil {
-		defaultBehavior := namespacedv1alpha1.DropBehaviorRestrict
-		dropBehavior = &defaultBehavior
+	dropBehavior := namespacedv1alpha1.DropBehaviorRestrict
+	if mg.Spec.ForProvider.DropBehavior != nil {
+		dropBehavior = *mg.Spec.ForProvider.DropBehavior
 	}
-	err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("DROP SCHEMA IF EXISTS %s %s", pq.QuoteIdentifier(meta.GetExternalName(mg)), string(*dropBehavior))})
+	err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("DROP SCHEMA IF EXISTS %s %s", pq.QuoteIdentifier(meta.GetExternalName(mg)), string(dropBehavior))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropSchema)
 }
 

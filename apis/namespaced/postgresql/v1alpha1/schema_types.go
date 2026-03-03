@@ -27,8 +27,10 @@ import (
 type DropBehavior string
 
 const (
+	// DropBehaviorCascade automatically drops objects contained in the schema.
+	DropBehaviorCascade DropBehavior = "CASCADE"
+	// DropBehaviorRestrict refuses to drop the schema if it contains any objects.
 	DropBehaviorRestrict DropBehavior = "RESTRICT"
-	DropBehaviorCascade  DropBehavior = "CASCADE"
 )
 
 // A SchemaSpec defines the desired state of a Schema.
