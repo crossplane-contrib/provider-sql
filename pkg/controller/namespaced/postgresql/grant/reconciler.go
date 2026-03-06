@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -78,6 +79,12 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		resource.ManagedKind(namespacedv1alpha1.GrantGroupVersionKind),
 		reconcilerOptions...,
 	)
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
+		&namespacedv1alpha1.GrantList{}, o.MetricOptions.PollStateMetricInterval,
+	)); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&namespacedv1alpha1.Grant{}).
