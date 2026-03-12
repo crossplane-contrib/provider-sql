@@ -117,6 +117,15 @@ spec:
                       database owned by another role, you must be a direct or indirect member
                       of that role, or be a superuser.
                     type: string
+                  strategy:
+                    description: |-
+                      Strategy sets the method used to create the database from the template.
+                      This field is create-only and requires PostgreSQL 15+.
+                      When omitted, PostgreSQL uses the server default.
+                    enum:
+                    - WAL_LOG
+                    - FILE_COPY
+                    type: string
                   tablespace:
                     description: |-
                       The name of the tablespace that will be associated with the new database,
@@ -130,6 +139,10 @@ spec:
                       DEFAULT to use the default template (template1).
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: strategy field is immutable after creation
+                  optionalOldSelf: true
+                  rule: '!has(oldSelf) || self.strategy == oldSelf.strategy'
               managementPolicies:
                 default:
                 - '*'
