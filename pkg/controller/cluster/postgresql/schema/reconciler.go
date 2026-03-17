@@ -18,8 +18,10 @@ package schema
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +77,12 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		resource.ManagedKind(v1alpha1.SchemaGroupVersionKind),
 		reconcilerOptions...,
 	)
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
+		&v1alpha1.SchemaList{}, o.MetricOptions.PollStateMetricInterval,
+	)); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.Schema{}).
@@ -189,7 +197,11 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Schema) (managed.Ext
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Schema) (managed.ExternalDelete, error) {
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP SCHEMA IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))})
+	dropBehavior := v1alpha1.DropBehaviorRestrict
+	if mg.Spec.ForProvider.DropBehavior != nil {
+		dropBehavior = *mg.Spec.ForProvider.DropBehavior
+	}
+	err := c.db.Exec(ctx, xsql.Query{String: fmt.Sprintf("DROP SCHEMA IF EXISTS %s %s", pq.QuoteIdentifier(meta.GetExternalName(mg)), string(dropBehavior))})
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropSchema)
 }
 

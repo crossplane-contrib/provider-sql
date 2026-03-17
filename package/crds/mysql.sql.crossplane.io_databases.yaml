@@ -76,6 +76,16 @@ spec:
                       operations of this database are propagated to replicas. Defaults
                       to true
                     type: boolean
+                  defaultCharacterSet:
+                    description: |-
+                      DefaultCharacterSet defines the default character set for this database.
+                      See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+                    type: string
+                  defaultCollation:
+                    description: |-
+                      DefaultCollation defines the default collation for this database.
+                      See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+                    type: string
                 type: object
               managementPolicies:
                 default:
