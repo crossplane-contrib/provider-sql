@@ -394,7 +394,7 @@ func selectSchemaGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	// permissions.
 	q.String = "SELECT EXISTS(SELECT 1 " +
 		"FROM pg_namespace n, " +
-		"aclexplode(nspacl) as acl " +
+		"aclexplode(n.nspacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
 		// Filter by schema, role and grantable setting
 		"WHERE n.nspname=$1 " +
@@ -424,7 +424,7 @@ func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 	// permissions.
 	q.String = "SELECT EXISTS(SELECT 1 " +
 		"FROM pg_database db, " +
-		"aclexplode(datacl) as acl " +
+		"aclexplode(db.datacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
 		// Filter by database, role and grantable setting
 		"WHERE db.datname=$1 " +
@@ -644,7 +644,7 @@ func createColumnGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro 
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleColumn)
 	}
 
-	co := strings.Join(gp.Columns, ",")
+	co := strings.Join(quoteIdentifiers(gp.Columns), ",")
 	cp := columnsPrivileges(gp.Privileges.ToStringSlice(), co)
 	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
 
@@ -732,14 +732,14 @@ func createForeignDataWrapperGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsq
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
 		xsql.Query{String: fmt.Sprintf("REVOKE %s ON FOREIGN DATA WRAPPER %s FROM %s",
 			sp,
-			strings.Join(gp.ForeignDataWrappers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignDataWrappers), ","),
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
 		xsql.Query{String: fmt.Sprintf("GRANT %s ON FOREIGN DATA WRAPPER %s TO %s %s",
 			sp,
-			strings.Join(gp.ForeignDataWrappers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignDataWrappers), ","),
 			ro,
 			withOption(gp.WithOption),
 		)},
@@ -758,14 +758,14 @@ func createForeignServerGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Que
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
 		xsql.Query{String: fmt.Sprintf("REVOKE %s ON FOREIGN SERVER %s FROM %s",
 			sp,
-			strings.Join(gp.ForeignServers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignServers), ","),
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
 		xsql.Query{String: fmt.Sprintf("GRANT %s ON FOREIGN SERVER %s TO %s %s",
 			sp,
-			strings.Join(gp.ForeignServers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignServers), ","),
 			ro,
 			withOption(gp.WithOption),
 		)},
@@ -824,7 +824,7 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 		)
 		return nil
 	case v1alpha1.RoleColumn:
-		co := strings.Join(gp.Columns, ",")
+		co := strings.Join(quoteIdentifiers(gp.Columns), ",")
 		cp := columnsPrivileges(gp.Privileges.ToStringSlice(), co)
 		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
 			cp,
@@ -835,14 +835,14 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 	case v1alpha1.RoleForeignDataWrapper:
 		q.String = fmt.Sprintf("REVOKE %s ON FOREIGN DATA WRAPPER %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(gp.ForeignDataWrappers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignDataWrappers), ","),
 			ro,
 		)
 		return nil
 	case v1alpha1.RoleForeignServer:
 		q.String = fmt.Sprintf("REVOKE %s ON FOREIGN SERVER %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(gp.ForeignServers, ","),
+			strings.Join(quoteIdentifiers(gp.ForeignServers), ","),
 			ro,
 		)
 		return nil
@@ -865,9 +865,18 @@ func quotedSignatures(sc string, rs []v1alpha1.Routine) []string {
 	sigs := make([]string, len(rs))
 
 	for i, r := range rs {
-		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(r.Arguments, ",") + ")"
+		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(quoteIdentifiers(r.Arguments), ",") + ")"
 	}
 	return sigs
+}
+
+// quoteIdentifiers returns a slice of PostgreSQL-quoted identifiers.
+func quoteIdentifiers(items []string) []string {
+	ret := make([]string, len(items))
+	for i, v := range items {
+		ret[i] = pq.QuoteIdentifier(v)
+	}
+	return ret
 }
 
 // prefixAndQuote returns objects in a quoted grantable format, prefixed with the schema
@@ -890,6 +899,9 @@ func columnsPrivileges(priv []string, cols string) string {
 }
 
 func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalObservation, error) {
+	if mg == nil {
+		return managed.ExternalObservation{}, errors.New(errNotGrant)
+	}
 	if mg.Spec.ForProvider.Role == nil {
 		return managed.ExternalObservation{}, errors.New(errNoRole)
 	}
@@ -924,6 +936,10 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalCreation, error) {
+	if mg == nil {
+		return managed.ExternalCreation{}, errors.New(errNotGrant)
+	}
+
 	var queries []xsql.Query
 
 	mg.SetConditions(xpv1.Creating())
@@ -945,6 +961,10 @@ func (c *external) Disconnect(ctx context.Context) error {
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalDelete, error) {
+	if mg == nil {
+		return managed.ExternalDelete{}, errors.New(errNotGrant)
+	}
+
 	var query xsql.Query
 
 	mg.SetConditions(xpv1.Deleting())

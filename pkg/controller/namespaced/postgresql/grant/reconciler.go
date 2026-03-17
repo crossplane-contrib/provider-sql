@@ -189,7 +189,7 @@ func selectGrantQuery(gp namespacedv1alpha1.GrantParameters, q *xsql.Query) erro
 	case roleDatabase:
 		gro := gp.WithOption != nil && *gp.WithOption == namespacedv1alpha1.GrantOptionGrant
 
-		ep := gp.Privileges.ExpandPrivileges()
+		ep := gp.ExpandPrivileges()
 		sp := ep.ToStringSlice()
 		// Join grantee. Filter by database name and grantee name.
 		// Finally, perform a permission comparison against expected
