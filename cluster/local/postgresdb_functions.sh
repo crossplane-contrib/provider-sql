@@ -81,9 +81,9 @@ setup_postgresdb_tests(){
   # create grant
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
 
-echo_step "creating PostgresDB Schema resources"
-# create grant
-"${KUBECTL}" apply -f ${projectdir}/examples/postgresql/schema.yaml
+  echo_step "creating PostgresDB Schema resources"
+  # create grant
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
 
   echo_step "check if Role is ready"
   "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
@@ -94,7 +94,7 @@ echo_step "creating PostgresDB Schema resources"
   echo_step_completed
 
 echo_step "check if schema is ready"
-"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/postgresql/schema.yaml
+"${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
 echo_step_completed
 
 echo_step "create grantable objects"
