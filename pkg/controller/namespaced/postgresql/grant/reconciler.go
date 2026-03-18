@@ -113,8 +113,16 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Grant) (
 		return nil, err
 	}
 
+	// Use the grant's target database when specified, falling back to the
+	// ProviderConfig's default. This matters for object-level grants (table,
+	// schema, sequence, etc.) which must run against the correct database.
+	db := providerInfo.DefaultDatabase
+	if mg.Spec.ForProvider.Database != nil && *mg.Spec.ForProvider.Database != "" {
+		db = *mg.Spec.ForProvider.Database
+	}
+
 	return &external{
-		db:   c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode)),
+		db:   c.newDB(providerInfo.SecretData, db, clients.ToString(providerInfo.SSLMode)),
 		kube: c.kube,
 	}, nil
 }
