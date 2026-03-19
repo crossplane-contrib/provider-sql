@@ -1325,6 +1325,19 @@ func TestGrantSQL(t *testing.T) {
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
 			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
 		},
+		"RoutineArgumentsUppercaseTypeNamesAreLowercased": {
+			reason: "Uppercase type names like TEXT must be lowercased before quoting so PostgreSQL can resolve them (quoted identifiers are case-sensitive, but pg_catalog stores type names as lowercase)",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+		},
 	}
 
 	for name, tc := range cases {

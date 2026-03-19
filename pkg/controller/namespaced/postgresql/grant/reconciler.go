@@ -596,7 +596,14 @@ func quotedSignatures(sc string, rs []namespacedv1alpha1.Routine) []string {
 	qsc := pq.QuoteIdentifier(sc)
 	sigs := make([]string, len(rs))
 	for i, r := range rs {
-		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(quoteIdentifiers(r.Arguments), ",") + ")"
+		args := make([]string, len(r.Arguments))
+		for j, arg := range r.Arguments {
+			// Type names must be lowercased before quoting: quoted identifiers are
+			// case-sensitive in PostgreSQL, but type names like TEXT are stored as
+			// "text" in pg_catalog, so "TEXT" would fail to resolve.
+			args[j] = pq.QuoteIdentifier(strings.ToLower(arg))
+		}
+		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(args, ",") + ")"
 	}
 	return sigs
 }

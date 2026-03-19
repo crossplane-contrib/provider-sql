@@ -16,7 +16,7 @@ spec:
     listKind: DatabaseList
     plural: databases
     singular: database
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status

@@ -82,3 +82,151 @@ spec:
   providerConfigRef:
     kind: ProviderConfig
     name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-schema
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    withOption: GRANT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: example
+    schemaRef:
+      name: my-schema
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-table
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - SELECT
+      - INSERT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - test_table
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-sequence
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    sequences:
+      - test_sequence_1
+      - test_sequence_2
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-routine
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    routines:
+      - name: test_procedure
+        args:
+        - TEXT
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-column
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - UPDATE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - test_table_column
+    columns:
+      - test_column
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-foreign-data-wrapper
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - USAGE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    foreignDataWrappers:
+      - test_foreign_data_wrapper
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-foreign-server
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - USAGE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    foreignServers:
+      - test_foreign_server
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
