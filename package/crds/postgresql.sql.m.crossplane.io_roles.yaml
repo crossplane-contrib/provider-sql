@@ -80,6 +80,12 @@ spec:
                     description: ConnectionLimit to be applied to the role.
                     format: int32
                     type: integer
+                  passwordResetToken:
+                    description: |-
+                      PasswordResetToken can be set to any string to trigger a one-time password reset.
+                      Useful after restoring a database from a snapshot, where roles already exist in the DB but
+                      the connection secret may be empty. Change the token value to trigger another reset.
+                    type: string
                   passwordSecretRef:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used
@@ -205,6 +211,11 @@ spec:
                           type: string
                       type: object
                     type: array
+                  lastPasswordResetToken:
+                    description: |-
+                      LastPasswordResetToken tracks the passwordResetToken value at which the last password reset was applied.
+                      Used to prevent repeated resets when spec.forProvider.passwordResetToken is set.
+                    type: string
                   privilegesAsClauses:
                     description: |-
                       PrivilegesAsClauses represents the applied privileges state, taking into account

@@ -336,9 +336,9 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
-		if mg.Spec.ForProvider.ResetPassword != nil && *mg.Spec.ForProvider.ResetPassword {
-			gen := mg.GetGeneration()
-			mg.Status.AtProvider.LastPasswordResetGeneration = &gen
+		if mg.Spec.ForProvider.PasswordResetToken != nil {
+			token := *mg.Spec.ForProvider.PasswordResetToken
+			mg.Status.AtProvider.LastPasswordResetToken = &token
 		}
 	}
 

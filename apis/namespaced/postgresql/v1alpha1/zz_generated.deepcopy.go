@@ -1018,9 +1018,9 @@ func (in *RoleObservation) DeepCopyInto(out *RoleObservation) {
 			copy(*out, *in)
 		}
 	}
-	if in.LastPasswordResetGeneration != nil {
-		in, out := &in.LastPasswordResetGeneration, &out.LastPasswordResetGeneration
-		*out = new(int64)
+	if in.LastPasswordResetToken != nil {
+		in, out := &in.LastPasswordResetToken, &out.LastPasswordResetToken
+		*out = new(string)
 		**out = **in
 	}
 }
@@ -1058,9 +1058,9 @@ func (in *RoleParameters) DeepCopyInto(out *RoleParameters) {
 			copy(*out, *in)
 		}
 	}
-	if in.ResetPassword != nil {
-		in, out := &in.ResetPassword, &out.ResetPassword
-		*out = new(bool)
+	if in.PasswordResetToken != nil {
+		in, out := &in.PasswordResetToken, &out.PasswordResetToken
+		*out = new(string)
 		**out = **in
 	}
 }

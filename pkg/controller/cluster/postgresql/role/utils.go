@@ -63,12 +63,11 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		return newPwd, changed, nil
 	}
 
-	// resetPassword triggers a forced password reset for the current generation.
-	if role.Spec.ForProvider.ResetPassword != nil && *role.Spec.ForProvider.ResetPassword {
-		gen := role.GetGeneration()
-		if role.Status.AtProvider.LastPasswordResetGeneration == nil || *role.Status.AtProvider.LastPasswordResetGeneration != gen {
-			return "", true, nil
-		}
+	// passwordResetToken triggers a forced password reset when the token changes.
+	if role.Spec.ForProvider.PasswordResetToken != nil &&
+		(role.Status.AtProvider.LastPasswordResetToken == nil ||
+			*role.Spec.ForProvider.PasswordResetToken != *role.Status.AtProvider.LastPasswordResetToken) {
+		return "", true, nil
 	}
 
 	return "", false, nil
