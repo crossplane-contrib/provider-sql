@@ -90,6 +90,12 @@ type RoleParameters struct {
 	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+
+	// ResetPassword when set to true triggers a one-time password reset for the current generation.
+	// Useful after restoring a database from a snapshot, where roles already exist in the DB but
+	// the connection secret may be empty. Will not trigger again until the spec is changed.
+	// +optional
+	ResetPassword *bool `json:"resetPassword,omitempty"`
 }
 
 // RoleConfigurationParameter is a role configuration parameter.
@@ -105,6 +111,10 @@ type RoleObservation struct {
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
 	// ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+	// LastPasswordResetGeneration tracks the resource generation at which the last password reset was applied.
+	// Used to prevent repeated resets when spec.forProvider.resetPassword is true.
+	// +optional
+	LastPasswordResetGeneration *int64 `json:"lastPasswordResetGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true
