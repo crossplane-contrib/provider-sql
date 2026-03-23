@@ -1106,6 +1106,245 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+func TestGetPassword(t *testing.T) {
+	type args struct {
+		ctx  context.Context
+		role *v1alpha1.Role
+	}
+	type want struct {
+		pwd     string
+		changed bool
+		err     error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"NoSecretRefNoToken": {
+			reason: "No password secret ref and no reset token should return unchanged",
+			args: args{
+				role: &v1alpha1.Role{},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NewPasswordResetToken": {
+			reason: "A new password reset token with no last token should trigger a reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"PasswordResetTokenUnchanged": {
+			reason: "An unchanged password reset token should not trigger a reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-1"),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"PasswordResetTokenChanged": {
+			reason: "A changed password reset token should trigger a reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-2"),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: true},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{kube: nil}
+			pwd, changed, err := e.getPassword(tc.args.ctx, tc.args.role)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.pwd, pwd); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want pwd, +got pwd:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.changed, changed); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want changed, +got changed:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestUpdatePasswordResetToken(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		// execQuery receives the SQL query string from MockExec, if called.
+		execQuery *string
+	}
+
+	type args struct {
+		ctx context.Context
+		mg  *v1alpha1.Role
+	}
+
+	type want struct {
+		err                    error
+		lastPasswordResetToken *string
+		// passwordGenerated asserts that ALTER ROLE was called with a non-empty
+		// generated password and that ConnectionDetails carry a non-empty password.
+		passwordGenerated bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"NewTokenGeneratesAndSetsPassword": {
+			reason: "A new password reset token should trigger password generation and update LastPasswordResetToken",
+			fields: fields{execQuery: new(string)},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:                    nil,
+				lastPasswordResetToken: ptr.To("token-1"),
+				passwordGenerated:      true,
+			},
+		},
+		"UnchangedTokenNoPasswordReset": {
+			reason: "An unchanged password reset token should not trigger any database call",
+			fields: fields{execQuery: nil},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-1"),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:                    nil,
+				lastPasswordResetToken: ptr.To("token-1"),
+				passwordGenerated:      false,
+			},
+		},
+		"ChangedTokenGeneratesNewPassword": {
+			reason: "A changed password reset token should generate a new password and update LastPasswordResetToken",
+			fields: fields{execQuery: new(string)},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordResetToken: ptr.To("token-2"),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordResetToken: ptr.To("token-1"),
+						},
+					},
+				},
+			},
+			want: want{
+				err:                    nil,
+				lastPasswordResetToken: ptr.To("token-2"),
+				passwordGenerated:      true,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			execQuery := tc.fields.execQuery
+			db := &mockDB{
+				MockExec: func(ctx context.Context, q xsql.Query) error {
+					if execQuery == nil {
+						// No DB call expected.
+						return errBoom
+					}
+					*execQuery = q.String
+					return nil
+				},
+			}
+			e := external{
+				db:   db,
+				kube: &test.MockClient{},
+			}
+			got, err := e.Update(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.lastPasswordResetToken, tc.args.mg.Status.AtProvider.LastPasswordResetToken); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want lastPasswordResetToken, +got lastPasswordResetToken:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.passwordGenerated {
+				// Verify the ALTER ROLE query was issued with a non-empty password.
+				if execQuery == nil || *execQuery == "" {
+					t.Errorf("\n%s\ne.Update(...): expected ALTER ROLE PASSWORD query to be executed\n", tc.reason)
+				} else if *execQuery == fmt.Sprintf("ALTER ROLE %s PASSWORD ''", pq.QuoteIdentifier("example")) {
+					t.Errorf("\n%s\ne.Update(...): ALTER ROLE PASSWORD query contained an empty password\n", tc.reason)
+				}
+				// Verify the returned ConnectionDetails carry a non-empty password.
+				if pw := got.ConnectionDetails[xpv1.ResourceCredentialsSecretPasswordKey]; len(pw) == 0 {
+					t.Errorf("\n%s\ne.Update(...): expected non-empty password in ConnectionDetails\n", tc.reason)
+				}
+			}
+		})
+	}
+}
+
 func TestDelete(t *testing.T) {
 	errBoom := errors.New("boom")
 
