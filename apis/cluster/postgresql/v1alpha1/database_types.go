@@ -22,7 +22,18 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 )
 
+// DatabaseStrategy sets the method that is used to create a database.
+type DatabaseStrategy string
+
+const (
+	// DatabaseStrategyWALLog copies blocks through the write-ahead log.
+	DatabaseStrategyWALLog DatabaseStrategy = "WAL_LOG"
+	// DatabaseStrategyFileCopy copies the template database files directly.
+	DatabaseStrategyFileCopy DatabaseStrategy = "FILE_COPY"
+)
+
 // DatabaseParameters are the configurable fields of a Database.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.strategy == oldSelf.strategy",message="strategy field is immutable after creation",optionalOldSelf=true
 type DatabaseParameters struct {
 	// The role name of the user who will own the new database, or DEFAULT to
 	// use the default (namely, the user executing the command). To create a
@@ -33,6 +44,13 @@ type DatabaseParameters struct {
 	// The name of the template from which to create the new database, or
 	// DEFAULT to use the default template (template1).
 	Template *string `json:"template,omitempty"`
+
+	// Strategy sets the method used to create the database from the template.
+	// This field is create-only and requires PostgreSQL 15+.
+	// When omitted, PostgreSQL uses the server default.
+	// +kubebuilder:validation:Enum=WAL_LOG;FILE_COPY
+	// +optional
+	Strategy *DatabaseStrategy `json:"strategy,omitempty"`
 
 	// Character set encoding to use in the new database. Specify a string
 	// constant (e.g., 'SQL_ASCII'), or an integer encoding number, or DEFAULT
