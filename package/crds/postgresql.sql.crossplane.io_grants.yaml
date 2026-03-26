@@ -86,6 +86,7 @@ spec:
                   columns:
                     description: The columns upon which to grant the privileges.
                     items:
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
                   database:
@@ -171,11 +172,13 @@ spec:
                     description: The foreign data wrappers upon which to grant the
                       privileges.
                     items:
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
                   foreignServers:
                     description: The foreign servers upon which to grant the privileges.
                     items:
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
                   memberOf:
@@ -264,7 +267,7 @@ spec:
                       See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
                     items:
                       description: GrantPrivilege represents a privilege to be granted
-                      pattern: ^[A-Z]+$
+                      pattern: ^[A-Z]+( [A-Z]+)*$
                       type: string
                     minItems: 1
                     type: array
@@ -359,10 +362,12 @@ spec:
                         args:
                           description: The arguments of the routine.
                           items:
+                            pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                             type: string
                           type: array
                         name:
                           description: The name of the routine.
+                          pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                           type: string
                       type: object
                     type: array
@@ -448,11 +453,13 @@ spec:
                   sequences:
                     description: The sequences upon which to grant the privileges.
                     items:
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
                   tables:
                     description: The tables upon which to grant the privileges.
                     items:
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
                   withOption:

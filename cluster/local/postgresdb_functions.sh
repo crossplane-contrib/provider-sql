@@ -12,7 +12,7 @@ setup_postgresdb_no_tls() {
       --from-literal port="5432"
 
   scriptdir=$(dirname "$0")
-  "${KUBECTL}" apply -f "${scriptdir}/postgres.server.yaml"
+  POSTGRES_VERSION="${POSTGRES_VERSION:-18}" envsubst '${POSTGRES_VERSION}' < "${scriptdir}/postgres.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for PostgreSQL to be ready"
   "${KUBECTL}" rollout status statefulset/postgresdb-postgresql --timeout=120s
@@ -282,6 +282,28 @@ check_foreign_server_privileges(){
   check_privileges $target_db "foreign server $foreign_server" $role $expected_privileges "$request"
 }
 
+check_all_privileges_table_grant(){
+  # Verify that granting ALL PRIVILEGES on a table expands correctly.
+  # MAINTAIN was introduced in PG 17; it is omitted from the expected set on older versions.
+  target_db="db1"
+  schema="public"
+  table="test_table"
+  role='example-role'
+
+  pg_major=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc \
+    "SELECT current_setting('server_version_num')::int / 10000;")
+
+  if [ "${pg_major}" -ge 17 ]; then
+    expected_privileges='DELETE|NO,INSERT|NO,MAINTAIN|NO,REFERENCES|NO,SELECT|NO,TRIGGER|NO,TRUNCATE|NO,UPDATE|NO'
+  else
+    expected_privileges='DELETE|NO,INSERT|NO,REFERENCES|NO,SELECT|NO,TRIGGER|NO,TRUNCATE|NO,UPDATE|NO'
+  fi
+
+  request="select privilege_type, is_grantable from information_schema.role_table_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' order by privilege_type asc"
+
+  check_privileges $target_db "ALL PRIVILEGES on table $schema.$table" $role $expected_privileges "$request"
+}
+
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
 
@@ -323,6 +345,7 @@ check_custom_object_privileges(){
   check_column_privileges
   check_foreign_data_wrapper_privileges
   check_foreign_server_privileges
+  check_all_privileges_table_grant
 
   echo_step_completed
 }

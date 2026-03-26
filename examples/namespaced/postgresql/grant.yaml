@@ -215,6 +215,27 @@ spec:
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Grant
 metadata:
+  name: example-grant-all-privileges-on-table
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - ALL PRIVILEGES
+    roleRef:
+      name: example-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - test_table
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
   name: example-grant-role-1-on-foreign-server
   namespace: default
 spec:

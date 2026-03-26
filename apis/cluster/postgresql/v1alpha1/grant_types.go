@@ -40,7 +40,7 @@ type GrantSpec struct {
 }
 
 // GrantPrivilege represents a privilege to be granted
-// +kubebuilder:validation:Pattern:=^[A-Z]+$
+// +kubebuilder:validation:Pattern:=^[A-Z]+( [A-Z]+)*$
 type GrantPrivilege string
 
 // If Privileges are specified, we should have at least one
@@ -252,10 +252,12 @@ const (
 
 type Routine struct {
 	// The name of the routine.
+	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Name string `json:"name,omitempty"`
 
 	// The arguments of the routine.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Arguments []string `json:"args,omitempty"`
 }
 
@@ -338,14 +340,17 @@ type GrantParameters struct {
 
 	// The columns upon which to grant the privileges.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Columns []string `json:"columns,omitempty"`
 
 	// The tables upon which to grant the privileges.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Tables []string `json:"tables,omitempty"`
 
 	// The sequences upon which to grant the privileges.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Sequences []string `json:"sequences,omitempty"`
 
 	// The routines upon which to grant the privileges.
@@ -354,10 +359,12 @@ type GrantParameters struct {
 
 	// The foreign data wrappers upon which to grant the privileges.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	ForeignDataWrappers []string `json:"foreignDataWrappers,omitempty"`
 
 	// The foreign servers upon which to grant the privileges.
 	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	ForeignServers []string `json:"foreignServers,omitempty"`
 }
 
