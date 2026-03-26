@@ -63,12 +63,27 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		return newPwd, changed, nil
 	}
 
-	// passwordResetToken triggers a forced password reset when the token changes.
-	if role.Spec.ForProvider.PasswordResetToken != nil &&
-		(role.Status.AtProvider.LastPasswordResetToken == nil ||
-			*role.Spec.ForProvider.PasswordResetToken != *role.Status.AtProvider.LastPasswordResetToken) {
-		return "", true, nil
-	}
+	changed, err = c.shouldResetPassword(ctx, role)
+	return "", changed, err
+}
 
-	return "", false, nil
+// shouldResetPassword returns true if passwordReset=true and the connection secret has no password.
+// This handles the case where the role exists in the DB after restoration from a snapshot
+// but the connection secret is empty. When false, the provider acts as before.
+func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
+	if role.Spec.ForProvider.PasswordReset == nil || !*role.Spec.ForProvider.PasswordReset {
+		return false, nil
+	}
+	if role.Spec.WriteConnectionSecretToReference == nil {
+		return false, nil
+	}
+	nn := types.NamespacedName{
+		Name:      role.Spec.WriteConnectionSecretToReference.Name,
+		Namespace: role.Namespace,
+	}
+	s := &corev1.Secret{}
+	if err := c.kube.Get(ctx, nn, s); resource.IgnoreNotFound(err) != nil {
+		return false, err
+	}
+	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
 }
