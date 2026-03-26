@@ -211,7 +211,7 @@ func createForeignServerGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Que
 	return nil
 }
 
-func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error {
+func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { //nolint: gocyclo
 	gt, err := resolveGrantType(gp)
 	if err != nil {
 		return err
