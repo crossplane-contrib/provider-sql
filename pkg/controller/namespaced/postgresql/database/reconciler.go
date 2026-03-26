@@ -208,13 +208,13 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) 
 		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Tablespace))
 	}
 	if mg.Spec.ForProvider.AllowConnections != nil {
-		b.WriteString(fmt.Sprintf(" ALLOW_CONNECTIONS %t", *mg.Spec.ForProvider.AllowConnections))
+		fmt.Fprintf(&b, " ALLOW_CONNECTIONS %t", *mg.Spec.ForProvider.AllowConnections)
 	}
 	if mg.Spec.ForProvider.ConnectionLimit != nil {
-		b.WriteString(fmt.Sprintf(" CONNECTION LIMIT %d", *mg.Spec.ForProvider.ConnectionLimit))
+		fmt.Fprintf(&b, " CONNECTION LIMIT %d", *mg.Spec.ForProvider.ConnectionLimit)
 	}
 	if mg.Spec.ForProvider.IsTemplate != nil {
-		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *mg.Spec.ForProvider.IsTemplate))
+		fmt.Fprintf(&b, " IS_TEMPLATE %t", *mg.Spec.ForProvider.IsTemplate)
 	}
 
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateDB)
