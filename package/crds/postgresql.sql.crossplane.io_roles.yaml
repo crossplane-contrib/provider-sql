@@ -94,6 +94,11 @@ spec:
                     description: ConnectionLimit to be applied to the role.
                     format: int32
                     type: integer
+                  passwordReset:
+                    description: |-
+                      PasswordReset controls behaviour when the role exists in the database but the connection
+                      secret has no password. When true, a new password is generated and written to the connection secret.
+                    type: boolean
                   passwordSecretRef:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used

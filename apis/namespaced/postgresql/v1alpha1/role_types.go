@@ -91,6 +91,12 @@ type RoleParameters struct {
 	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+
+	// PasswordReset controls behaviour when the role exists in the database but the connection
+	// secret has no password.
+	// When true, a new password is generated and written to the connection secret.
+	// +optional
+	PasswordReset *bool `json:"passwordReset,omitempty"`
 }
 
 // RoleConfigurationParameter is a role configuration parameter.
