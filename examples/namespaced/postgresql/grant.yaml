@@ -220,7 +220,7 @@ metadata:
 spec:
   forProvider:
     privileges:
-      - ALL PRIVILEGES
+      - ALL
     roleRef:
       name: example-role
     databaseRef:

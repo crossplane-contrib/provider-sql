@@ -285,21 +285,23 @@ check_foreign_server_privileges(){
 check_all_privileges_table_grant(){
   # Verify that granting ALL PRIVILEGES on a table expands correctly.
   # MAINTAIN was introduced in PG 17; it is omitted from the expected set on older versions.
+  # Uses pg_class/aclexplode instead of information_schema because information_schema
+  # does not include PostgreSQL-specific privileges like MAINTAIN.
   target_db="db1"
   schema="public"
   table="test_table"
   role='example-role'
 
   pg_major=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc \
-    "SELECT current_setting('server_version_num')::int / 10000;")
+    "SELECT current_setting('server_version_num')::int / 10000;" | xargs)
 
   if [ "${pg_major}" -ge 17 ]; then
-    expected_privileges='DELETE|NO,INSERT|NO,MAINTAIN|NO,REFERENCES|NO,SELECT|NO,TRIGGER|NO,TRUNCATE|NO,UPDATE|NO'
+    expected_privileges='DELETE|f,INSERT|f,MAINTAIN|f,REFERENCES|f,SELECT|f,TRIGGER|f,TRUNCATE|f,UPDATE|f'
   else
-    expected_privileges='DELETE|NO,INSERT|NO,REFERENCES|NO,SELECT|NO,TRIGGER|NO,TRUNCATE|NO,UPDATE|NO'
+    expected_privileges='DELETE|f,INSERT|f,REFERENCES|f,SELECT|f,TRIGGER|f,TRUNCATE|f,UPDATE|f'
   fi
 
-  request="select privilege_type, is_grantable from information_schema.role_table_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' order by privilege_type asc"
+  request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'r' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$table' order by acl.privilege_type asc"
 
   check_privileges $target_db "ALL PRIVILEGES on table $schema.$table" $role $expected_privileges "$request"
 }
