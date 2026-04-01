@@ -10,7 +10,7 @@ require (
 	github.com/crossplane/upjet/v2 v2.2.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
-	github.com/lib/pq v1.11.2
+	github.com/lib/pq v1.12.1
 	github.com/microsoft/go-mssqldb v1.9.8
 	github.com/pkg/errors v0.9.1
 	k8s.io/api v0.34.0
