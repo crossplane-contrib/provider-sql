@@ -34,7 +34,7 @@ const (
 )
 
 // DatabaseParameters are the configurable fields of a Database.
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.strategy == oldSelf.strategy",message="strategy field is immutable after creation",optionalOldSelf=true
+// +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() || ((!has(self.strategy) && !has(oldSelf.value().strategy)) || (has(self.strategy) && has(oldSelf.value().strategy) && self.strategy == oldSelf.value().strategy))",message="strategy field is immutable after creation",optionalOldSelf=true
 type DatabaseParameters struct {
 	// The role name of the user who will own the new database, or DEFAULT to
 	// use the default (namely, the user executing the command). To create a
