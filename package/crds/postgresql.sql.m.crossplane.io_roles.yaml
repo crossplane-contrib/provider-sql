@@ -83,7 +83,8 @@ spec:
                   passwordReset:
                     description: |-
                       PasswordReset controls behaviour when the role exists in the database but the connection
-                      secret has no password. When true, a new password is generated and written to the connection secret.
+                      secret has no password.
+                      When true, a new password is generated and written to the connection secret.
                     type: boolean
                   passwordSecretRef:
                     description: |-
