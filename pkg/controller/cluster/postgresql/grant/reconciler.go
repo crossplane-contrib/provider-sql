@@ -256,7 +256,6 @@ func createForeignServerGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Que
 	return nil
 }
 
-
 func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query, serverVersion int) error { // nolint: gocyclo
 	gt, err := resolveGrantType(gp)
 	if err != nil {
@@ -384,7 +383,6 @@ func createSequenceGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, r
 	)
 	return nil
 }
-
 
 func createTableGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string, serverVersion int) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
@@ -758,7 +756,6 @@ func selectForeignServerGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) e
 	return nil
 }
 
-
 func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error { // nolint: gocyclo
 	gt, err := resolveGrantType(gp)
 	if err != nil {
@@ -922,7 +919,6 @@ func selectSequenceGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 
 	return nil
 }
-
 
 func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error {
 	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
