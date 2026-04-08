@@ -142,7 +142,9 @@ spec:
                 x-kubernetes-validations:
                 - message: strategy field is immutable after creation
                   optionalOldSelf: true
-                  rule: '!has(oldSelf) || self.strategy == oldSelf.strategy'
+                  rule: '!oldSelf.hasValue() || ((!has(self.strategy) && !has(oldSelf.value().strategy))
+                    || (has(self.strategy) && has(oldSelf.value().strategy) && self.strategy
+                    == oldSelf.value().strategy))'
               managementPolicies:
                 default:
                 - '*'
