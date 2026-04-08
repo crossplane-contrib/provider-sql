@@ -1364,7 +1364,7 @@ func TestGrantSQL(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if tc.wantSelectContains != "" {
 				var q xsql.Query
-				if err := selectGrantQuery(tc.gp, &q); err != nil {
+				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
 					t.Fatalf("selectGrantQuery: %v", err)
 				}
 				if !strings.Contains(q.String, tc.wantSelectContains) {
@@ -1374,7 +1374,7 @@ func TestGrantSQL(t *testing.T) {
 
 			if tc.wantRevoke != "" || tc.wantGrant != "" {
 				var ql []xsql.Query
-				if err := createGrantQueries(tc.gp, &ql); err != nil {
+				if err := createGrantQueriesWithVersion(tc.gp, &ql, 0); err != nil {
 					t.Fatalf("createGrantQueries: %v", err)
 				}
 				if len(ql) < 2 {
