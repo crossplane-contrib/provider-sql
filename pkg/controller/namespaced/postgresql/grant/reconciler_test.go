@@ -49,6 +49,7 @@ type mockDB struct {
 	MockScan                 func(ctx context.Context, q xsql.Query, dest ...interface{}) error
 	MockQuery                func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
 	MockGetConnectionDetails func(username, password string) managed.ConnectionDetails
+	MockGetServerVersion     func(ctx context.Context) (int, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -69,6 +70,13 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return m.MockGetConnectionDetails(username, password)
+}
+
+func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	if m.MockGetServerVersion == nil {
+		return 0, nil // Default to version 0 (latest) if not set
+	}
+	return m.MockGetServerVersion(ctx)
 }
 
 func TestConnect(t *testing.T) {
@@ -677,7 +685,11 @@ func TestObserve(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			got, err := e.Observe(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -967,7 +979,11 @@ func TestCreate(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -1267,7 +1283,11 @@ func TestDelete(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			_, err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)

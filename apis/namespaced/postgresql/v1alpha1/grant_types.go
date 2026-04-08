@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"context"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
@@ -199,12 +200,24 @@ var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
 
 // ExpandPrivileges expands any shorthand privileges to their full equivalents.
 func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
+	return gp.ExpandPrivilegesWithVersion(0)
+}
+
+// ExpandPrivilegesWithVersion expands shorthand privileges to their full equivalents,
+// accounting for PostgreSQL version differences. For example, MAINTAIN was introduced in
+// PostgreSQL 17 and should not be included for earlier versions.
+// serverVersion should be in the format returned by current_setting('server_version_num'),
+// e.g. 160200 for PostgreSQL 16.2, 170100 for PostgreSQL 17.1...
+// If serverVersion is 0, it defaults to the latest version (includes all privileges).
+func (gp *GrantParameters) ExpandPrivilegesWithVersion(serverVersion int) GrantPrivileges {
 	gt, err := gp.IdentifyGrantType()
 	if err != nil {
 		return gp.Privileges
 	}
-	gr, ex := grantReplacements[gt]
-	if !ex {
+
+	// Filter replacements based on server version
+	gr := getVersionAwareReplacements(gt, serverVersion)
+	if gr == nil {
 		return gp.Privileges
 	}
 
@@ -227,6 +240,33 @@ func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
 	}
 
 	return privileges
+}
+
+// getVersionAwareReplacements returns privilege replacements filtered by PostgreSQL version.
+func getVersionAwareReplacements(gt GrantType, serverVersion int) map[GrantPrivilege]GrantPrivileges {
+	gr, exists := grantReplacements[gt]
+	if !exists {
+		return nil
+	}
+
+	// Only need to filter for table grants (MAINTAIN was added to table privileges in PG17)
+	if gt != RoleTable || serverVersion == 0 || serverVersion >= 170000 {
+		return gr
+	}
+
+	// For PG < 17, return a filtered copy without MAINTAIN
+	filtered := make(map[GrantPrivilege]GrantPrivileges)
+	for k, v := range gr {
+		filtered[k] = filterOutPrivileges(v, []string{"MAINTAIN"})
+	}
+	return filtered
+}
+
+// filterOutPrivileges removes the specified privileges from a privilege list
+func filterOutPrivileges(privileges GrantPrivileges, toFilter []string) GrantPrivileges {
+	return slices.DeleteFunc(slices.Clone(privileges), func(p GrantPrivilege) bool {
+		return slices.Contains(toFilter, string(p))
+	})
 }
 
 // ToStringSlice converts the slice of privileges to strings

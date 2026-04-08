@@ -119,6 +119,13 @@ func (c mssqlDB) GetConnectionDetails(username, password string) managed.Connect
 	}
 }
 
+// GetServerVersion is not supported by the MSSQL client (only used by PostgreSQL).
+func (c mssqlDB) GetServerVersion(ctx context.Context) (int, error) {
+	// This method should never be called for MSSQL clients
+	// but is implemented to satisfy the xsql.DB interface
+	return 0, nil
+}
+
 // QuoteIdentifier for mssql queries
 func QuoteIdentifier(id string) string {
 	return "[" + id + "]"

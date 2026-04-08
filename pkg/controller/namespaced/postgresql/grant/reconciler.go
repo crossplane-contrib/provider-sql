@@ -117,11 +117,16 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.Exte
 
 	mg.SetConditions(xpv1.Creating())
 
-	if err := createGrantQueries(mg.Spec.ForProvider, &queries); err != nil {
+	serverVersion, err := c.db.GetServerVersion(ctx)
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, "cannot get server version")
+	}
+
+	if err := createGrantQueriesWithVersion(mg.Spec.ForProvider, &queries, serverVersion); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
 
-	err := c.db.ExecTx(ctx, queries)
+	err = c.db.ExecTx(ctx, queries)
 	return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 }
 
@@ -212,6 +217,10 @@ func createForeignServerGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Que
 }
 
 func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { //nolint: gocyclo
+	return createGrantQueriesWithVersion(gp, ql, 0)
+}
+
+func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query, serverVersion int) error { //nolint: gocyclo
 	gt, err := resolveGrantType(gp)
 	if err != nil {
 		return err
@@ -237,7 +246,7 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 	case v1alpha1.RoleSequence:
 		return createSequenceGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleTable:
-		return createTableGrantQueries(gp, ql, ro)
+		return createTableGrantQueriesWithVersion(gp, ql, ro, serverVersion)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -340,12 +349,18 @@ func createSequenceGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, r
 }
 
 func createTableGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	return createTableGrantQueriesWithVersion(gp, ql, ro, 0)
+}
+
+func createTableGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string, serverVersion int) error {
 	if gp.Database == nil || gp.Schema == nil || len(gp.Tables) < 1 || gp.Role == nil || len(gp.Privileges) < 1 {
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
 	}
 
 	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
-	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+	// Use version-aware privilege expansion
+	expandedPrivileges := gp.ExpandPrivilegesWithVersion(serverVersion)
+	sp := strings.Join(expandedPrivileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
@@ -475,7 +490,12 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 	gp := mg.Spec.ForProvider
 	var query xsql.Query
 
-	err := selectGrantQuery(gp, &query)
+	serverVersion, err := c.db.GetServerVersion(ctx)
+	if err != nil {
+		return managed.ExternalObservation{}, errors.Wrap(err, "cannot get server version")
+	}
+
+	err = selectGrantQueryWithVersion(gp, &query, serverVersion)
 
 	if err != nil {
 		return managed.ExternalObservation{}, err
@@ -705,6 +725,10 @@ func selectForeignServerGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) e
 }
 
 func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nolint: gocyclo
+	return selectGrantQueryWithVersion(gp, q, 0)
+}
+
+func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error { // nolint: gocyclo
 	gt, err := resolveGrantType(gp)
 	if err != nil {
 		return err
@@ -728,7 +752,7 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 	case v1alpha1.RoleSequence:
 		return selectSequenceGrantQuery(gp, q)
 	case v1alpha1.RoleTable:
-		return selectTableGrantQuery(gp, q)
+		return selectTableGrantQueryWithVersion(gp, q, serverVersion)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -869,9 +893,13 @@ func selectSequenceGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 }
 
 func selectTableGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	return selectTableGrantQueryWithVersion(gp, q, 0)
+}
+
+func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error {
 	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
 
-	ep := gp.ExpandPrivileges()
+	ep := gp.ExpandPrivilegesWithVersion(serverVersion)
 	sp := ep.ToStringSlice()
 
 	// Join grantee. Filter by schema name, table name and grantee name.
