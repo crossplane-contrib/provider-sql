@@ -341,6 +341,12 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if pwchanged {
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalUpdate{}, err
+			}
+		}
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s PASSWORD %s", crn, pq.QuoteLiteral(pw)),
 		}); err != nil {

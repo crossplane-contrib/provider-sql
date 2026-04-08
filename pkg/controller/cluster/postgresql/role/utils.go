@@ -31,36 +31,59 @@ import (
 )
 
 func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd string, changed bool, err error) {
-	if role.Spec.ForProvider.PasswordSecretRef == nil {
-		return "", false, nil
+	if role.Spec.ForProvider.PasswordSecretRef != nil {
+		nn := types.NamespacedName{
+			Name:      role.Spec.ForProvider.PasswordSecretRef.Name,
+			Namespace: role.Spec.ForProvider.PasswordSecretRef.Namespace,
+		}
+		s := &corev1.Secret{}
+		if err := c.kube.Get(ctx, nn, s); err != nil {
+			return "", false, errors.Wrap(err, errGetPasswordSecretFailed)
+		}
+		newPwd = string(s.Data[role.Spec.ForProvider.PasswordSecretRef.Key])
+
+		if role.Spec.WriteConnectionSecretToReference == nil {
+			return newPwd, false, nil
+		}
+
+		nn = types.NamespacedName{
+			Name:      role.Spec.WriteConnectionSecretToReference.Name,
+			Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
+		}
+		s = &corev1.Secret{}
+		// the output secret may not exist yet, so we can skip returning an
+		// error if the error is NotFound
+		if err := c.kube.Get(ctx, nn, s); resource.IgnoreNotFound(err) != nil {
+			return "", false, err
+		}
+		// if newPwd was set to some value, compare value in output secret with
+		// newPwd
+		changed = newPwd != "" && newPwd != string(s.Data[xpv1.ResourceCredentialsSecretPasswordKey])
+
+		return newPwd, changed, nil
+	}
+
+	changed, err = c.shouldResetPassword(ctx, role)
+	return "", changed, err
+}
+
+// shouldResetPassword returns true if passwordReset=true and the connection secret has no password.
+// This handles the case where the role exists in the DB after restoration from a snapshot
+// but the connection secret is empty. When false, the provider acts as before.
+func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
+	if role.Spec.ForProvider.PasswordReset == nil || !*role.Spec.ForProvider.PasswordReset {
+		return false, nil
+	}
+	if role.Spec.WriteConnectionSecretToReference == nil {
+		return false, nil
 	}
 	nn := types.NamespacedName{
-		Name:      role.Spec.ForProvider.PasswordSecretRef.Name,
-		Namespace: role.Spec.ForProvider.PasswordSecretRef.Namespace,
-	}
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, nn, s); err != nil {
-		return "", false, errors.Wrap(err, errGetPasswordSecretFailed)
-	}
-	newPwd = string(s.Data[role.Spec.ForProvider.PasswordSecretRef.Key])
-
-	if role.Spec.WriteConnectionSecretToReference == nil {
-		return newPwd, false, nil
-	}
-
-	nn = types.NamespacedName{
 		Name:      role.Spec.WriteConnectionSecretToReference.Name,
 		Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
 	}
-	s = &corev1.Secret{}
-	// the output secret may not exist yet, so we can skip returning an
-	// error if the error is NotFound
+	s := &corev1.Secret{}
 	if err := c.kube.Get(ctx, nn, s); resource.IgnoreNotFound(err) != nil {
-		return "", false, err
+		return false, err
 	}
-	// if newPwd was set to some value, compare value in output secret with
-	// newPwd
-	changed = newPwd != "" && newPwd != string(s.Data[xpv1.ResourceCredentialsSecretPasswordKey])
-
-	return newPwd, changed, nil
+	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
 }
