@@ -77,7 +77,7 @@ func (c mssqlDB) ExecTx(_ context.Context, _ []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open(driverName, c.dsn)
+	db, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
