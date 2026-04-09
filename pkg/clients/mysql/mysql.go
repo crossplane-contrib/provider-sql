@@ -75,7 +75,7 @@ func (c mySQLDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mySQLDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
+	db, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
