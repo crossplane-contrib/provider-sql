@@ -36,7 +36,6 @@ func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string)
 		Header: http.Header{},
 	}
 	if err := req.Write(conn); err != nil {
-		conn.Close() //nolint:errcheck
 		return nil, err
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
