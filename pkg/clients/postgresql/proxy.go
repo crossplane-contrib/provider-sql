@@ -25,30 +25,37 @@ func (d *httpProxyDialer) DialTimeout(network, addr string, timeout time.Duratio
 	return tunnel(&net.Dialer{Timeout: timeout}, d.proxy, addr)
 }
 
-func tunnel(nd *net.Dialer, proxy *url.URL, addr string) (net.Conn, error) {
+func tunnel(nd *net.Dialer, proxy *url.URL, addr string) (_ net.Conn, err error) {
 	conn, err := nd.Dial("tcp", proxy.Host)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			closeErr := conn.Close()
+			if closeErr != nil {
+				err = fmt.Errorf("error closing connection (%w) after: %w", closeErr, err)
+			}
+		}
+	}()
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: addr},
 		Host:   addr,
 		Header: http.Header{},
 	}
-	if err := req.Write(conn); err != nil {
-		conn.Close() //nolint:errcheck
+	if err = req.Write(conn); err != nil {
 		return nil, err
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	var resp *http.Response
+	resp, err = http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		conn.Close() //nolint:errcheck
 		return nil, err
 	}
 	resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		conn.Close() //nolint:errcheck
-		return nil, fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
+		err = fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
+		return nil, err
 	}
 	return conn, nil
 }

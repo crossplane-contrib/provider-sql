@@ -16,12 +16,12 @@ type httpProxyDialer struct {
 	proxy *url.URL
 }
 
-func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string) (_ net.Conn, err error) {
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", d.proxy.Host)
 	if err != nil {
 		return nil, err
 	}
-	defer func()
+	defer func() {
 		if err != nil {
 			closeErr := conn.Close()
 			if closeErr != nil {
@@ -35,16 +35,18 @@ func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string)
 		Host:   addr,
 		Header: http.Header{},
 	}
-	if err := req.Write(conn); err != nil {
+	if err = req.Write(conn); err != nil {
 		return nil, err
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	var resp *http.Response
+	resp, err = http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
 		return nil, err
 	}
 	resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
+		err = fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
+		return nil, err
 	}
 	return conn, nil
 }
