@@ -44,7 +44,6 @@ func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string)
 	}
 	resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		conn.Close() //nolint:errcheck
 		return nil, fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
 	}
 	return conn, nil
