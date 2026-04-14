@@ -21,6 +21,14 @@ func (d *httpProxyDialer) DialContext(ctx context.Context, network, addr string)
 	if err != nil {
 		return nil, err
 	}
+	defer func()
+		if err != nil {
+			closeErr := conn.Close()
+			if closeErr != nil {
+				err = fmt.Errorf("error closing connection (%w) after: %w", closeErr, err)
+			}
+		}
+	}()
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: addr},
