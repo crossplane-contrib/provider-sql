@@ -156,6 +156,13 @@ type GrantParameters struct {
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
 	RevokePublicOnDb *bool `json:"revokePublicOnDb,omitempty" default:"false"`
+
+	// WithInherit controls whether the grantee automatically inherits the privileges
+	// of the granted role. When set to false, emits WITH INHERIT FALSE (PostgreSQL 16+),
+	// granting membership without automatic privilege inheritance. Only valid when
+	// memberOf is set. When omitted, PostgreSQL's default behavior (inherit true) applies.
+	// +optional
+	WithInherit *bool `json:"withInherit,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.

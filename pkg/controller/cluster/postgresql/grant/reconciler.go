@@ -60,6 +60,7 @@ const (
 	errInvalidParams = "invalid parameters for grant type %s"
 
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
+	errWithInheritOnlyForMemberOf       = "withInherit is only valid for memberOf grants"
 
 	maxConcurrency = 5
 )
@@ -162,6 +163,10 @@ func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
 		return roleMember, nil
 	}
 
+	if gp.WithInherit != nil {
+		return "", errors.New(errWithInheritOnlyForMemberOf)
+	}
+
 	if gp.Database == nil {
 		return "", errors.New(errNoDatabase)
 	}
@@ -189,16 +194,26 @@ func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		// roleid and member oids to their role names, but
 		// if this is used with a nonexistent role name it will
 		// throw an error rather than return false.
-		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
-			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
-			"INNER JOIN pg_roles r ON m.member = r.oid " +
-			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
-			"m.admin_option = $3)"
-
 		q.Parameters = []interface{}{
 			gp.Role,
 			gp.MemberOf,
 			ao,
+		}
+
+		if gp.WithInherit != nil {
+			// inherit_option is a pg_auth_members column added in PostgreSQL 16.
+			q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
+				"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+				"INNER JOIN pg_roles r ON m.member = r.oid " +
+				"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
+				"m.admin_option = $3 AND m.inherit_option = $4)"
+			q.Parameters = append(q.Parameters, *gp.WithInherit)
+		} else {
+			q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
+				"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+				"INNER JOIN pg_roles r ON m.member = r.oid " +
+				"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
+				"m.admin_option = $3)"
 		}
 		return nil
 	case roleDatabase:
@@ -241,6 +256,27 @@ func withOption(option *v1alpha1.GrantOption) string {
 	return ""
 }
 
+// membershipWithClauses builds the WITH clause for role membership GRANTs,
+// combining the optional ADMIN/SET option and the optional INHERIT flag.
+// On PostgreSQL 16+, multiple options are comma-separated: WITH ADMIN OPTION, INHERIT FALSE.
+func membershipWithClauses(option *v1alpha1.GrantOption, inherit *bool) string {
+	var parts []string
+	if option != nil {
+		parts = append(parts, fmt.Sprintf("%s OPTION", string(*option)))
+	}
+	if inherit != nil {
+		if *inherit {
+			parts = append(parts, "INHERIT TRUE")
+		} else {
+			parts = append(parts, "INHERIT FALSE")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "WITH " + strings.Join(parts, ", ")
+}
+
 func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { // nolint: gocyclo
 	gt, err := identifyGrantType(gp)
 	if err != nil {
@@ -260,7 +296,7 @@ func createGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query) error { /
 		*ql = append(*ql,
 			xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
 			xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
-				withOption(gp.WithOption),
+				membershipWithClauses(gp.WithOption, gp.WithInherit),
 			)},
 		)
 		return nil
