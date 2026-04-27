@@ -63,27 +63,25 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		return newPwd, changed, nil
 	}
 
-	changed, err = c.shouldResetPassword(ctx, role)
-	return "", changed, err
+	return "", c.shouldResetPassword(role), nil
 }
 
-// shouldResetPassword returns true if passwordReset=true and the connection secret has no password.
-// This handles the case where the role exists in the DB after restoration from a snapshot
-// but the connection secret is empty. When false, the provider acts as before.
-func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
+// shouldResetPassword returns true when a password change is needed for the non-BYOP path.
+// PasswordRotationTrigger fires when the trigger time is after LastPasswordChange.
+// PasswordReset fires once when LastPasswordChange is nil (e.g. after a database restore).
+func (c *external) shouldResetPassword(role *v1alpha1.Role) bool {
+	if role.Spec.ForProvider.PasswordSecretRef != nil {
+		return false
+	}
+	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
+		last := role.Status.AtProvider.LastPasswordChange
+		if last == nil {
+			return true
+		}
+		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time)
+	}
 	if role.Spec.ForProvider.PasswordReset == nil || !*role.Spec.ForProvider.PasswordReset {
-		return false, nil
+		return false
 	}
-	if role.Spec.WriteConnectionSecretToReference == nil {
-		return false, nil
-	}
-	nn := types.NamespacedName{
-		Name:      role.Spec.WriteConnectionSecretToReference.Name,
-		Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
-	}
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, nn, s); resource.IgnoreNotFound(err) != nil {
-		return false, err
-	}
-	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
+	return role.Status.AtProvider.LastPasswordChange == nil
 }

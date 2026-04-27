@@ -28,6 +28,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -322,6 +323,9 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 		mg.Status.AtProvider.ConfigurationParameters = mg.Spec.ForProvider.ConfigurationParameters
 	}
 
+	now := metav1.Now()
+	mg.Status.AtProvider.LastPasswordChange = &now
+
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 	}, nil
@@ -352,6 +356,8 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)

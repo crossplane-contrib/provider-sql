@@ -96,10 +96,16 @@ spec:
                     type: integer
                   passwordReset:
                     description: |-
-                      PasswordReset controls behaviour when the role exists in the database but the connection
-                      secret has no password.
+                      PasswordReset controls behavior when the role exists in the database but the connection
+                      secret has no password. Has no effect when passwordSecretRef is set.
                       When true, a new password is generated and written to the connection secret.
                     type: boolean
+                  passwordRotationTrigger:
+                    description: |-
+                      PasswordRotationTrigger triggers rotation of the auto-generated password when set to
+                      a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
+                    format: date-time
+                    type: string
                   passwordSecretRef:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used
@@ -258,6 +264,11 @@ spec:
                           type: string
                       type: object
                     type: array
+                  lastPasswordChange:
+                    description: LastPasswordChange records when the provider last
+                      set the role's password.
+                    format: date-time
+                    type: string
                   privilegesAsClauses:
                     description: |-
                       PrivilegesAsClauses represents the applied privileges state, taking into account

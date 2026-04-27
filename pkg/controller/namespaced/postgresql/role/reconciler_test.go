@@ -1143,8 +1143,8 @@ func TestGetPassword(t *testing.T) {
 			},
 			want: want{pwd: "", changed: false},
 		},
-		"PasswordResetTrueNoConnectionSecretRef": {
-			reason: "passwordReset=true with no WriteConnectionSecretToReference should not trigger a reset",
+		"PasswordResetTrueNoLastPasswordChange": {
+			reason: "passwordReset=true with no LastPasswordChange should trigger a reset",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
@@ -1153,50 +1153,22 @@ func TestGetPassword(t *testing.T) {
 						},
 					},
 				},
-			},
-			want: want{pwd: "", changed: false},
-		},
-		"PasswordResetTrueEmptySecret": {
-			reason: "passwordReset=true with no password in connection secret should trigger a reset",
-			args: args{
-				role: &v1alpha1.Role{
-					Spec: v1alpha1.RoleSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
-								Name: "connection-secret",
-							},
-						},
-						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(true),
-						},
-					},
-				},
-				kube: &test.MockClient{MockGet: test.NewMockGetFn(nil)},
 			},
 			want: want{pwd: "", changed: true},
 		},
-		"PasswordResetTruePasswordExists": {
-			reason: "passwordReset=true with a password already in connection secret should not trigger a reset",
+		"PasswordResetTrueLastPasswordChangeSet": {
+			reason: "passwordReset=true with LastPasswordChange already set should not trigger a reset",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
-								Name: "connection-secret",
-							},
-						},
 						ForProvider: v1alpha1.RoleParameters{
 							PasswordReset: ptr.To(true),
 						},
 					},
-				},
-				kube: &test.MockClient{
-					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
-						s := obj.(*corev1.Secret)
-						s.Data = map[string][]byte{
-							xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
-						}
-						return nil
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
 					},
 				},
 			},
@@ -1248,8 +1220,8 @@ func TestUpdatePasswordReset(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"PasswordResetTrueEmptySecretGeneratesPassword": {
-			reason: "passwordReset=true with no password in connection secret should generate a new password",
+		"PasswordResetTrueNoLastPasswordChangeGeneratesPassword": {
+			reason: "passwordReset=true with no LastPasswordChange should generate a new password",
 			fields: fields{execQuery: new(string)},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -1259,25 +1231,20 @@ func TestUpdatePasswordReset(t *testing.T) {
 						},
 					},
 					Spec: v1alpha1.RoleSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
-								Name: "connection-secret",
-							},
-						},
 						ForProvider: v1alpha1.RoleParameters{
 							PasswordReset: ptr.To(true),
 						},
 					},
 				},
-				kube: &test.MockClient{MockGet: test.NewMockGetFn(nil)},
+				kube: &test.MockClient{},
 			},
 			want: want{
 				err:               nil,
 				passwordGenerated: true,
 			},
 		},
-		"PasswordResetTruePasswordExistsNoReset": {
-			reason: "passwordReset=true with existing password in connection secret should not reset",
+		"PasswordResetTrueLastPasswordChangeSetNoReset": {
+			reason: "passwordReset=true with LastPasswordChange already set should not reset",
 			fields: fields{execQuery: nil},
 			args: args{
 				mg: &v1alpha1.Role{
@@ -1287,25 +1254,17 @@ func TestUpdatePasswordReset(t *testing.T) {
 						},
 					},
 					Spec: v1alpha1.RoleSpec{
-						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
-								Name: "connection-secret",
-							},
-						},
 						ForProvider: v1alpha1.RoleParameters{
 							PasswordReset: ptr.To(true),
 						},
 					},
-				},
-				kube: &test.MockClient{
-					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
-						s := obj.(*corev1.Secret)
-						s.Data = map[string][]byte{
-							xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
-						}
-						return nil
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
 					},
 				},
+				kube: &test.MockClient{},
 			},
 			want: want{
 				err:               nil,

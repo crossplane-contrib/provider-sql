@@ -27,6 +27,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -306,6 +307,9 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 		mg.Status.AtProvider.ConfigurationParameters = mg.Spec.ForProvider.ConfigurationParameters
 	}
 
+	now := metav1.Now()
+	mg.Status.AtProvider.LastPasswordChange = &now
+
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 	}, nil
@@ -336,6 +340,8 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
