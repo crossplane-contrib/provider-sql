@@ -130,10 +130,11 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.User) (managed.Typ
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	userDB := c.newClient(s.Data, ptr.Deref(mg.Spec.ForProvider.Database, ""))
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	userDB := c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))
 	loginDB := userDB
 	if mg.Spec.ForProvider.LoginDatabase != nil {
-		loginDB = c.newClient(s.Data, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
+		loginDB = c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
 	return &external{

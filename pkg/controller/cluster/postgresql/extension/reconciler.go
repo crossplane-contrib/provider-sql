@@ -121,13 +121,15 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Extension) (manage
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+
 	// We do not want to create an extension on the default DB
 	// if the user was expecting a database name to be resolved.
 	if mg.Spec.ForProvider.Database != nil {
-		return &external{db: c.newDB(s.Data, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+		return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
 	}
 
-	return &external{db: c.newDB(s.Data, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode))}, nil
+	return &external{db: c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode))}, nil
 }
 
 type external struct{ db xsql.DB }
