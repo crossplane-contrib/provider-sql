@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
@@ -249,6 +250,11 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.RoleParameters{
 							Privileges:      v1alpha1.RolePrivilege{},
 							ConnectionLimit: nil,
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
 						},
 					},
 				},
@@ -597,6 +603,11 @@ func TestUpdate(t *testing.T) {
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
 						},
 					},
 				},
@@ -1060,51 +1071,83 @@ func TestGetPassword(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"NoSecretRefNoPasswordReset": {
-			reason: "No password secret ref and no passwordReset should return unchanged",
+		"NilLastPasswordChange": {
+			reason: "nil LastPasswordChange should trigger a reset (handles restoration scenario)",
 			args: args{
 				role: &v1alpha1.Role{},
 			},
-			want: want{pwd: "", changed: false},
+			want: want{pwd: "", changed: true},
 		},
-		"PasswordResetFalse": {
-			reason: "passwordReset=false should not trigger a reset",
+		"NilLastPasswordChangeSecretHasPassword": {
+			reason: "nil LastPasswordChange with existing connection secret password should not reset (Create already ran)",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
-						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(false),
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
+								Name:      "test-secret",
+								Namespace: "test-ns",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"LastPasswordChangeSetNoTrigger": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
 						},
 					},
 				},
 			},
 			want: want{pwd: "", changed: false},
 		},
-		"PasswordResetTrueNoLastPasswordChange": {
-			reason: "passwordReset=true with no LastPasswordChange should trigger a reset",
+		"RotationTriggerAfterLastChange": {
+			reason: "PasswordRotationTrigger set after LastPasswordChange should trigger rotation",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(true),
+							PasswordRotationTrigger: &v1.Time{Time: time.Now()},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: time.Now().Add(-time.Hour)},
 						},
 					},
 				},
 			},
 			want: want{pwd: "", changed: true},
 		},
-		"PasswordResetTrueLastPasswordChangeSet": {
-			reason: "passwordReset=true with LastPasswordChange already set should not trigger a reset",
+		"RotationTriggerBeforeLastChange": {
+			reason: "PasswordRotationTrigger set before LastPasswordChange should not trigger rotation",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(true),
+							PasswordRotationTrigger: &v1.Time{Time: time.Now().Add(-2 * time.Hour)},
 						},
 					},
 					Status: v1alpha1.RoleStatus{
 						AtProvider: v1alpha1.RoleObservation{
-							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
+							LastPasswordChange: &v1.Time{Time: time.Now().Add(-time.Hour)},
 						},
 					},
 				},
@@ -1154,19 +1197,14 @@ func TestUpdatePasswordReset(t *testing.T) {
 		args   args
 		want   want
 	}{
-		"PasswordResetTrueNoLastPasswordChangeGeneratesPassword": {
-			reason: "passwordReset=true with no LastPasswordChange should generate a new password",
+		"NilLastPasswordChangeGeneratesPassword": {
+			reason: "nil LastPasswordChange should generate a new password (restoration scenario)",
 			fields: fields{execQuery: new(string)},
 			args: args{
 				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
-						},
-					},
-					Spec: v1alpha1.RoleSpec{
-						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(true),
 						},
 					},
 				},
@@ -1177,47 +1215,19 @@ func TestUpdatePasswordReset(t *testing.T) {
 				passwordGenerated: true,
 			},
 		},
-		"PasswordResetTrueLastPasswordChangeSetNoReset": {
-			reason: "passwordReset=true with LastPasswordChange already set should not reset",
+		"LastPasswordChangeSetNoReset": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
 			fields: fields{execQuery: nil},
 			args: args{
 				mg: &v1alpha1.Role{
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
-						},
-					},
-					Spec: v1alpha1.RoleSpec{
-						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(true),
 						},
 					},
 					Status: v1alpha1.RoleStatus{
 						AtProvider: v1alpha1.RoleObservation{
 							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
-						},
-					},
-				},
-				kube: &test.MockClient{},
-			},
-			want: want{
-				err:               nil,
-				passwordGenerated: false,
-			},
-		},
-		"PasswordResetFalseNoReset": {
-			reason: "passwordReset=false should not trigger any database call",
-			fields: fields{execQuery: nil},
-			args: args{
-				mg: &v1alpha1.Role{
-					ObjectMeta: v1.ObjectMeta{
-						Annotations: map[string]string{
-							meta.AnnotationKeyExternalName: "example",
-						},
-					},
-					Spec: v1alpha1.RoleSpec{
-						ForProvider: v1alpha1.RoleParameters{
-							PasswordReset: ptr.To(false),
 						},
 					},
 				},

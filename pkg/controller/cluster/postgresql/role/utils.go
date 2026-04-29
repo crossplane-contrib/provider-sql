@@ -63,25 +63,36 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		return newPwd, changed, nil
 	}
 
-	return "", c.shouldResetPassword(role), nil
+	return "", c.shouldResetPassword(ctx, role), nil
 }
 
 // shouldResetPassword returns true when a password change is needed for the non-BYOP path.
-// PasswordRotationTrigger fires when the trigger time is after LastPasswordChange.
-// PasswordReset fires once when LastPasswordChange is nil (e.g. after a database restore).
-func (c *external) shouldResetPassword(role *v1alpha1.Role) bool {
-	if role.Spec.ForProvider.PasswordSecretRef != nil {
-		return false
-	}
-	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-		last := role.Status.AtProvider.LastPasswordChange
-		if last == nil {
+// When LastPasswordChange is nil: checks the connection secret — if it already has a
+// password, no reset is needed; if the secret is
+// absent or empty, a role restoration is assumed and a reset is triggered.
+// Also returns true when PasswordRotationTrigger is set to a time after LastPasswordChange.
+func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) bool {
+	last := role.Status.AtProvider.LastPasswordChange
+	if last == nil {
+		if role.Spec.ForProvider.PasswordRotationTrigger != nil {
 			return true
 		}
+		if role.Spec.WriteConnectionSecretToReference != nil {
+			nn := types.NamespacedName{
+				Name:      role.Spec.WriteConnectionSecretToReference.Name,
+				Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
+			}
+			s := &corev1.Secret{}
+			if err := c.kube.Get(ctx, nn, s); err == nil {
+				if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
 		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time)
 	}
-	if role.Spec.ForProvider.PasswordReset == nil || !*role.Spec.ForProvider.PasswordReset {
-		return false
-	}
-	return role.Status.AtProvider.LastPasswordChange == nil
+	return false
 }

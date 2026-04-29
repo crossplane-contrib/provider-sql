@@ -307,9 +307,6 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 		mg.Status.AtProvider.ConfigurationParameters = mg.Spec.ForProvider.ConfigurationParameters
 	}
 
-	now := metav1.Now()
-	mg.Status.AtProvider.LastPasswordChange = &now
-
 	return managed.ExternalCreation{
 		ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 	}, nil

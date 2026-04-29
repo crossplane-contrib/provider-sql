@@ -949,11 +949,6 @@ func (in *RoleParameters) DeepCopyInto(out *RoleParameters) {
 			copy(*out, *in)
 		}
 	}
-	if in.PasswordReset != nil {
-		in, out := &in.PasswordReset, &out.PasswordReset
-		*out = new(bool)
-		**out = **in
-	}
 	if in.PasswordRotationTrigger != nil {
 		in, out := &in.PasswordRotationTrigger, &out.PasswordRotationTrigger
 		*out = (*in).DeepCopy()

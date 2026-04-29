@@ -91,12 +91,6 @@ type RoleParameters struct {
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 
-	// PasswordReset controls behavior when the role exists in the database but the connection
-	// secret has no password. Has no effect when passwordSecretRef is set.
-	// When true, a new password is generated and written to the connection secret.
-	// +optional
-	PasswordReset *bool `json:"passwordReset,omitempty"`
-
 	// PasswordRotationTrigger triggers rotation of the auto-generated password when set to
 	// a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
 	// +optional
