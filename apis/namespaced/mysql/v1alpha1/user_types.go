@@ -38,9 +38,28 @@ type UserStatus struct {
 // UserParameters define the desired state of a MySQL user instance.
 type UserParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
-	// for this user. If no reference is given, a password will be auto-generated.
+	// for this user. If no reference is given and AuthenticationPlugin is
+	// unset, a password will be auto-generated.
+	// Ignored when AuthenticationPlugin is set.
 	// +optional
 	PasswordSecretRef *xpv1.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
+
+	// AuthenticationPlugin selects a non-default MySQL authentication plugin
+	// for the user. When set, the user is created with
+	// CREATE USER ... IDENTIFIED WITH <plugin> [AS '<authString>'] and no
+	// password is generated or required.
+	//
+	// Most commonly used for AWS RDS IAM authentication, where the DB user
+	// has no static password and clients authenticate via short-lived IAM
+	// auth tokens. Example:
+	//   authenticationPlugin:
+	//     name: AWSAuthenticationPlugin
+	//     authString: RDS
+	//
+	// When AuthenticationPlugin is set, PasswordSecretRef is ignored and
+	// the connection secret will not contain a password.
+	// +optional
+	AuthenticationPlugin *AuthenticationPlugin `json:"authenticationPlugin,omitempty"`
 
 	// ResourceOptions sets account specific resource limits.
 	// See https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
@@ -50,6 +69,20 @@ type UserParameters struct {
 	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"binlog,omitempty"`
+}
+
+// AuthenticationPlugin selects the auth plugin used when creating the user.
+type AuthenticationPlugin struct {
+	// Name is the auth plugin name. Examples: "AWSAuthenticationPlugin",
+	// "mysql_native_password", "caching_sha2_password", "auth_socket".
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// AuthString is the optional auth string passed to the plugin via the
+	// AS clause. For AWSAuthenticationPlugin set this to "RDS". For native
+	// password plugins, leave empty and use PasswordSecretRef instead.
+	// +optional
+	AuthString *string `json:"authString,omitempty"`
 }
 
 // ResourceOptions define the account specific resource limits.

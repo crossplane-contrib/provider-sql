@@ -229,9 +229,15 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	_, pwdChanged, err := c.getPassword(ctx, mg)
-	if err != nil {
-		return managed.ExternalObservation{}, err
+	// When the user is configured with a non-default auth plugin (e.g., AWS
+	// IAM auth), there is no password to compare. Skip the password drift
+	// check so the resource doesn't churn on every reconcile.
+	pwdChanged := false
+	if mg.Spec.ForProvider.AuthenticationPlugin == nil {
+		_, pwdChanged, err = c.getPassword(ctx, mg)
+		if err != nil {
+			return managed.ExternalObservation{}, err
+		}
 	}
 
 	mg.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
@@ -248,6 +254,23 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 	mg.SetConditions(xpv1.Creating())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
+	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
+
+	// When AuthenticationPlugin is set, the user has no password — skip
+	// password generation, emit IDENTIFIED WITH ..., and return connection
+	// details without a password.
+	if ap := mg.Spec.ForProvider.AuthenticationPlugin; ap != nil {
+		if err := c.executeCreateUserWithPluginQuery(ctx, username, host, ro, ap); err != nil {
+			return managed.ExternalCreation{}, err
+		}
+		if len(ro) != 0 {
+			mg.Status.AtProvider.ResourceOptionsAsClauses = ro
+		}
+		return managed.ExternalCreation{
+			ConnectionDetails: c.db.GetConnectionDetails(username, ""),
+		}, nil
+	}
+
 	pw, _, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -260,7 +283,6 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 		}
 	}
 
-	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
 	if err := c.executeCreateUserQuery(ctx, username, host, ro, pw); err != nil {
 		return managed.ExternalCreation{}, err
 	}
@@ -285,6 +307,38 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 		mysql.QuoteValue(username),
 		mysql.QuoteValue(host),
 		mysql.QuoteValue(pw),
+		resourceOptions,
+	)
+
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errCreateUser}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// executeCreateUserWithPluginQuery emits CREATE USER ... IDENTIFIED WITH
+// <plugin> [AS '<authString>'] [WITH <resourceOptions>]. The plugin name is
+// not value-quoted because MySQL parses it as an identifier; QuoteIdentifier
+// (backticks) is used to guard against injection in the plugin name. The
+// auth string is value-quoted as a regular string.
+func (c *external) executeCreateUserWithPluginQuery(ctx context.Context, username string, host string, resourceOptionsClauses []string, ap *v1alpha1.AuthenticationPlugin) error {
+	resourceOptions := ""
+	if len(resourceOptionsClauses) != 0 {
+		resourceOptions = fmt.Sprintf(" WITH %s", strings.Join(resourceOptionsClauses, " "))
+	}
+
+	authString := ""
+	if ap.AuthString != nil && *ap.AuthString != "" {
+		authString = fmt.Sprintf(" AS %s", mysql.QuoteValue(*ap.AuthString))
+	}
+
+	query := fmt.Sprintf(
+		"CREATE USER %s@%s IDENTIFIED WITH %s%s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		mysql.QuoteIdentifier(ap.Name),
+		authString,
 		resourceOptions,
 	)
 
@@ -333,6 +387,13 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 }
 
 func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, username, host string) (managed.ConnectionDetails, error) {
+	// Users authenticated via a non-default plugin (e.g., AWS IAM auth)
+	// have no static password to manage. Skip the ALTER USER call so the
+	// provider doesn't downgrade the user back to native password auth.
+	if cr.Spec.ForProvider.AuthenticationPlugin != nil {
+		return managed.ConnectionDetails{}, nil
+	}
+
 	pw, pwchanged, err := c.getPassword(ctx, cr)
 	if err != nil {
 		return managed.ConnectionDetails{}, err
