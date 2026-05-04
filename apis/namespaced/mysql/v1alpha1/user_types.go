@@ -36,11 +36,11 @@ type UserStatus struct {
 }
 
 // UserParameters define the desired state of a MySQL user instance.
+// +kubebuilder:validation:XValidation:rule="!(has(self.authenticationPlugin) && has(self.passwordSecretRef))",message="authenticationPlugin and passwordSecretRef are mutually exclusive"
 type UserParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
-	// for this user. If no reference is given and AuthenticationPlugin is
-	// unset, a password will be auto-generated.
-	// Ignored when AuthenticationPlugin is set.
+	// for this user. If no reference is given, a password will be auto-generated.
+	// Cannot be set together with AuthenticationPlugin.
 	// +optional
 	PasswordSecretRef *xpv1.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 
@@ -56,8 +56,8 @@ type UserParameters struct {
 	//     name: AWSAuthenticationPlugin
 	//     authString: RDS
 	//
-	// When AuthenticationPlugin is set, PasswordSecretRef is ignored and
-	// the connection secret will not contain a password.
+	// When AuthenticationPlugin is set, PasswordSecretRef must not be set
+	// and the connection secret will not contain a password.
 	// +optional
 	AuthenticationPlugin *AuthenticationPlugin `json:"authenticationPlugin,omitempty"`
 

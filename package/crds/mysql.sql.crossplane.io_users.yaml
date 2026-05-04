@@ -85,8 +85,8 @@ spec:
                           name: AWSAuthenticationPlugin
                           authString: RDS
 
-                      When AuthenticationPlugin is set, PasswordSecretRef is ignored and
-                      the connection secret will not contain a password.
+                      When AuthenticationPlugin is set, PasswordSecretRef must not be set
+                      and the connection secret will not contain a password.
                     properties:
                       authString:
                         description: |-
@@ -111,9 +111,8 @@ spec:
                   passwordSecretRef:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used
-                      for this user. If no reference is given and AuthenticationPlugin is
-                      unset, a password will be auto-generated.
-                      Ignored when AuthenticationPlugin is set.
+                      for this user. If no reference is given, a password will be auto-generated.
+                      Cannot be set together with AuthenticationPlugin.
                     properties:
                       key:
                         description: The key to select.
@@ -152,6 +151,10 @@ spec:
                         type: integer
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: authenticationPlugin and passwordSecretRef are mutually
+                    exclusive
+                  rule: '!(has(self.authenticationPlugin) && has(self.passwordSecretRef))'
               managementPolicies:
                 default:
                 - '*'
