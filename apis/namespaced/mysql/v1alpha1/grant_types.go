@@ -31,7 +31,7 @@ type GrantSpec struct {
 }
 
 // GrantPrivilege represents a privilege to be granted
-// +kubebuilder:validation:Pattern:="^([A-Z_ ]+|[A-Z_ ]+ [(]`[^`]+`(, `[^`]+`)*[)])$"
+// +kubebuilder:validation:Pattern:="^([A-Z0-9_ ]+|[A-Z_ ]+ [(]`[^`]+`(, `[^`]+`)*[)])$"
 type GrantPrivilege string
 
 // If Privileges are specified, we should have at least one
