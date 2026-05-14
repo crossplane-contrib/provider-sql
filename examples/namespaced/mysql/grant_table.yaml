@@ -9,7 +9,7 @@ spec:
       - DROP
       - INSERT
       - SELECT
-      - UPDATE (status, updated_at)
+      - UPDATE (`status`, `updated_at`)
     table: example-table
     userRef:
       name: example-user
