@@ -8,6 +8,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -16,7 +17,7 @@ import (
 const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
-	pqInvalidCatalog = pq.ErrorCode("3D000")
+	pqInvalidCatalog = pqerror.Code("3D000")
 )
 
 type postgresDB struct {
