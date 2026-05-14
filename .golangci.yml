@@ -142,6 +142,22 @@ linters:
         linters:
           - staticcheck
 
+      # mgr.GetEventRecorderFor is deprecated at controller-runtime
+      # in favor of mgr.GetEventRecorder. Suppress until crossplane-runtime
+      # adapts event.NewAPIRecorder to accept the new events.EventRecorder type.
+      - path: pkg/controller/
+        text: "SA1019:.*GetEventRecorderFor is deprecated"
+        linters:
+          - staticcheck
+
+      # resource.LegacyManaged is deprecated in favor of ModernManaged for new
+      # namespace-scoped MRs. Cluster-scoped MRs (apis/cluster, pkg/controller/cluster)
+      # must keep the legacy contract for backward compatibility with existing CRDs.
+      - path: pkg/controller/cluster/
+        text: "SA1019:.*LegacyManaged is deprecated"
+        linters:
+          - staticcheck
+
       - text: "k8s.io/api/core/v1"
         linters:
           - goimports
