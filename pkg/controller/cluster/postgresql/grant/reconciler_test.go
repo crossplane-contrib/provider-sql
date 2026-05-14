@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
@@ -367,6 +368,112 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessRoleMembershipWithInheritNil": {
+			reason: "WithInherit nil should produce a 3-parameter query (no inherit_option filter)",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 3 {
+							return fmt.Errorf("expected 3 query parameters, got %d", len(q.Parameters))
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:     ptr.To("testrole"),
+							MemberOf: ptr.To("parentrole"),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleMembershipWithInheritFalse": {
+			reason: "WithInherit false should produce a 4-parameter query with $4 == false",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 4 {
+							return fmt.Errorf("expected 4 query parameters, got %d", len(q.Parameters))
+						}
+						inheritParam, ok := q.Parameters[3].(bool)
+						if !ok || inheritParam != false {
+							return fmt.Errorf("expected $4 to be false, got %v", q.Parameters[3])
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleMembershipWithInheritTrue": {
+			reason: "WithInherit true should produce a 4-parameter query with $4 == true",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 4 {
+							return fmt.Errorf("expected 4 query parameters, got %d", len(q.Parameters))
+						}
+						inheritParam, ok := q.Parameters[3].(bool)
+						if !ok || inheritParam != true {
+							return fmt.Errorf("expected $4 to be true, got %v", q.Parameters[3])
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(true),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -385,6 +492,7 @@ func TestObserve(t *testing.T) {
 
 func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
+	goa := v1alpha1.GrantOptionAdmin
 
 	type fields struct {
 		db xsql.DB
@@ -442,6 +550,99 @@ func TestCreate(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleMembershipWithInheritNil": {
+			reason: "WithInherit nil should produce a GRANT with no WITH clause",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if strings.Contains(grantSQL, "INHERIT") {
+							return fmt.Errorf("expected no INHERIT clause, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:     ptr.To("testrole"),
+							MemberOf: ptr.To("parentrole"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleMembershipWithInheritFalse": {
+			reason: "WithInherit false should produce a GRANT with WITH INHERIT FALSE",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if !strings.Contains(grantSQL, "WITH INHERIT FALSE") {
+							return fmt.Errorf("expected WITH INHERIT FALSE in grant SQL, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleMembershipWithInheritFalseAndAdminOption": {
+			reason: "WithInherit false and WithOption ADMIN should produce WITH ADMIN OPTION, INHERIT FALSE",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if !strings.Contains(grantSQL, "WITH ADMIN OPTION, INHERIT FALSE") {
+							return fmt.Errorf("expected WITH ADMIN OPTION, INHERIT FALSE in grant SQL, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithOption:  &goa,
+							WithInherit: ptr.To(false),
 						},
 					},
 				},

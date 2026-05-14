@@ -1,0 +1,25 @@
+# Demonstrates WITH INHERIT FALSE on a role membership grant (PostgreSQL 16+).
+#
+# Use case: RDS IAM database authentication with a shared admin role.
+#
+# 1. An "admin" role holds rds_iam membership so that migration tools
+#    (Flyway, Liquibase, Atlas) can authenticate via IAM tokens.
+# 2. The RDS master user needs membership in "admin" in order to run
+#    ALTER DEFAULT PRIVILEGES FOR ROLE admin — but must NOT inherit
+#    the rds_iam privilege, which would break its password authentication.
+#
+# GRANT admin TO master_user WITH INHERIT FALSE satisfies both requirements:
+# the master user can SET ROLE admin (for ALTER DEFAULT PRIVILEGES) while
+# retaining its own password-based login.
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: grant-master-user-membership-no-inherit
+spec:
+  forProvider:
+    withInherit: false
+    roleRef:
+      name: master-user
+    memberOfRef:
+      name: admin-role
