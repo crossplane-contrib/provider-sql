@@ -57,6 +57,38 @@ spec:
                 description: UserParameters define the desired state of a MySQL user
                   instance.
                 properties:
+                  authenticationPlugin:
+                    description: |-
+                      AuthenticationPlugin selects a non-default MySQL authentication plugin
+                      for the user. When set, the user is created with
+                      CREATE USER ... IDENTIFIED WITH <plugin> [AS '<authString>'] and no
+                      password is generated or required.
+
+                      Most commonly used for AWS RDS IAM authentication, where the DB user
+                      has no static password and clients authenticate via short-lived IAM
+                      auth tokens. Example:
+                        authenticationPlugin:
+                          name: AWSAuthenticationPlugin
+                          authString: RDS
+
+                      When AuthenticationPlugin is set, PasswordSecretRef must not be set
+                      and the connection secret will not contain a password.
+                    properties:
+                      authString:
+                        description: |-
+                          AuthString is the optional auth string passed to the plugin via the
+                          AS clause. For AWSAuthenticationPlugin set this to "RDS". For native
+                          password plugins, leave empty and use PasswordSecretRef instead.
+                        type: string
+                      name:
+                        description: |-
+                          Name is the auth plugin name. Examples: "AWSAuthenticationPlugin",
+                          "mysql_native_password", "caching_sha2_password", "auth_socket".
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   binlog:
                     description: BinLog defines whether the create, delete, update
                       operations of this user are propagated to replicas. Defaults
@@ -66,6 +98,7 @@ spec:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used
                       for this user. If no reference is given, a password will be auto-generated.
+                      Cannot be set together with AuthenticationPlugin.
                     properties:
                       key:
                         type: string
@@ -99,6 +132,10 @@ spec:
                         type: integer
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: authenticationPlugin and passwordSecretRef are mutually
+                    exclusive
+                  rule: '!(has(self.authenticationPlugin) && has(self.passwordSecretRef))'
               managementPolicies:
                 default:
                 - '*'
