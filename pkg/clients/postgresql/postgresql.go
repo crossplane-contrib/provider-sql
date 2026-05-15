@@ -8,6 +8,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -16,7 +17,7 @@ import (
 const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
-	pqInvalidCatalog = pq.ErrorCode("3D000")
+	pqInvalidCatalog = pqerror.Code("3D000")
 )
 
 type postgresDB struct {
@@ -136,6 +137,20 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
 	}
+}
+
+// GetServerVersion returns the PostgreSQL server version as an integer
+// For example, PostgreSQL 16.2 would return 160200.
+func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
+	db, err := sql.Open("postgres", c.dsn)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close() //nolint:errcheck
+
+	var version int
+	err = db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version)
+	return version, err
 }
 
 // IsInvalidCatalog returns true if passed a pq error indicating
