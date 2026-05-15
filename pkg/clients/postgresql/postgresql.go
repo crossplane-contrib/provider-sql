@@ -64,7 +64,7 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 // ExecTx executes an array of queries, committing if all are successful and
 // rolling back immediately on failure.
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) 
 
 // Scan the results of the supplied query into the supplied destination.
 func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("postgres", c.dsn)
+	db, err := openDB(c.endpoint, c.port, c.dsn)
 	if err != nil {
 		return err
 	}
