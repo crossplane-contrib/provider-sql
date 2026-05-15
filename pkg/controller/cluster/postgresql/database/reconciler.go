@@ -53,6 +53,7 @@ const (
 	errGetSecret    = "cannot get credentials Secret"
 
 	errSelectDB          = "cannot select database"
+	errSelectServerVer   = "cannot determine PostgreSQL server version"
 	errCreateDB          = "cannot create database"
 	errAlterDBOwner      = "cannot alter database owner"
 	errAlterDBConnLimit  = "cannot alter database connection limit"
@@ -60,7 +61,8 @@ const (
 	errAlterDBIsTmpl     = "cannot alter database is template"
 	errDropDB            = "cannot drop database"
 
-	maxConcurrency = 5
+	maxConcurrency                   = 5
+	minDatabaseStrategyServerVersion = 150000
 )
 
 // Setup adds a controller that reconciles Database managed resources.
@@ -195,6 +197,11 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Database) (managed.
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalCreation, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
+	if mg.Spec.ForProvider.Strategy != nil {
+		if err := c.ensureDatabaseStrategySupport(ctx); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+		}
+	}
 
 	var b strings.Builder
 	b.WriteString("CREATE DATABASE ")
@@ -207,6 +214,10 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Database) (managed.E
 	if mg.Spec.ForProvider.Template != nil {
 		b.WriteString(" TEMPLATE ")
 		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Template))
+	}
+	if mg.Spec.ForProvider.Strategy != nil {
+		b.WriteString(" STRATEGY ")
+		b.WriteString(string(*mg.Spec.ForProvider.Strategy))
 	}
 	if mg.Spec.ForProvider.Encoding != nil {
 		b.WriteString(" ENCODING ")
@@ -235,6 +246,18 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Database) (managed.E
 	}
 
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateDB)
+}
+
+func (c *external) ensureDatabaseStrategySupport(ctx context.Context) error {
+	var serverVersion int
+	err := c.db.Scan(ctx, xsql.Query{String: "SELECT current_setting('server_version_num')::integer"}, &serverVersion)
+	if err != nil {
+		return errors.Wrap(err, errSelectServerVer)
+	}
+	if serverVersion < minDatabaseStrategyServerVersion {
+		return errors.Errorf("database strategy requires PostgreSQL 15+; found server_version_num=%d", serverVersion)
+	}
+	return nil
 }
 
 func (c *external) Update(ctx context.Context, mg *v1alpha1.Database) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -290,8 +313,8 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.Database) (managed.E
 }
 
 func upToDate(observed, desired v1alpha1.DatabaseParameters) bool {
-	// Template is only used at create time.
-	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(v1alpha1.DatabaseParameters{}, "Template"))
+	// Template and strategy are only used at create time.
+	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(v1alpha1.DatabaseParameters{}, "Template", "Strategy"))
 }
 
 func lateInit(observed v1alpha1.DatabaseParameters, desired *v1alpha1.DatabaseParameters) bool {
