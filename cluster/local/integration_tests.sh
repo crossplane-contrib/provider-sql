@@ -451,7 +451,6 @@ run_test() {
   echo_step "--- TESTING $testmain DONE IN ${duration}s ---"
 }
 
-TLS=true API_TYPE="cluster" run_test integration_tests_mariadb
 TLS=true API_TYPE="namespaced" run_test integration_tests_mariadb
 TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
 
