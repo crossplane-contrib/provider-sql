@@ -44,11 +44,12 @@ import (
 )
 
 type mockDB struct {
-	database   string
-	MockExec   func(ctx context.Context, q xsql.Query) error
-	MockExecTx func(ctx context.Context, ql []xsql.Query) error
-	MockScan   func(ctx context.Context, q xsql.Query, dest ...interface{}) error
-	MockQuery  func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
+	database             string
+	MockExec             func(ctx context.Context, q xsql.Query) error
+	MockExecTx           func(ctx context.Context, ql []xsql.Query) error
+	MockScan             func(ctx context.Context, q xsql.Query, dest ...interface{}) error
+	MockQuery            func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
+	MockGetServerVersion func(ctx context.Context) (int, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -70,6 +71,9 @@ func (m mockDB) GetConnectionDetails(username, password string) managed.Connecti
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
 	}
+}
+func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	return m.MockGetServerVersion(ctx)
 }
 
 func mockRowsToSQLRows(mockRows *sqlmock.Rows) *sql.Rows {
