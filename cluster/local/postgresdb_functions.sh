@@ -17,7 +17,7 @@ setup_postgresdb_no_tls() {
   echo_step "Waiting for PostgreSQL to be ready"
   "${KUBECTL}" rollout status statefulset/postgresdb-postgresql --timeout=120s
 
-  "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 | grep -v "Handling connection for" &
+  "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 > >(grep -v "Handling connection for") 2>&1 &
   PORT_FORWARD_PID=$!
 
   while ! PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT 1;"; do

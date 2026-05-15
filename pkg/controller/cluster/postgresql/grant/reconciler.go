@@ -59,6 +59,7 @@ const (
 
 	errUnsupportedGrant                 = "grant type not supported: %s"
 	errInvalidParams                    = "invalid parameters for grant type %s"
+	errGetServerVersion                 = "cannot get server version"
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
 
 	maxConcurrency = 5
@@ -71,8 +72,9 @@ type connector struct {
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	db            xsql.DB
+	kube          client.Client
+	serverVersion int
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
@@ -115,9 +117,17 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	if db == "" {
 		db = pc.Spec.DefaultDatabase
 	}
+	xdb := c.newDB(s.Data, db, clients.ToString(pc.Spec.SSLMode))
+
+	serverVersion, err := xdb.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
 	return &external{
-		db:   c.newDB(s.Data, db, clients.ToString(pc.Spec.SSLMode)),
-		kube: c.kube,
+		db:            xdb,
+		kube:          c.kube,
+		serverVersion: serverVersion,
 	}, nil
 }
 
@@ -130,12 +140,7 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.Exte
 
 	mg.SetConditions(xpv1.Creating())
 
-	serverVersion, err := c.db.GetServerVersion(ctx)
-	if err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, "cannot get server version")
-	}
-
-	if err := createGrantQueriesWithVersion(mg.Spec.ForProvider, &queries, serverVersion); err != nil {
+	if err := createGrantQueriesWithVersion(mg.Spec.ForProvider, &queries, c.serverVersion); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
 	}
 	return managed.ExternalCreation{}, errors.Wrap(c.db.ExecTx(ctx, queries), errCreateGrant)
@@ -522,14 +527,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 	gp := mg.Spec.ForProvider
 	var query xsql.Query
 
-	serverVersion, err := c.db.GetServerVersion(ctx)
-	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, "cannot get server version")
-	}
-
-	err = selectGrantQueryWithVersion(gp, &query, serverVersion)
-
-	if err != nil {
+	if err := selectGrantQueryWithVersion(gp, &query, c.serverVersion); err != nil {
 		return managed.ExternalObservation{}, err
 	}
 
