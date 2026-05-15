@@ -117,7 +117,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	if db == "" {
 		db = pc.Spec.DefaultDatabase
 	}
-	xdb := c.newDB(s.Data, db, clients.ToString(pc.Spec.SSLMode))
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	xdb := c.newDB(secretData, db, clients.ToString(pc.Spec.SSLMode))
 
 	serverVersion, err := xdb.GetServerVersion(ctx)
 	if err != nil {
@@ -989,142 +990,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
-type connector struct {
-	kube  client.Client
-	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
-}
-
-var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
-
-func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.TypedExternalClient[*v1alpha1.Grant], error) {
-	if err := c.track(ctx, mg); err != nil {
-		return nil, errors.Wrap(err, errTrackPCUsage)
-	}
-
-	// ProviderConfigReference could theoretically be nil, but in practice the
-	// DefaultProviderConfig initializer will set it before we get here.
-	pc := &v1alpha1.ProviderConfig{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Name: mg.GetProviderConfigReference().Name}, pc); err != nil {
-		return nil, errors.Wrap(err, errGetPC)
-	}
-
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
-	ref := pc.Spec.Credentials.ConnectionSecretRef
-	if ref == nil {
-		return nil, errors.New(errNoSecretRef)
-	}
-
-	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, s); err != nil {
-		return nil, errors.Wrap(err, errGetSecret)
-	}
-	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{
-		db:   c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
-		kube: c.kube,
-	}, nil
-}
-
-type external struct {
-	db   xsql.DB
-	kube client.Client
-}
-
-var _ managed.TypedExternalClient[*v1alpha1.Grant] = &external{}
-
-type grantType string
-
-const (
-	roleMember   grantType = "ROLE_MEMBER"
-	roleDatabase grantType = "ROLE_DATABASE"
-)
-
-func identifyGrantType(gp v1alpha1.GrantParameters) (grantType, error) {
-	pc := len(gp.Privileges)
-
-	// If memberOf is specified, this is ROLE_MEMBER
-	// NOTE: If any of these are set, even if the lookup by ref or selector fails,
-	// then this is still a roleMember grant type.
-	if gp.MemberOfRef != nil || gp.MemberOfSelector != nil || gp.MemberOf != nil {
-		if gp.Database != nil || pc > 0 {
-			return "", errors.New(errMemberOfWithDatabaseOrPrivileges)
-		}
-		return roleMember, nil
-	}
-
-	if gp.Database == nil {
-		return "", errors.New(errNoDatabase)
-	}
-
-	if pc < 1 {
-		return "", errors.New(errNoPrivileges)
-	}
-
-	// This is ROLE_DATABASE
-	return roleDatabase, nil
-}
-
-func selectGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
-	gt, err := identifyGrantType(gp)
-	if err != nil {
-		return err
-	}
-
-	switch gt {
-	case roleMember:
-		ao := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionAdmin
-
-		// Always returns a row with a true or false value
-		// A simpler query would use ::regrol to cast the
-		// roleid and member oids to their role names, but
-		// if this is used with a nonexistent role name it will
-		// throw an error rather than return false.
-		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
-			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
-			"INNER JOIN pg_roles r ON m.member = r.oid " +
-			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
-			"m.admin_option = $3)"
-
-		q.Parameters = []interface{}{
-			gp.Role,
-			gp.MemberOf,
-			ao,
-		}
-		return nil
-	case roleDatabase:
-		gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
-		ep := gp.Privileges.ExpandPrivileges()
-		sp := ep.ToStringSlice()
-		// Join grantee. Filter by database name and grantee name.
-		// Finally, perform a permission comparison against expected
-		// permissions.
-		q.String = "SELECT EXISTS(SELECT 1 " +
-			"FROM pg_database db, " +
-			"aclexplode(datacl) as acl " +
-			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-			// Filter by database, role and grantable setting
-			"WHERE db.datname=$1 " +
-			"AND s.rolname=$2 " +
-			"AND acl.is_grantable=$3 " +
-			"GROUP BY db.datname, s.rolname, acl.is_grantable " +
-			// Check privileges match. Convoluted right-hand-side is necessary to
-			// ensure identical sort order of the input permissions.
-			"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-			"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
-
-		q.Parameters = []interface{}{
-			gp.Database,
-			gp.Role,
-			gro,
-			pq.Array(sp),
-		}
-		return nil
-	}
-	return errors.New(errUnknownGrant)
+func (c *external) Update(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalUpdate, error) {
+	// Update is a no-op, as permissions are fully revoked and then granted in the Create function,
+	// inside a transaction.
+	return managed.ExternalUpdate{}, nil
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
