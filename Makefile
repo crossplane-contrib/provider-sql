@@ -86,6 +86,7 @@ e2e.run: test-integration
 
 CROSSPLANE_HELM_CHANNEL ?= stable
 CROSSPLANE_HELM_CHART_VERSION ?=
+POSTGRES_VERSION ?= 18
 
 # Run integration tests.
 test-integration: $(KIND) $(KUBECTL) $(CROSSPLANE_CLI) $(HELM)
@@ -93,6 +94,7 @@ test-integration: $(KIND) $(KUBECTL) $(CROSSPLANE_CLI) $(HELM)
 	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} \
 	  CROSSPLANE_HELM_CHANNEL=${CROSSPLANE_HELM_CHANNEL} \
 	  CROSSPLANE_HELM_CHART_VERSION=${CROSSPLANE_HELM_CHART_VERSION} \
+	  POSTGRES_VERSION=${POSTGRES_VERSION} \
 	  $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
 	@$(OK) integration tests passed
 
