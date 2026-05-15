@@ -33,13 +33,13 @@ setup_provider_config_postgres_no_tls() {
 
 create_grantable_objects() {
   TARGET_DB='db1'
-  TARGE_SCHEMA='public'
+  TARGET_SCHEMA='public'
   request="
-  CREATE TABLE \"$TARGE_SCHEMA\".test_table(col1 INT NULL);
-  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence_1 START WITH 1000 INCREMENT BY 1;
-  CREATE SEQUENCE \"$TARGE_SCHEMA\".test_sequence_2 START WITH 1000 INCREMENT BY 1;
-  CREATE PROCEDURE \"$TARGE_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
-  CREATE TABLE \"$TARGE_SCHEMA\".test_table_column(test_column INT NULL);
+  CREATE TABLE \"$TARGET_SCHEMA\".test_table(col1 INT NULL);
+  CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1 START WITH 1000 INCREMENT BY 1;
+  CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2 START WITH 1000 INCREMENT BY 1;
+  CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  CREATE TABLE \"$TARGET_SCHEMA\".test_table_column(test_column INT NULL);
   CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   CREATE SERVER test_foreign_server FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   "
@@ -53,15 +53,15 @@ create_grantable_objects() {
 
 delete_grantable_objects() {
   TARGET_DB='db1'
-  TARGE_SCHEMA='public'
+  TARGET_SCHEMA='public'
   request="
   DROP SERVER test_foreign_server;
   DROP FOREIGN DATA WRAPPER test_foreign_data_wrapper;
-  DROP TABLE \"$TARGE_SCHEMA\".test_table_column;
-  DROP PROCEDURE \"$TARGE_SCHEMA\".test_procedure(TEXT);
-  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence_1;
-  DROP SEQUENCE \"$TARGE_SCHEMA\".test_sequence_2;
-  DROP TABLE \"$TARGE_SCHEMA\".test_table;
+  DROP TABLE \"$TARGET_SCHEMA\".test_table_column;
+  DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure(TEXT);
+  DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1;
+  DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2;
+  DROP TABLE \"$TARGET_SCHEMA\".test_table;
   "
   drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
   if [ $? -eq 0 ]; then
