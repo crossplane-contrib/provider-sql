@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: databases.postgresql.sql.m.crossplane.io
 spec:
   group: postgresql.sql.m.crossplane.io
@@ -103,6 +103,15 @@ spec:
                       database owned by another role, you must be a direct or indirect member
                       of that role, or be a superuser.
                     type: string
+                  strategy:
+                    description: |-
+                      Strategy sets the method used to create the database from the template.
+                      This field is create-only and requires PostgreSQL 15+.
+                      When omitted, PostgreSQL uses the server default.
+                    enum:
+                    - WAL_LOG
+                    - FILE_COPY
+                    type: string
                   tablespace:
                     description: |-
                       The name of the tablespace that will be associated with the new database,
@@ -116,6 +125,12 @@ spec:
                       DEFAULT to use the default template (template1).
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: strategy field is immutable after creation
+                  optionalOldSelf: true
+                  rule: '!oldSelf.hasValue() || ((!has(self.strategy) && !has(oldSelf.value().strategy))
+                    || (has(self.strategy) && has(oldSelf.value().strategy) && self.strategy
+                    == oldSelf.value().strategy))'
               managementPolicies:
                 default:
                 - '*'

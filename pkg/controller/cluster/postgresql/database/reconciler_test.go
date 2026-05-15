@@ -65,6 +65,10 @@ func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
 	return m.MockGetServerVersion(ctx)
 }
 
+func ptr[T any](v T) *T {
+	return &v
+}
+
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
@@ -276,8 +280,9 @@ func TestCreate(t *testing.T) {
 	}
 
 	type want struct {
-		c   managed.ExternalCreation
-		err error
+		c     managed.ExternalCreation
+		err   error
+		query string
 	}
 
 	cases := map[string]struct {
@@ -328,10 +333,69 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessWithStrategy": {
+			reason: "The CREATE statement should include STRATEGY when specified",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[0].(*int)) = minDatabaseStrategyServerVersion
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							Template: ptr("template-source"),
+							Strategy: ptr(v1alpha1.DatabaseStrategyFileCopy),
+						},
+					},
+				},
+			},
+			want: want{
+				err:   nil,
+				query: `CREATE DATABASE "" TEMPLATE "template-source" STRATEGY FILE_COPY`,
+			},
+		},
+		"ErrUnsupportedStrategyVersion": {
+			reason: "An error should be returned when strategy is requested on PostgreSQL versions older than 15",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[0].(*int)) = 140000
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							Strategy: ptr(v1alpha1.DatabaseStrategyFileCopy),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.Errorf("database strategy requires PostgreSQL 15+; found server_version_num=%d", 140000), errCreateDB),
+			},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			var lastQuery string
+			if tc.want.query != "" {
+				origDB := tc.fields.db.(*mockDB)
+				origExec := origDB.MockExec
+				origDB.MockExec = func(ctx context.Context, q xsql.Query) error {
+					lastQuery = q.String
+					return origExec(ctx, q)
+				}
+			}
 			e := external{db: tc.fields.db}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
@@ -339,6 +403,11 @@ func TestCreate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.query != "" {
+				if diff := cmp.Diff(tc.want.query, lastQuery); diff != "" {
+					t.Errorf("\n%s\ne.Create(...): -want query, +got query:\n%s\n", tc.reason, diff)
+				}
 			}
 		})
 	}
