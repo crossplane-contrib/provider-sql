@@ -61,7 +61,7 @@ const (
 	RoleSchema             GrantType = "ROLE_SCHEMA"
 	RoleTable              GrantType = "ROLE_TABLE"
 	RoleSequence           GrantType = "ROLE_SEQUENCE"
-	RoleRoutine            GrantType = "ROLE_ROUTE"
+	RoleRoutine            GrantType = "ROLE_ROUTINE"
 	RoleColumn             GrantType = "ROLE_COLUMN"
 	RoleForeignDataWrapper GrantType = "ROLE_FOREIGN_DATA_WRAPPER"
 	RoleForeignServer      GrantType = "ROLE_FOREIGN_SERVER"
