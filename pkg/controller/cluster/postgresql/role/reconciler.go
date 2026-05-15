@@ -28,6 +28,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -341,11 +342,19 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if pwchanged {
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalUpdate{}, err
+			}
+		}
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s PASSWORD %s", crn, pq.QuoteLiteral(pw)),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)

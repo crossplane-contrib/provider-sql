@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
@@ -257,6 +258,11 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.RoleParameters{
 							Privileges:      v1alpha1.RolePrivilege{},
 							ConnectionLimit: nil,
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
 						},
 					},
 				},
@@ -605,6 +611,11 @@ func TestUpdate(t *testing.T) {
 					ObjectMeta: v1.ObjectMeta{
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
 						},
 					},
 				},
@@ -1046,6 +1057,226 @@ func TestUpdate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got, cmpopts.IgnoreMapEntries(func(key string, _ []byte) bool { return key == "password" })); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestGetPassword(t *testing.T) {
+	type args struct {
+		ctx  context.Context
+		role *v1alpha1.Role
+		kube client.Client
+	}
+	type want struct {
+		pwd     string
+		changed bool
+		err     error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChange": {
+			reason: "nil LastPasswordChange should trigger a reset (handles restoration scenario)",
+			args: args{
+				role: &v1alpha1.Role{},
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"NilLastPasswordChangeSecretHasPassword": {
+			reason: "nil LastPasswordChange with existing connection secret password should not reset (Create already ran)",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
+								Name:      "test-secret",
+								Namespace: "test-ns",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"LastPasswordChangeSetNoTrigger": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerAfterLastChange": {
+			reason: "PasswordRotationTrigger set after LastPasswordChange should trigger rotation",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &v1.Time{Time: time.Now()},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"RotationTriggerBeforeLastChange": {
+			reason: "PasswordRotationTrigger set before LastPasswordChange should not trigger rotation",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &v1.Time{Time: time.Now().Add(-2 * time.Hour)},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{kube: tc.args.kube}
+			pwd, changed, err := e.getPassword(tc.args.ctx, tc.args.role)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.pwd, pwd); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want pwd, +got pwd:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.changed, changed); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want changed, +got changed:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestUpdatePasswordReset(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		execQuery *string
+	}
+
+	type args struct {
+		ctx  context.Context
+		mg   *v1alpha1.Role
+		kube client.Client
+	}
+
+	type want struct {
+		err               error
+		passwordGenerated bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChangeGeneratesPassword": {
+			reason: "nil LastPasswordChange should generate a new password (restoration scenario)",
+			fields: fields{execQuery: new(string)},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+				},
+				kube: &test.MockClient{},
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: true,
+			},
+		},
+		"LastPasswordChangeSetNoReset": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			fields: fields{execQuery: nil},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: v1.Now().Time},
+						},
+					},
+				},
+				kube: &test.MockClient{},
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: false,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			execQuery := tc.fields.execQuery
+			db := &mockDB{
+				MockExec: func(ctx context.Context, q xsql.Query) error {
+					if execQuery == nil {
+						return errBoom
+					}
+					*execQuery = q.String
+					return nil
+				},
+			}
+			e := external{
+				db:   db,
+				kube: tc.args.kube,
+			}
+			got, err := e.Update(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.passwordGenerated {
+				if execQuery == nil || *execQuery == "" {
+					t.Errorf("\n%s\ne.Update(...): expected ALTER ROLE PASSWORD query to be executed\n", tc.reason)
+				} else if *execQuery == fmt.Sprintf("ALTER ROLE %s PASSWORD ''", pq.QuoteIdentifier("example")) {
+					t.Errorf("\n%s\ne.Update(...): ALTER ROLE PASSWORD query contained an empty password\n", tc.reason)
+				}
+				if pw := got.ConnectionDetails[xpv1.ResourceCredentialsSecretPasswordKey]; len(pw) == 0 {
+					t.Errorf("\n%s\ne.Update(...): expected non-empty password in ConnectionDetails\n", tc.reason)
+				}
 			}
 		})
 	}

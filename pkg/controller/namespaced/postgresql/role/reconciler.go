@@ -27,6 +27,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -325,11 +326,19 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if pwchanged {
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalUpdate{}, err
+			}
+		}
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s PASSWORD %s", crn, pq.QuoteLiteral(pw)),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
