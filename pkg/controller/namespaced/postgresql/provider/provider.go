@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,6 +27,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		secretKey       *client.ObjectKey
 		defaultDatabase string
 		sslMode         *string
+		keyMapping      map[string]string
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -48,6 +50,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 		defaultDatabase = providerConfig.Spec.DefaultDatabase
 		sslMode = providerConfig.Spec.SSLMode
+		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
 			ObjectMeta: metav1.ObjectMeta{
@@ -66,6 +69,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 		defaultDatabase = clusterProviderConfig.Spec.DefaultDatabase
 		sslMode = clusterProviderConfig.Spec.SSLMode
+		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
 	}
@@ -82,7 +86,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 	return ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
-		SecretData:         s.Data,
+		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
 		DefaultDatabase:    defaultDatabase,
 		SSLMode:            sslMode,
 	}, nil

@@ -32,7 +32,6 @@ type postgresDB struct {
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
 // The sslmode defines the mode used to set up the connection for the provider.
 func New(creds map[string][]byte, database, sslmode string) xsql.DB {
-	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])

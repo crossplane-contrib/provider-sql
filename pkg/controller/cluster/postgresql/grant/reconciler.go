@@ -117,7 +117,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	if db == "" {
 		db = pc.Spec.DefaultDatabase
 	}
-	xdb := c.newDB(s.Data, db, clients.ToString(pc.Spec.SSLMode))
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	xdb := c.newDB(secretData, db, clients.ToString(pc.Spec.SSLMode))
 
 	serverVersion, err := xdb.GetServerVersion(ctx)
 	if err != nil {

@@ -129,7 +129,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.T
 		return nil, errors.New(errNoDatabase)
 	}
 
-	return &external{db: c.newDB(s.Data, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.Schema] = &external{}

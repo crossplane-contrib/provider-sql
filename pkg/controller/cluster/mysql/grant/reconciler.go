@@ -138,7 +138,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(s.Data, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
 }
 
 type external struct{ db xsql.DB }

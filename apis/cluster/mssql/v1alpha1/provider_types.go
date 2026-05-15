@@ -46,6 +46,51 @@ type ProviderCredentials struct {
 	// provider.
 	// +optional
 	ConnectionSecretRef *xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
+
+	// SecretKeyMapping allows overriding the default secret key names used
+	// to read credentials from the connection secret. When not specified,
+	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
+	// +optional
+	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+}
+
+// SecretKeyMapping allows overriding the default secret key names used to
+// read credentials from the connection secret.
+type SecretKeyMapping struct {
+	// Endpoint overrides the key used to read the host/endpoint. Default: "endpoint".
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// Port overrides the key used to read the port. Default: "port".
+	// +optional
+	Port string `json:"port,omitempty"`
+	// Username overrides the key used to read the username. Default: "username".
+	// +optional
+	Username string `json:"username,omitempty"`
+	// Password overrides the key used to read the password. Default: "password".
+	// +optional
+	Password string `json:"password,omitempty"`
+}
+
+// ToMap converts the mapping to a map[string]string suitable for
+// xsql.RemapCredentialKeys. Returns nil when the receiver is nil.
+func (m *SecretKeyMapping) ToMap() map[string]string {
+	if m == nil {
+		return nil
+	}
+	mapping := make(map[string]string, 4)
+	if m.Endpoint != "" {
+		mapping["endpoint"] = m.Endpoint
+	}
+	if m.Port != "" {
+		mapping["port"] = m.Port
+	}
+	if m.Username != "" {
+		mapping["username"] = m.Username
+	}
+	if m.Password != "" {
+		mapping["password"] = m.Password
+	}
+	return mapping
 }
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
