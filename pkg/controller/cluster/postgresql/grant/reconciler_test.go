@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
@@ -46,6 +47,7 @@ type mockDB struct {
 	MockScan                 func(ctx context.Context, q xsql.Query, dest ...interface{}) error
 	MockQuery                func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
 	MockGetConnectionDetails func(username, password string) managed.ConnectionDetails
+	MockGetServerVersion     func(ctx context.Context) (int, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -66,6 +68,13 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return m.MockGetConnectionDetails(username, password)
+}
+
+func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	if m.MockGetServerVersion == nil {
+		return 0, nil // Default to version 0 (latest) if not set
+	}
+	return m.MockGetServerVersion(ctx)
 }
 
 func TestConnect(t *testing.T) {
@@ -205,6 +214,33 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"ErrNotGrant": {
+			reason: "An error should be returned if the managed resource is not a *Grant",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotGrant),
+			},
+		},
+		"ErrBadGrant": {
+			reason: "An error should be returned if the managed resource has no identifiable grant type",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Role:       ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.New(errUnknownGrant),
+			},
+		},
 		"SuccessNoGrant": {
 			reason: "We should return ResourceExists: false when no grant is found",
 			fields: fields{
@@ -367,11 +403,244 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessRoleSchema": {
+			reason: "We should return no error if we can find our role-schema grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleTable": {
+			reason: "We should return no error if we can find our role-table grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Tables:     []string{"testtable"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleColumn": {
+			reason: "We should return no error if we can find our role-column grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Tables:     []string{"testtable"},
+							Columns:    []string{"testcolumn"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleSequence": {
+			reason: "We should return no error if we can find our role-sequence grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Sequences:  []string{"testsequence"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleRoutine": {
+			reason: "We should return no error if we can find our role-routine grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Routines:   []v1alpha1.Routine{{Name: "testroutine", Arguments: []string{"text"}}},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							WithOption: &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleForeingDataWrapper": {
+			reason: "We should return no error if we can find our role-foreign-data-wrapper grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:            ptr.To("testdb"),
+							Role:                ptr.To("testrole"),
+							ForeignDataWrappers: []string{"testforeigndatawrapper"},
+							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+							WithOption:          &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleForeignServer": {
+			reason: "We should return no error if we can find our role-foreign-server grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:       ptr.To("testdb"),
+							Role:           ptr.To("testrole"),
+							ForeignServers: []string{"testforeignserver"},
+							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+							WithOption:     &gog,
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			got, err := e.Observe(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -385,6 +654,7 @@ func TestObserve(t *testing.T) {
 
 func TestCreate(t *testing.T) {
 	errBoom := errors.New("boom")
+	goa := v1alpha1.GrantOptionAdmin
 
 	type fields struct {
 		db xsql.DB
@@ -406,6 +676,33 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"ErrNotGrant": {
+			reason: "An error should be returned if the managed resource is not a *Grant",
+			args: args{
+				mg: nil,
+			},
+			want: want{
+				err: errors.New(errNotGrant),
+			},
+		},
+		"ErrBadGrant": {
+			reason: "An error should be returned if the managed resource has no identifiable grant type",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Role:       ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.New(errUnknownGrant), errCreateGrant),
+			},
+		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the grant should be returned",
 			fields: fields{
@@ -428,8 +725,30 @@ func TestCreate(t *testing.T) {
 				err: errors.Wrap(errBoom, errCreateGrant),
 			},
 		},
-		"Success": {
-			reason: "No error should be returned when we successfully create a grant",
+		"RoleMembershipSuccess": {
+			reason: "No error should be returned when we successfully create a role-membership grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:       ptr.To("testrole"),
+							MemberOf:   ptr.To("parentrole"),
+							WithOption: &goa,
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleDatabaseSuccess": {
+			reason: "No error should be returned when we successfully create a role-database grant",
 			fields: fields{
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
@@ -450,11 +769,181 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"RoleSchemaSuccess": {
+			reason: "No error should be returned when we successfully create a role-schema grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleTableSuccess": {
+			reason: "No error should be returned when we successfully create a role-table grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleColumnSuccess": {
+			reason: "No error should be returned when we successfully create a role-column grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Columns:    []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleSequenceSuccess": {
+			reason: "No error should be returned when we successfully create a role-sequence grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Sequences:  []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleRoutineSuccess": {
+			reason: "No error should be returned when we successfully create a role-routine grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Routines:   []v1alpha1.Routine{{Name: "test-example", Arguments: []string{"test-example"}}},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleForeignDataWrapperSuccess": {
+			reason: "No error should be returned when we successfully create a role-foreign-data-wrapper grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:            ptr.To("test-example"),
+							Role:                ptr.To("test-example"),
+							ForeignDataWrappers: []string{"test-example"},
+							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleForeignServerSuccess": {
+			reason: "No error should be returned when we successfully create a role-foreign-server grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:       ptr.To("test-example"),
+							Role:           ptr.To("test-example"),
+							ForeignServers: []string{"test-example"},
+							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -540,6 +1029,29 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
+		"ErrNotGrant": {
+			reason: "An error should be returned if the managed resource is not a *Grant",
+			args: args{
+				mg: nil,
+			},
+			want: errors.New(errNotGrant),
+		},
+		"ErrBadGrant": {
+			reason: "An error should be returned if the managed resource has no identifiable grant type",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Role:       ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: errors.Wrap(errors.New(errUnknownGrant), errRevokeGrant),
+		},
 		"ErrDropGrant": {
 			reason: "Errors dropping a grant should be returned",
 			fields: fields{
@@ -562,8 +1074,8 @@ func TestDelete(t *testing.T) {
 			},
 			want: errors.Wrap(errBoom, errRevokeGrant),
 		},
-		"Success": {
-			reason: "No error should be returned if the grant was revoked",
+		"RoleDatabaseSuccess": {
+			reason: "No error should be returned if the role-database grant was revoked",
 			args: args{
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
@@ -582,14 +1094,312 @@ func TestDelete(t *testing.T) {
 			},
 			want: nil,
 		},
+		"RoleSchemaSuccess": {
+			reason: "No error should be returned if the role-schema grant was revoked",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			want: nil,
+		},
+		"RoleTableSuccess": {
+			reason: "No error should be returned if the role-table grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"RoleColumnSuccess": {
+			reason: "No error should be returned if the role-column grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Tables:     []string{"test-example"},
+							Columns:    []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"RoleSequenceSuccess": {
+			reason: "No error should be returned if the role-sequence grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Sequences:  []string{"test-example"},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"RoleRoutineSuccess": {
+			reason: "No error should be returned if the role-routine grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Routines:   []v1alpha1.Routine{{Name: "test-example", Arguments: []string{"test-example"}}},
+							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"RoleForeignDataWrapperSuccess": {
+			reason: "No error should be returned if the role-foreign-data-wrapper grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:            ptr.To("test-example"),
+							Role:                ptr.To("test-example"),
+							ForeignDataWrappers: []string{"test-example"},
+							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"RoleForeignServerSuccess": {
+			reason: "No error should be returned if the role-foreign-server grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:       ptr.To("test-example"),
+							Role:           ptr.To("test-example"),
+							ForeignServers: []string{"test-example"},
+							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{db: tc.fields.db}
+			db := tc.fields.db
+			if db == nil {
+				db = mockDB{}
+			}
+			e := external{db: db}
 			_, err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// TestGrantSQL validates the SQL strings generated by selectGrantQuery,
+// createGrantQueries, and deleteGrantQuery, verifying that object names are
+// properly quoted and ACL column references are qualified with their table alias.
+func TestGrantSQL(t *testing.T) {
+	cases := map[string]struct {
+		reason             string
+		gp                 v1alpha1.GrantParameters
+		wantSelectContains string
+		wantRevoke         string
+		wantGrant          string
+		wantDelete         string
+	}{
+		"SchemaSelectQueryUsesQualifiedACL": {
+			reason: "aclexplode must reference n.nspacl to avoid scoping issues with JOIN precedence",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantSelectContains: "aclexplode(n.nspacl)",
+		},
+		"DatabaseSelectQueryUsesQualifiedACL": {
+			reason: "aclexplode must reference db.datacl to avoid scoping issues with JOIN precedence",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"CONNECT"},
+			},
+			wantSelectContains: "aclexplode(db.datacl)",
+		},
+		"ColumnNamesAreQuoted": {
+			reason: "Column names must be double-quoted to prevent SQL injection",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"mytable"},
+				Columns:    []string{"mycol"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantRevoke: `REVOKE SELECT("mycol") ON TABLE "myschema"."mytable" FROM "myrole"`,
+			wantGrant:  `GRANT SELECT("mycol") ON TABLE "myschema"."mytable" TO "myrole" `,
+			wantDelete: `REVOKE SELECT("mycol") ON TABLE "myschema"."mytable" FROM "myrole"`,
+		},
+		"ForeignDataWrapperNamesAreQuoted": {
+			reason: "Foreign data wrapper names must be double-quoted to prevent SQL injection",
+			gp: v1alpha1.GrantParameters{
+				Database:            ptr.To("mydb"),
+				ForeignDataWrappers: []string{"myfdw"},
+				Role:                ptr.To("myrole"),
+				Privileges:          v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantRevoke: `REVOKE USAGE ON FOREIGN DATA WRAPPER "myfdw" FROM "myrole"`,
+			wantGrant:  `GRANT USAGE ON FOREIGN DATA WRAPPER "myfdw" TO "myrole" `,
+			wantDelete: `REVOKE USAGE ON FOREIGN DATA WRAPPER "myfdw" FROM "myrole"`,
+		},
+		"ForeignServerNamesAreQuoted": {
+			reason: "Foreign server names must be double-quoted to prevent SQL injection",
+			gp: v1alpha1.GrantParameters{
+				Database:       ptr.To("mydb"),
+				ForeignServers: []string{"myserver"},
+				Role:           ptr.To("myrole"),
+				Privileges:     v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantRevoke: `REVOKE USAGE ON FOREIGN SERVER "myserver" FROM "myrole"`,
+			wantGrant:  `GRANT USAGE ON FOREIGN SERVER "myserver" TO "myrole" `,
+			wantDelete: `REVOKE USAGE ON FOREIGN SERVER "myserver" FROM "myrole"`,
+		},
+		"RoutineArgumentsAreQuoted": {
+			reason: "Routine argument type names must be double-quoted to prevent SQL injection",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+		},
+		"RoutineArgumentsUppercaseTypeNamesAreLowercased": {
+			reason: "Uppercase type names like TEXT must be lowercased before quoting so PostgreSQL can resolve them (quoted identifiers are case-sensitive, but pg_catalog stores type names as lowercase)",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if tc.wantSelectContains != "" {
+				var q xsql.Query
+				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+					t.Fatalf("selectGrantQuery: %v", err)
+				}
+				if !strings.Contains(q.String, tc.wantSelectContains) {
+					t.Errorf("%s\nwant query to contain %q\ngot: %s", tc.reason, tc.wantSelectContains, q.String)
+				}
+			}
+
+			if tc.wantRevoke != "" || tc.wantGrant != "" {
+				var ql []xsql.Query
+				if err := createGrantQueriesWithVersion(tc.gp, &ql, 0); err != nil {
+					t.Fatalf("createGrantQueries: %v", err)
+				}
+				if len(ql) < 2 {
+					t.Fatalf("expected at least 2 queries, got %d", len(ql))
+				}
+				if tc.wantRevoke != "" {
+					if diff := cmp.Diff(tc.wantRevoke, ql[0].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries REVOKE (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+				if tc.wantGrant != "" {
+					if diff := cmp.Diff(tc.wantGrant, ql[1].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries GRANT (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+			}
+
+			if tc.wantDelete != "" {
+				var q xsql.Query
+				if err := deleteGrantQuery(tc.gp, &q); err != nil {
+					t.Fatalf("deleteGrantQuery: %v", err)
+				}
+				if diff := cmp.Diff(tc.wantDelete, q.String); diff != "" {
+					t.Errorf("%s\ndeleteGrantQuery (-want +got):\n%s", tc.reason, diff)
+				}
 			}
 		})
 	}

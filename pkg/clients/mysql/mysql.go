@@ -117,6 +117,13 @@ func (c mySQLDB) GetConnectionDetails(username, password string) managed.Connect
 	}
 }
 
+// GetServerVersion is not supported by the MySQL client (only used by PostgreSQL).
+func (c mySQLDB) GetServerVersion(ctx context.Context) (int, error) {
+	// This method should never be called for MySQL clients
+	// but is implemented to satisfy the xsql.DB interface
+	return 0, nil
+}
+
 // QuoteIdentifier for MySQL queries
 func QuoteIdentifier(id string) string {
 	return "`" + strings.ReplaceAll(id, "`", "``") + "`"
