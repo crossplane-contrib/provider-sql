@@ -203,11 +203,14 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 		ResourceOptions: &v1alpha1.ResourceOptions{},
 	}
 
+	var pluginName, authString string
 	query := "SELECT " +
 		"max_questions, " +
 		"max_updates, " +
 		"max_connections, " +
-		"max_user_connections " +
+		"max_user_connections, " +
+		"plugin, " +
+		"authentication_string " +
 		"FROM mysql.user WHERE User = ? AND Host = ?"
 	err := c.db.Scan(ctx,
 		xsql.Query{
@@ -221,12 +224,29 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 		&observed.ResourceOptions.MaxUpdatesPerHour,
 		&observed.ResourceOptions.MaxConnectionsPerHour,
 		&observed.ResourceOptions.MaxUserConnections,
+		&pluginName,
+		&authString,
 	)
 	if xsql.IsNoRows(err) {
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 	if err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
+	}
+
+	// Hydrate observed.AuthenticationPlugin only when the user is configured
+	// with a non-default-password plugin. Password plugins (caching_sha2_password,
+	// mysql_native_password, sha256_password) store an opaque hash in
+	// authentication_string and are the implicit default when the user was
+	// created with IDENTIFIED BY '<pwd>' — we leave AuthenticationPlugin nil in
+	// that case so the comparison against a spec without AuthenticationPlugin
+	// reports up-to-date.
+	if pluginName != "" && !isPasswordPlugin(pluginName) {
+		observed.AuthenticationPlugin = &v1alpha1.AuthenticationPlugin{Name: pluginName}
+		if authString != "" {
+			as := authString
+			observed.AuthenticationPlugin.AuthString = &as
+		}
 	}
 
 	// When the user is configured with a non-default auth plugin (e.g., AWS
@@ -241,6 +261,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 	}
 
 	mg.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
+	mg.Status.AtProvider.AuthenticationPlugin = observed.AuthenticationPlugin
 
 	mg.SetConditions(xpv1.Available())
 
@@ -248,6 +269,43 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 		ResourceExists:   true,
 		ResourceUpToDate: !pwdChanged && upToDate(observed, &mg.Spec.ForProvider),
 	}, nil
+}
+
+// isPasswordPlugin reports whether the given MySQL plugin name is one of the
+// password-based authentication plugins. Users created with IDENTIFIED BY
+// '<pwd>' are assigned a password plugin (caching_sha2_password is the MySQL
+// 8.0 default; mysql_native_password and sha256_password are common). For
+// these we treat AuthenticationPlugin as nil in the observed state because
+// they represent "use a password" rather than an opt-in plugin choice.
+func isPasswordPlugin(name string) bool {
+	switch name {
+	case "caching_sha2_password", "mysql_native_password", "sha256_password":
+		return true
+	}
+	return false
+}
+
+// authPluginEqual reports whether observed and desired AuthenticationPlugin
+// configurations match. nil/nil = match. Mismatched nil-ness = drift. Same
+// nil-ness with non-nil values: names must match, and authStrings must both
+// be nil OR both equal.
+func authPluginEqual(observed, desired *v1alpha1.AuthenticationPlugin) bool {
+	if desired == nil {
+		return observed == nil
+	}
+	if observed == nil {
+		return false
+	}
+	if observed.Name != desired.Name {
+		return false
+	}
+	if (observed.AuthString == nil) != (desired.AuthString == nil) {
+		return false
+	}
+	if observed.AuthString != nil && *observed.AuthString != *desired.AuthString {
+		return false
+	}
+	return true
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.ExternalCreation, error) {
@@ -374,9 +432,39 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 		mg.Status.AtProvider.ResourceOptionsAsClauses = ro
 	}
 
+	// Detect AuthenticationPlugin drift using the last-observed value cached
+	// in Status.AtProvider by Observe. Three transitions are handled:
+	//   1. password → plugin: ALTER USER ... IDENTIFIED WITH <plugin> [AS '<authString>']
+	//   2. plugin → password: fall through to UpdatePassword below; it emits
+	//      ALTER USER ... IDENTIFIED BY '<pw>' which both sets the password
+	//      AND restores the default password plugin.
+	//   3. plugin → different plugin or same plugin with different authString:
+	//      ALTER USER ... IDENTIFIED WITH <plugin> [AS '<authString>']
+	// The API-level XValidation rule enforces mutual exclusivity of
+	// PasswordSecretRef and AuthenticationPlugin, so the spec always
+	// represents one mode or the other.
+	desiredPlugin := mg.Spec.ForProvider.AuthenticationPlugin
+	observedPlugin := mg.Status.AtProvider.AuthenticationPlugin
+	if !authPluginEqual(observedPlugin, desiredPlugin) && desiredPlugin != nil {
+		if err := c.executeAlterUserWithPluginQuery(ctx, username, host, desiredPlugin); err != nil {
+			return managed.ExternalUpdate{}, err
+		}
+		mg.Status.AtProvider.AuthenticationPlugin = desiredPlugin
+		// Connection details for a plugin-auth user carry no password.
+		return managed.ExternalUpdate{
+			ConnectionDetails: c.db.GetConnectionDetails(username, ""),
+		}, nil
+	}
+
 	connectionDetails, err := c.UpdatePassword(ctx, mg, username, host)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
+	}
+
+	// If transitioning from plugin → password, clear the cached observed
+	// plugin so the next reconcile starts clean.
+	if desiredPlugin == nil && observedPlugin != nil {
+		mg.Status.AtProvider.AuthenticationPlugin = nil
 	}
 
 	if len(connectionDetails) > 0 {
@@ -384,6 +472,31 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 	}
 
 	return managed.ExternalUpdate{}, nil
+}
+
+// executeAlterUserWithPluginQuery emits ALTER USER ... IDENTIFIED WITH
+// <plugin> [AS '<authString>']. Same identifier-vs-value quoting rules as
+// the Create-time helper: plugin name is QuoteIdentifier (backticked) to
+// guard against injection while still parsing as an identifier, authString
+// is value-quoted as a regular string.
+func (c *external) executeAlterUserWithPluginQuery(ctx context.Context, username string, host string, ap *v1alpha1.AuthenticationPlugin) error {
+	authString := ""
+	if ap.AuthString != nil && *ap.AuthString != "" {
+		authString = fmt.Sprintf(" AS %s", mysql.QuoteValue(*ap.AuthString))
+	}
+
+	query := fmt.Sprintf(
+		"ALTER USER %s@%s IDENTIFIED WITH %s%s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		mysql.QuoteIdentifier(ap.Name),
+		authString,
+	)
+
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *external) UpdatePassword(ctx context.Context, cr *v1alpha1.User, username, host string) (managed.ConnectionDetails, error) {
@@ -429,6 +542,11 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 }
 
 func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameters) bool {
+	// AuthenticationPlugin drift — checked first so a plugin change is detected
+	// even when ResourceOptions are nil.
+	if !authPluginEqual(observed.AuthenticationPlugin, desired.AuthenticationPlugin) {
+		return false
+	}
 	if desired.ResourceOptions == nil {
 		// Return true if there are no desired ResourceOptions
 		return true

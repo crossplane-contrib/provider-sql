@@ -108,6 +108,14 @@ type ResourceOptions struct {
 type UserObservation struct {
 	// ResourceOptionsAsClauses represents the applied resource options
 	ResourceOptionsAsClauses []string `json:"resourceOptionsAsClauses,omitempty"`
+
+	// AuthenticationPlugin reflects the user's actual authentication plugin
+	// as read from mysql.user. Populated only when the observed plugin is a
+	// non-default-password plugin (e.g., AWSAuthenticationPlugin). Used by
+	// the reconciler to detect drift between the desired
+	// spec.forProvider.authenticationPlugin and what's actually configured
+	// on the DB so plugin changes are not silently ignored.
+	AuthenticationPlugin *AuthenticationPlugin `json:"authenticationPlugin,omitempty"`
 }
 
 // +kubebuilder:object:root=true
