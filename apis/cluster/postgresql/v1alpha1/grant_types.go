@@ -17,9 +17,21 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	client "sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	"github.com/pkg/errors"
+)
+
+const (
+	errNoPrivileges           = "privileges not passed"
+	errUnknownGrant           = "cannot identify grant type based on passed params"
+	errMemberOfWithPrivileges = "cannot set privileges in the same grant as memberOf"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -29,7 +41,7 @@ type GrantSpec struct {
 }
 
 // GrantPrivilege represents a privilege to be granted
-// +kubebuilder:validation:Pattern:=^[A-Z]+$
+// +kubebuilder:validation:Pattern:=^[A-Z]+( [A-Z]+)*$
 type GrantPrivilege string
 
 // If Privileges are specified, we should have at least one
@@ -38,24 +50,181 @@ type GrantPrivilege string
 // +kubebuilder:validation:MinItems:=1
 type GrantPrivileges []GrantPrivilege
 
+type GrantType string
+
+// GrantType is the list of the possible grant types represented by a GrantParameters
+const (
+	RoleMember             GrantType = "ROLE_MEMBER"
+	RoleDatabase           GrantType = "ROLE_DATABASE"
+	RoleSchema             GrantType = "ROLE_SCHEMA"
+	RoleTable              GrantType = "ROLE_TABLE"
+	RoleSequence           GrantType = "ROLE_SEQUENCE"
+	RoleRoutine            GrantType = "ROLE_ROUTINE"
+	RoleColumn             GrantType = "ROLE_COLUMN"
+	RoleForeignDataWrapper GrantType = "ROLE_FOREIGN_DATA_WRAPPER"
+	RoleForeignServer      GrantType = "ROLE_FOREIGN_SERVER"
+)
+
+type marker struct{}
+type stringSet struct {
+	elements map[string]marker
+}
+
+func newStringSet() *stringSet {
+	return &stringSet{
+		elements: make(map[string]marker),
+	}
+}
+
+func (s *stringSet) add(element string) {
+	s.elements[element] = marker{}
+}
+
+func (s *stringSet) contains(element string) bool {
+	_, exists := s.elements[element]
+	return exists
+}
+
+func (s *stringSet) containsExactly(elements ...string) bool {
+	if len(s.elements) != len(elements) {
+		return false
+	}
+	for _, elem := range elements {
+		if !s.contains(elem) {
+			return false
+		}
+	}
+	return true
+}
+
+func (gp *GrantParameters) filledInFields() *stringSet {
+	fields := map[string]bool{
+		"MemberOf":            gp.MemberOf != nil,
+		"Database":            gp.Database != nil,
+		"Schema":              gp.Schema != nil,
+		"Tables":              len(gp.Tables) > 0,
+		"Columns":             len(gp.Columns) > 0,
+		"Sequences":           len(gp.Sequences) > 0,
+		"Routines":            len(gp.Routines) > 0,
+		"ForeignServers":      len(gp.ForeignServers) > 0,
+		"ForeignDataWrappers": len(gp.ForeignDataWrappers) > 0,
+	}
+	set := newStringSet()
+
+	for key, hasField := range fields {
+		if hasField {
+			set.add(key)
+		}
+	}
+	return set
+}
+
+var grantTypeFields = map[GrantType][]string{
+	RoleMember:             {"MemberOf"},
+	RoleDatabase:           {"Database"},
+	RoleSchema:             {"Database", "Schema"},
+	RoleTable:              {"Database", "Schema", "Tables"},
+	RoleColumn:             {"Database", "Schema", "Tables", "Columns"},
+	RoleSequence:           {"Database", "Schema", "Sequences"},
+	RoleRoutine:            {"Database", "Schema", "Routines"},
+	RoleForeignServer:      {"Database", "ForeignServers"},
+	RoleForeignDataWrapper: {"Database", "ForeignDataWrappers"},
+}
+
+// IdentifyGrantType return the deduced GrantType from the filled in fields.
+func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
+	ff := gp.filledInFields()
+	pc := len(gp.Privileges)
+
+	var gt *GrantType
+
+	for k, v := range grantTypeFields {
+		if ff.containsExactly(v...) {
+			gt = &k
+			break
+		}
+	}
+	if gt == nil {
+		return "", errors.New(errUnknownGrant)
+	}
+	if *gt == RoleMember && pc > 0 {
+		return "", errors.New(errMemberOfWithPrivileges)
+	}
+	if *gt != RoleMember && pc < 1 {
+		return "", errors.New(errNoPrivileges)
+	}
+	return *gt, nil
+}
+
 // Some privileges are shorthands for multiple privileges. These translations
 // happen internally inside postgresql when making grants. When we query the
 // privileges back, we need to look for the expanded set.
 // https://www.postgresql.org/docs/15/ddl-priv.html
-var grantReplacements = map[GrantPrivilege]GrantPrivileges{
-	"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
-	"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
-	"TEMP":           {"TEMPORARY"},
+var grantReplacements = map[GrantType]map[GrantPrivilege]GrantPrivileges{
+	RoleDatabase: {
+		"ALL":            {"CREATE", "TEMPORARY", "CONNECT"},
+		"ALL PRIVILEGES": {"CREATE", "TEMPORARY", "CONNECT"},
+		"TEMP":           {"TEMPORARY"},
+	},
+	RoleSchema: {
+		"ALL":            {"CREATE", "USAGE"},
+		"ALL PRIVILEGES": {"CREATE", "USAGE"},
+	},
+	RoleTable: {
+		"ALL":            {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
+		"ALL PRIVILEGES": {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"},
+	},
+	RoleColumn: {
+		"ALL":            {"SELECT", "INSERT", "UPDATE", "REFERENCES"},
+		"ALL PRIVILEGES": {"SELECT", "INSERT", "UPDATE", "REFERENCES"},
+	},
+	RoleSequence: {
+		"ALL":            {"USAGE", "SELECT", "UPDATE"},
+		"ALL PRIVILEGES": {"USAGE", "SELECT", "UPDATE"},
+	},
+	RoleRoutine: {
+		"ALL":            {"EXECUTE"},
+		"ALL PRIVILEGES": {"EXECUTE"},
+	},
+	RoleForeignDataWrapper: {
+		"ALL":            {"USAGE"},
+		"ALL PRIVILEGES": {"USAGE"},
+	},
+	RoleForeignServer: {
+		"ALL":            {"USAGE"},
+		"ALL PRIVILEGES": {"USAGE"},
+	},
 }
 
 // ExpandPrivileges expands any shorthand privileges to their full equivalents.
-func (gp *GrantPrivileges) ExpandPrivileges() GrantPrivileges {
+func (gp *GrantParameters) ExpandPrivileges() GrantPrivileges {
+	return gp.ExpandPrivilegesWithVersion(0)
+}
+
+// ExpandPrivilegesWithVersion expands shorthand privileges to their full equivalents,
+// taking into account the PostgreSQL version. For example, MAINTAIN was introduced in
+// PostgreSQL 17 and should not be included for earlier versions.
+// serverVersion should be in the format returned by current_setting('server_version_num'),
+// e.g. 160200 for PostgreSQL 16.2, 170100 for PostgreSQL 17.1...
+// If serverVersion is 0, it defaults to the latest version (includes all privileges).
+func (gp *GrantParameters) ExpandPrivilegesWithVersion(serverVersion int) GrantPrivileges {
+	gt, err := gp.IdentifyGrantType()
+	if err != nil {
+		return gp.Privileges
+	}
+
+	// Filter replacements based on server version
+	gr := getVersionAwareReplacements(gt, serverVersion)
+	if gr == nil {
+		return gp.Privileges
+	}
+
 	privilegeSet := make(map[GrantPrivilege]struct{})
 
 	// Replace any shorthand privileges with their full equivalents
-	for _, p := range *gp {
-		if _, ok := grantReplacements[p]; ok {
-			for _, rp := range grantReplacements[p] {
+	for _, p := range gp.Privileges {
+		if _, ok := gr[p]; ok {
+			for _, rp := range gr[p] {
 				privilegeSet[rp] = struct{}{}
 			}
 		} else {
@@ -69,6 +238,33 @@ func (gp *GrantPrivileges) ExpandPrivileges() GrantPrivileges {
 	}
 
 	return privileges
+}
+
+// getVersionAwareReplacements returns privilege replacements filtered by PostgreSQL version.
+func getVersionAwareReplacements(gt GrantType, serverVersion int) map[GrantPrivilege]GrantPrivileges {
+	gr, exists := grantReplacements[gt]
+	if !exists {
+		return nil
+	}
+
+	// Only need to filter for table grants (MAINTAIN was added to table privileges in PG17)
+	if gt != RoleTable || serverVersion == 0 || serverVersion >= 170000 {
+		return gr
+	}
+
+	// For PG < 17, return a filtered copy without MAINTAIN
+	filtered := make(map[GrantPrivilege]GrantPrivileges)
+	for k, v := range gr {
+		filtered[k] = filterOutPrivileges(v, []string{"MAINTAIN"})
+	}
+	return filtered
+}
+
+// filterOutPrivileges removes the specified privileges from a privilege list
+func filterOutPrivileges(privileges GrantPrivileges, toFilter []string) GrantPrivileges {
+	return slices.DeleteFunc(slices.Clone(privileges), func(p GrantPrivilege) bool {
+		return slices.Contains(toFilter, string(p))
+	})
 }
 
 // ToStringSlice converts the slice of privileges to strings
@@ -93,6 +289,17 @@ const (
 	GrantOptionAdmin GrantOption = "ADMIN"
 	GrantOptionGrant GrantOption = "GRANT"
 )
+
+type Routine struct {
+	// The name of the routine.
+	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	Name string `json:"name,omitempty"`
+
+	// The arguments of the routine.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	Arguments []string `json:"args,omitempty"`
+}
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 type GrantParameters struct {
@@ -138,6 +345,20 @@ type GrantParameters struct {
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
+	// Schema this grant is for.
+	// +optional
+	Schema *string `json:"schema,omitempty"`
+
+	// SchemaRef references the schema object this grant it for.
+	// +immutable
+	// +optional
+	SchemaRef *xpv1.Reference `json:"schemaRef,omitempty"`
+
+	// SchemaSelector selects a reference to a Schema this grant is for.
+	// +immutable
+	// +optional
+	SchemaSelector *xpv1.Selector `json:"schemaSelector,omitempty"`
+
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
 	// +crossplane:generate:reference:type=Role
@@ -156,6 +377,35 @@ type GrantParameters struct {
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
 	RevokePublicOnDb *bool `json:"revokePublicOnDb,omitempty" default:"false"`
+
+	// The columns upon which to grant the privileges.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	Columns []string `json:"columns,omitempty"`
+
+	// The tables upon which to grant the privileges.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	Tables []string `json:"tables,omitempty"`
+
+	// The sequences upon which to grant the privileges.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	Sequences []string `json:"sequences,omitempty"`
+
+	// The routines upon which to grant the privileges.
+	// +optional
+	Routines []Routine `json:"routines,omitempty"`
+
+	// The foreign data wrappers upon which to grant the privileges.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	ForeignDataWrappers []string `json:"foreignDataWrappers,omitempty"`
+
+	// The foreign servers upon which to grant the privileges.
+	// +optional
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	ForeignServers []string `json:"foreignServers,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
@@ -190,4 +440,66 @@ type GrantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Grant `json:"items"`
+}
+
+// ResolveReferences of this Grant
+func (mg *Grant) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
+
+	// Resolve spec.forProvider.database
+	rsp, err := r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Database),
+		Reference:    mg.Spec.ForProvider.DatabaseRef,
+		Selector:     mg.Spec.ForProvider.DatabaseSelector,
+		To:           reference.To{Managed: &Database{}, List: &DatabaseList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.database")
+	}
+	mg.Spec.ForProvider.Database = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.DatabaseRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.schema
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Schema),
+		Reference:    mg.Spec.ForProvider.SchemaRef,
+		Selector:     mg.Spec.ForProvider.SchemaSelector,
+		To:           reference.To{Managed: &Schema{}, List: &SchemaList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.schema")
+	}
+	mg.Spec.ForProvider.Schema = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.SchemaRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.role
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Role),
+		Reference:    mg.Spec.ForProvider.RoleRef,
+		Selector:     mg.Spec.ForProvider.RoleSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.role")
+	}
+	mg.Spec.ForProvider.Role = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.RoleRef = rsp.ResolvedReference
+
+	// Resolve spec.forProvider.memberOf
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.MemberOf),
+		Reference:    mg.Spec.ForProvider.MemberOfRef,
+		Selector:     mg.Spec.ForProvider.MemberOfSelector,
+		To:           reference.To{Managed: &Role{}, List: &RoleList{}},
+		Extract:      reference.ExternalName(),
+	})
+	if err != nil {
+		return errors.Wrap(err, "spec.forProvider.memberOf")
+	}
+	mg.Spec.ForProvider.MemberOf = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.MemberOfRef = rsp.ResolvedReference
+	return nil
 }

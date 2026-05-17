@@ -162,10 +162,41 @@ func defaultIdentifier(identifier *string) string {
 	return "*"
 }
 
+func splitGrantPrivileges(s string) []string {
+	var out []string
+	start := 0
+	depth := 0
+
+	emit := func(end int) {
+		perm := strings.TrimSpace(s[start:end])
+		if perm != "" {
+			out = append(out, perm)
+		}
+	}
+
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				emit(i)
+				start = i + 1
+			}
+		}
+	}
+	emit(len(s))
+	return out
+}
+
 func parseGrant(grant, dbname string, table string) (privileges []string) {
 	matches := grantRegex.FindStringSubmatch(grant)
 	if len(matches) == 5 && matches[2] == dbname && matches[3] == table {
-		privileges := strings.Split(matches[1], ", ")
+		privileges := splitGrantPrivileges(matches[1])
 
 		if matches[4] != "" {
 			privileges = append(privileges, "GRANT OPTION")
@@ -359,13 +390,31 @@ func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Grant) (ma
 	return managed.ExternalDelete{}, nil
 }
 
+func normalizePrivilege(p string) string {
+	p = strings.TrimSpace(p)
+
+	start := strings.Index(p, "(")
+	end := strings.LastIndex(p, ")")
+
+	if start == -1 || end == -1 || end <= start {
+		return p
+	}
+
+	cols := p[start+1 : end]
+
+	parts := splitGrantPrivileges(cols)
+	sort.Strings(parts)
+
+	return p[:start+1] + strings.Join(parts, ", ") + p[end:]
+}
+
 func diffPermissions(desired, observed []string) ([]string, []string) {
 	desiredMap := make(map[string]struct{}, len(desired))
 	observedMap := make(map[string]struct{}, len(observed))
 
 	for _, desiredPrivilege := range desired {
 		// Special case because ALL is an alias for "ALL PRIVILEGES"
-		desiredPrivilegeMapped := strings.ReplaceAll(desiredPrivilege, allPrivileges, "ALL")
+		desiredPrivilegeMapped := strings.ReplaceAll(normalizePrivilege(desiredPrivilege), allPrivileges, "ALL")
 		desiredMap[desiredPrivilegeMapped] = struct{}{}
 	}
 	for _, observedPrivilege := range observed {

@@ -43,3 +43,15 @@ spec:
       login: true
       createRole: true
       inherit: true
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: no-grants-role
+spec:
+  writeConnectionSecretToRef:
+    name: no-grants-role-secret
+    namespace: default
+  forProvider:
+    privileges:
+      login: true

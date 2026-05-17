@@ -123,7 +123,8 @@ func (c *connector) Connect(ctx context.Context, mg *clusterv1alpha1.Database) (
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{db: c.newClient(s.Data, "")}, nil
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	return &external{db: c.newClient(secretData, "")}, nil
 }
 
 type external struct{ db xsql.DB }

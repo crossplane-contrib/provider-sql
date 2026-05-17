@@ -1,0 +1,9 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: strategy-db
+spec:
+  forProvider:
+    template: strategy-template
+    # Optional, create-only, and supported on PostgreSQL 15+.
+    strategy: FILE_COPY

@@ -51,3 +51,18 @@ spec:
   providerConfigRef:
     kind: ProviderConfig
     name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: no-grants-role
+  namespace: default
+spec:
+  writeConnectionSecretToRef:
+    name: no-grants-role-secret
+  forProvider:
+    privileges:
+      login: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
