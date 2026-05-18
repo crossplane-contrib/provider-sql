@@ -47,8 +47,7 @@ const (
 	errTrackPCUsage      = "cannot track ProviderConfig usage"
 	errGetPC             = "cannot get ProviderConfig"
 	errNoSecretRef       = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret         = "cannot get credentials Secret"
-	errGetServerVersion  = "cannot get server version"
+	errGetSecret = "cannot get credentials Secret"
 
 	errSelectDB = "cannot select database"
 	errCreateDB = "cannot create database"
@@ -125,20 +124,12 @@ func (c *connector) Connect(ctx context.Context, mg *clusterv1alpha1.Database) (
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	db := c.newClient(secretData, "")
-
-	serverVersion, err := db.GetServerVersion(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
-	}
-
-	return &external{db: db, serverVersion: serverVersion}, nil
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
+	return &external{db: c.newClient(secretData, "")}, nil
 }
 
-type external struct {
-	db            xsql.DB
-	serverVersion int
-}
+type external struct{ db xsql.DB }
 
 var _ managed.TypedExternalClient[*clusterv1alpha1.Database] = &external{}
 

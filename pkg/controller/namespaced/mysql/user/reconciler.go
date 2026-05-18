@@ -44,9 +44,8 @@ import (
 )
 
 const (
-	errTrackPCUsage     = "cannot track ProviderConfig usage"
-	errTLSConfig        = "cannot load TLS config"
-	errGetServerVersion = "cannot get server version"
+	errTrackPCUsage = "cannot track ProviderConfig usage"
+	errTLSConfig    = "cannot load TLS config"
 
 	errSelectUser              = "cannot select user"
 	errCreateUser              = "cannot create user"
@@ -117,24 +116,17 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	db := c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog)
-
-	serverVersion, err := db.GetServerVersion(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
-	}
-
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{
-		db:            db,
-		kube:          c.kube,
-		serverVersion: serverVersion,
+		db:   c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog),
+		kube: c.kube,
 	}, nil
 }
 
 type external struct {
-	db            xsql.DB
-	kube          client.Client
-	serverVersion int
+	db   xsql.DB
+	kube client.Client
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}

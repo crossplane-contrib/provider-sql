@@ -40,9 +40,8 @@ import (
 )
 
 const (
-	errTrackUsage       = "cannot track ProviderConfig usage"
-	errTrackPCUsage     = "cannot track ProviderConfig usage"
-	errGetServerVersion = "cannot get server version"
+	errTrackUsage   = "cannot track ProviderConfig usage"
+	errTrackPCUsage = "cannot track ProviderConfig usage"
 
 	errSelectDB = "cannot select database"
 	errCreateDB = "cannot create database"
@@ -105,20 +104,12 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database
 		return nil, err
 	}
 
-	db := c.newClient(providerInfo.SecretData, "")
-
-	serverVersion, err := db.GetServerVersion(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
-	}
-
-	return &external{db: db, serverVersion: serverVersion}, nil
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
+	return &external{db: c.newClient(providerInfo.SecretData, "")}, nil
 }
 
-type external struct {
-	db            xsql.DB
-	serverVersion int
-}
+type external struct{ db xsql.DB }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Database] = &external{}
 

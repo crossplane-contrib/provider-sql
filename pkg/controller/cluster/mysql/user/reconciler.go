@@ -48,9 +48,8 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret        = "cannot get credentials Secret"
-	errTLSConfig        = "cannot load TLS config"
-	errGetServerVersion = "cannot get server version"
+	errGetSecret = "cannot get credentials Secret"
+	errTLSConfig = "cannot load TLS config"
 
 	errSelectUser              = "cannot select user"
 	errCreateUser              = "cannot create user"
@@ -135,24 +134,17 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.User) (managed.Typ
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	db := c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)
-
-	serverVersion, err := db.GetServerVersion(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
-	}
-
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{
-		db:            db,
-		kube:          c.kube,
-		serverVersion: serverVersion,
+		db:   c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog),
+		kube: c.kube,
 	}, nil
 }
 
 type external struct {
-	db            xsql.DB
-	kube          client.Client
-	serverVersion int
+	db   xsql.DB
+	kube client.Client
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.User] = &external{}

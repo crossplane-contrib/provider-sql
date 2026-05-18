@@ -43,8 +43,7 @@ import (
 )
 
 const (
-	errTrackPCUsage     = "cannot track ProviderConfig usage"
-	errGetServerVersion = "cannot get server version"
+	errTrackPCUsage = "cannot track ProviderConfig usage"
 
 	errSelectUser             = "cannot select user"
 	errCreateUser             = "cannot create user %s"
@@ -120,24 +119,19 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
-	serverVersion, err := userDB.GetServerVersion(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
-	}
-
+	// To add version-gated logic, call userDB.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{
-		userDB:        userDB,
-		loginDB:       loginDB,
-		kube:          c.kube,
-		serverVersion: serverVersion,
+		userDB:  userDB,
+		loginDB: loginDB,
+		kube:    c.kube,
 	}, nil
 }
 
 type external struct {
-	userDB        xsql.DB
-	loginDB       xsql.DB
-	kube          client.Client
-	serverVersion int
+	userDB  xsql.DB
+	loginDB xsql.DB
+	kube    client.Client
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}
