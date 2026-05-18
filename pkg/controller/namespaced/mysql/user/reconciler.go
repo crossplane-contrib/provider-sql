@@ -392,26 +392,8 @@ func (c *external) executeCreateUserWithPluginQuery(ctx context.Context, usernam
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 
-	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
-	rochanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
-	if err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateUser)
-	}
-
-	if len(rochanged) > 0 {
-		resourceOptions := fmt.Sprintf("WITH %s", strings.Join(ro, " "))
-
-		query := fmt.Sprintf(
-			"ALTER USER %s@%s %s",
-			mysql.QuoteValue(username),
-			mysql.QuoteValue(host),
-			resourceOptions,
-		)
-		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
-			return managed.ExternalUpdate{}, err
-		}
-
-		mg.Status.AtProvider.ResourceOptionsAsClauses = ro
+	if err := c.updateResourceOptions(ctx, mg, username, host); err != nil {
+		return managed.ExternalUpdate{}, err
 	}
 
 	// Detect AuthenticationPlugin drift using the last-observed value cached
@@ -454,6 +436,32 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (man
 	}
 
 	return managed.ExternalUpdate{}, nil
+}
+
+// updateResourceOptions emits ALTER USER ... WITH <opts> when the
+// resource-options clauses observed by Status differ from the desired spec.
+// Extracted from Update to keep that function below the gocyclo threshold.
+func (c *external) updateResourceOptions(ctx context.Context, mg *namespacedv1alpha1.User, username, host string) error {
+	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
+	rochanged, err := changedResourceOptions(mg.Status.AtProvider.ResourceOptionsAsClauses, ro)
+	if err != nil {
+		return errors.Wrap(err, errUpdateUser)
+	}
+	if len(rochanged) == 0 {
+		return nil
+	}
+
+	query := fmt.Sprintf(
+		"ALTER USER %s@%s WITH %s",
+		mysql.QuoteValue(username),
+		mysql.QuoteValue(host),
+		strings.Join(ro, " "),
+	)
+	if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
+		return err
+	}
+	mg.Status.AtProvider.ResourceOptionsAsClauses = ro
+	return nil
 }
 
 // executeAlterUserWithPluginQuery emits ALTER USER ... IDENTIFIED WITH

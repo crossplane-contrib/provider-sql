@@ -248,6 +248,30 @@ spec:
                 description: A UserObservation represents the observed state of a
                   MySQL user.
                 properties:
+                  authenticationPlugin:
+                    description: |-
+                      AuthenticationPlugin reflects the user's actual authentication plugin
+                      as read from mysql.user. Populated only when the observed plugin is a
+                      non-default-password plugin (e.g., AWSAuthenticationPlugin). Used by
+                      the reconciler to detect drift between the desired
+                      spec.forProvider.authenticationPlugin and what's actually configured
+                      on the DB so plugin changes are not silently ignored.
+                    properties:
+                      authString:
+                        description: |-
+                          AuthString is the optional auth string passed to the plugin via the
+                          AS clause. For AWSAuthenticationPlugin set this to "RDS". For native
+                          password plugins, leave empty and use PasswordSecretRef instead.
+                        type: string
+                      name:
+                        description: |-
+                          Name is the auth plugin name. Examples: "AWSAuthenticationPlugin",
+                          "mysql_native_password", "caching_sha2_password", "auth_socket".
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
                   resourceOptionsAsClauses:
                     description: ResourceOptionsAsClauses represents the applied resource
                       options
