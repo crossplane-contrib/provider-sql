@@ -47,7 +47,8 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
+	errGetSecret        = "cannot get credentials Secret"
+	errGetServerVersion = "cannot get server version"
 
 	errSelectUser             = "cannot select user"
 	errCreateUser             = "cannot create user %s"
@@ -137,17 +138,24 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.User) (managed.Typ
 		loginDB = c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
+	serverVersion, err := userDB.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
 	return &external{
-		userDB:  userDB,
-		loginDB: loginDB,
-		kube:    c.kube,
+		userDB:        userDB,
+		loginDB:       loginDB,
+		kube:          c.kube,
+		serverVersion: serverVersion,
 	}, nil
 }
 
 type external struct {
-	userDB  xsql.DB
-	loginDB xsql.DB
-	kube    client.Client
+	userDB        xsql.DB
+	loginDB       xsql.DB
+	kube          client.Client
+	serverVersion int
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.User] = &external{}

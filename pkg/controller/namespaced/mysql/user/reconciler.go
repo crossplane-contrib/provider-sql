@@ -44,8 +44,9 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errTLSConfig    = "cannot load TLS config"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errTLSConfig        = "cannot load TLS config"
+	errGetServerVersion = "cannot get server version"
 
 	errSelectUser              = "cannot select user"
 	errCreateUser              = "cannot create user"
@@ -116,15 +117,24 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
+	db := c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog)
+
+	serverVersion, err := db.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
 	return &external{
-		db:   c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog),
-		kube: c.kube,
+		db:            db,
+		kube:          c.kube,
+		serverVersion: serverVersion,
 	}, nil
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	db            xsql.DB
+	kube          client.Client
+	serverVersion int
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}

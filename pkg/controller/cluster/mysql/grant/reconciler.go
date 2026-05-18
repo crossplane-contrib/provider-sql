@@ -49,8 +49,9 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret    = "cannot get credentials Secret"
-	errTLSConfig    = "cannot load TLS config"
+	errGetSecret        = "cannot get credentials Secret"
+	errTLSConfig        = "cannot load TLS config"
+	errGetServerVersion = "cannot get server version"
 
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -139,10 +140,20 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	db := c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)
+
+	serverVersion, err := db.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
+	return &external{db: db, serverVersion: serverVersion}, nil
 }
 
-type external struct{ db xsql.DB }
+type external struct {
+	db            xsql.DB
+	serverVersion int
+}
 
 var _ managed.TypedExternalClient[*v1alpha1.Grant] = &external{}
 

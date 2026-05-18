@@ -48,6 +48,7 @@ const (
 	errGetPC             = "cannot get ProviderConfig"
 	errNoSecretRef       = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret         = "cannot get credentials Secret"
+	errGetServerVersion  = "cannot get server version"
 
 	errSelectDB = "cannot select database"
 	errCreateDB = "cannot create database"
@@ -124,10 +125,20 @@ func (c *connector) Connect(ctx context.Context, mg *clusterv1alpha1.Database) (
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newClient(secretData, "")}, nil
+	db := c.newClient(secretData, "")
+
+	serverVersion, err := db.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
+	return &external{db: db, serverVersion: serverVersion}, nil
 }
 
-type external struct{ db xsql.DB }
+type external struct {
+	db            xsql.DB
+	serverVersion int
+}
 
 var _ managed.TypedExternalClient[*clusterv1alpha1.Database] = &external{}
 

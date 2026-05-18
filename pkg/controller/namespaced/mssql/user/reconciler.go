@@ -43,7 +43,8 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errGetServerVersion = "cannot get server version"
 
 	errSelectUser             = "cannot select user"
 	errCreateUser             = "cannot create user %s"
@@ -119,17 +120,24 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
+	serverVersion, err := userDB.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
 	return &external{
-		userDB:  userDB,
-		loginDB: loginDB,
-		kube:    c.kube,
+		userDB:        userDB,
+		loginDB:       loginDB,
+		kube:          c.kube,
+		serverVersion: serverVersion,
 	}, nil
 }
 
 type external struct {
-	userDB  xsql.DB
-	loginDB xsql.DB
-	kube    client.Client
+	userDB        xsql.DB
+	loginDB       xsql.DB
+	kube          client.Client
+	serverVersion int
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}

@@ -43,7 +43,8 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errGetServerVersion = "cannot get server version"
 
 	errGrant           = "cannot grant"
 	errRevoke          = "cannot revoke"
@@ -107,10 +108,20 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Grant) (
 		return nil, err
 	}
 
-	return &external{db: c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))}, nil
+	db := c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))
+
+	serverVersion, err := db.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
+	return &external{db: db, serverVersion: serverVersion}, nil
 }
 
-type external struct{ db xsql.DB }
+type external struct {
+	db            xsql.DB
+	serverVersion int
+}
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Grant] = &external{}
 

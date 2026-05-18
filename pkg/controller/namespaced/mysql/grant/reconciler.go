@@ -45,8 +45,9 @@ import (
 )
 
 const (
-	errTrackPCUsage = "cannot track ProviderConfig usage"
-	errTLSConfig    = "cannot load TLS config"
+	errTrackPCUsage     = "cannot track ProviderConfig usage"
+	errTLSConfig        = "cannot load TLS config"
+	errGetServerVersion = "cannot get server version"
 
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -121,10 +122,20 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Grant) (
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	db := c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog)
+
+	serverVersion, err := db.GetServerVersion(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errGetServerVersion)
+	}
+
+	return &external{db: db, serverVersion: serverVersion}, nil
 }
 
-type external struct{ db xsql.DB }
+type external struct {
+	db            xsql.DB
+	serverVersion int
+}
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Grant] = &external{}
 

@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -117,11 +118,21 @@ func (c mySQLDB) GetConnectionDetails(username, password string) managed.Connect
 	}
 }
 
-// GetServerVersion is not supported by the MySQL client (only used by PostgreSQL).
+// GetServerVersion returns the MySQL server version as an integer.
+// For example, MySQL 8.0.35 returns 80035 (major*10000 + minor*100 + patch).
 func (c mySQLDB) GetServerVersion(ctx context.Context) (int, error) {
-	// This method should never be called for MySQL clients
-	// but is implemented to satisfy the xsql.DB interface
-	return 0, nil
+	db, err := sql.Open("mysql", c.dsn)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close() //nolint:errcheck
+
+	var version string
+	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
+		return 0, err
+	}
+
+	return xsql.ParseVersion(version)
 }
 
 // QuoteIdentifier for MySQL queries

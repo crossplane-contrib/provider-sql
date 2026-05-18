@@ -71,6 +71,9 @@ func (m mockDB) GetConnectionDetails(username, password string) managed.Connecti
 	return m.MockGetConnectionDetails(username, password)
 }
 func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	if m.MockGetServerVersion == nil {
+		return 0, nil
+	}
 	return m.MockGetServerVersion(ctx)
 }
 
