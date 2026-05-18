@@ -48,8 +48,8 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
-	errGetSecret = "cannot get credentials Secret"
-	errTLSConfig = "cannot load TLS config"
+	errGetSecret    = "cannot get credentials Secret"
+	errTLSConfig    = "cannot load TLS config"
 
 	errSelectUser              = "cannot select user"
 	errCreateUser              = "cannot create user"
