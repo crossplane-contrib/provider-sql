@@ -165,7 +165,6 @@ spec:
                     - table
                     - sequence
                     - function
-                    - schema
                     - type
                     type: string
                   privileges:
