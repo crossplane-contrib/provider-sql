@@ -287,7 +287,6 @@ spec:
                     type: string
                 required:
                 - objectType
-                - schema
                 - targetRole
                 type: object
               managementPolicies:
