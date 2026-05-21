@@ -267,7 +267,7 @@ spec:
                         type: object
                     type: object
                   schema:
-                    description: Schema in which the default privileges are applied
+                    description: Schema in which the default privileges are applied. Not applicable when objectType is schema.
                     type: string
                   targetRole:
                     description: |-

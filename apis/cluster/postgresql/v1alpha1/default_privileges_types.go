@@ -94,8 +94,9 @@ type DefaultPrivilegesParameters struct {
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
-	// Schema in which the default privileges are applied
-	// +required
+	// Schema in which the default privileges are applied.
+	// Not applicable when objectType is schema.
+	// +optional
 	Schema *string `json:"schema,omitempty"`
 }
 
