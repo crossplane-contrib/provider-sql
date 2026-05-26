@@ -13,6 +13,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/microsoft/go-mssqldb v1.10.0
 	github.com/pkg/errors v0.9.1
+	golang.org/x/net v0.53.0
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/utils v0.0.0-20260108192941-914a6e750570
@@ -94,7 +95,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect

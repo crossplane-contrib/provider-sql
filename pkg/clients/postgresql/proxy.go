@@ -1,78 +1,49 @@
 package postgresql
 
 import (
-	"bufio"
+	"context"
 	"database/sql"
-	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
-// httpProxyDialer tunnels connections through an HTTP CONNECT proxy.
-type httpProxyDialer struct {
+// proxyDialer adapts xsql.TunnelContext to the pq.Dialer interface, which
+// predates context and only exposes Dial and DialTimeout.
+type proxyDialer struct {
 	proxy *url.URL
 }
 
-func (d *httpProxyDialer) Dial(network, addr string) (net.Conn, error) {
-	return tunnel(&net.Dialer{}, d.proxy, addr)
+func (d *proxyDialer) Dial(_, addr string) (net.Conn, error) {
+	return xsql.TunnelContext(context.Background(), d.proxy, addr)
 }
 
-func (d *httpProxyDialer) DialTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
-	return tunnel(&net.Dialer{Timeout: timeout}, d.proxy, addr)
-}
-
-func tunnel(nd *net.Dialer, proxy *url.URL, addr string) (_ net.Conn, err error) {
-	conn, err := nd.Dial("tcp", proxy.Host)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			closeErr := conn.Close()
-			if closeErr != nil {
-				err = fmt.Errorf("error closing connection (%w) after: %w", closeErr, err)
-			}
-		}
-	}()
-	req := &http.Request{
-		Method: http.MethodConnect,
-		URL:    &url.URL{Host: addr},
-		Host:   addr,
-		Header: http.Header{},
-	}
-	if err = req.Write(conn); err != nil {
-		return nil, err
-	}
-	var resp *http.Response
-	resp, err = http.ReadResponse(bufio.NewReader(conn), req)
-	if err != nil {
-		return nil, err
-	}
-	resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != http.StatusOK {
-		err = fmt.Errorf("proxy CONNECT to %s: %s", addr, resp.Status)
-		return nil, err
-	}
-	return conn, nil
+func (d *proxyDialer) DialTimeout(_, addr string, timeout time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return xsql.TunnelContext(ctx, d.proxy, addr)
 }
 
 // openDB opens a *sql.DB for the given DSN. When HTTP_PROXY or HTTPS_PROXY is
 // set and applicable to the target endpoint, connections are tunnelled through
 // the proxy via HTTP CONNECT.
 func openDB(endpoint, port, dsn string) (*sql.DB, error) {
-	req, _ := http.NewRequest(http.MethodConnect, "https://"+endpoint+":"+port, nil)
-	proxyURL, err := http.ProxyFromEnvironment(req)
-	if err != nil || proxyURL == nil {
+	proxyURL, err := xsql.ProxyForAddr(endpoint, port)
+	if err != nil {
+		return nil, err
+	}
+	if proxyURL == nil {
 		return sql.Open("postgres", dsn)
 	}
 	connector, err := pq.NewConnector(dsn)
 	if err != nil {
 		return nil, err
 	}
-	connector.Dialer(&httpProxyDialer{proxy: proxyURL})
+	// pq.Connector.Dialer is a setter method, not a field.
+	connector.Dialer(&proxyDialer{proxy: proxyURL})
 	return sql.OpenDB(connector), nil
 }
