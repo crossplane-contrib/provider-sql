@@ -51,6 +51,51 @@ spec:
           spec:
             description: A ProviderConfigSpec defines the desired state of a ProviderConfig.
             properties:
+              connectionPool:
+                description: |-
+                  ConnectionPool tunes the underlying database/sql connection pool
+                  shared across reconciles. When omitted, Go's database/sql defaults
+                  apply (unlimited open connections, 2 idle connections, no max
+                  lifetime, no dial timeout). Configuring this is strongly
+                  recommended for any non-trivial deployment — see upstream issues
+                  #110, #195, and #220 for the failure modes the defaults can
+                  produce under load.
+                properties:
+                  connMaxIdleTime:
+                    description: |-
+                      ConnMaxIdleTime caps how long a connection may sit idle in the
+                      pool before being closed. An unset or zero value allows idle
+                      connections to live forever.
+                    type: string
+                  connMaxLifetime:
+                    description: |-
+                      ConnMaxLifetime caps how long a connection may be reused. An
+                      unset or zero value allows connections to live forever — usually
+                      undesirable behind load balancers and managed proxies that may
+                      close long-lived connections from their side. Recommended: a few
+                      minutes.
+                    type: string
+                  dialTimeout:
+                    description: |-
+                      DialTimeout bounds the TCP connect and TLS handshake that open
+                      new connections to the database. An unset or zero value leaves
+                      the go-sql-driver default (no timeout) in place. Recommended
+                      for any deployment behind a proxy that can hang on connect.
+                    type: string
+                  maxIdleConns:
+                    description: |-
+                      MaxIdleConns bounds idle pool size. A zero or unset value leaves
+                      Go's default (2) in place. Negative values disable idle
+                      connection retention.
+                    type: integer
+                  maxOpenConns:
+                    description: |-
+                      MaxOpenConns bounds simultaneous in-use connections per pool. A
+                      zero or unset value leaves Go's default (unlimited) in place,
+                      which is the storm-prone behavior #110 calls out — set this to
+                      bound the load offered to the database.
+                    type: integer
+                type: object
               credentials:
                 description: Credentials required to authenticate to this provider.
                 properties:

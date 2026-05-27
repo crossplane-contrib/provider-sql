@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
@@ -39,6 +41,80 @@ type ProviderConfigSpec struct {
 	// Optional TLS configuration for sql driver. Setting this field also requires the tls field to be set to custom.
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig"`
+
+	// ConnectionPool tunes the underlying database/sql connection pool
+	// shared across reconciles. When omitted, Go's database/sql defaults
+	// apply (unlimited open connections, 2 idle connections, no max
+	// lifetime, no dial timeout). Configuring this is strongly
+	// recommended for any non-trivial deployment — see upstream issues
+	// #110, #195, and #220 for the failure modes the defaults can
+	// produce under load.
+	// +optional
+	ConnectionPool *ConnectionPoolSpec `json:"connectionPool,omitempty"`
+}
+
+// ConnectionPoolSpec tunes the database/sql connection pool the provider
+// uses to talk to MySQL. All fields are optional; a nil ConnectionPoolSpec
+// (or a ConnectionPoolSpec with all fields zero) preserves Go's defaults.
+type ConnectionPoolSpec struct {
+	// MaxOpenConns bounds simultaneous in-use connections per pool. A
+	// zero or unset value leaves Go's default (unlimited) in place,
+	// which is the storm-prone behavior #110 calls out — set this to
+	// bound the load offered to the database.
+	// +optional
+	MaxOpenConns *int `json:"maxOpenConns,omitempty"`
+
+	// MaxIdleConns bounds idle pool size. A zero or unset value leaves
+	// Go's default (2) in place. Negative values disable idle
+	// connection retention.
+	// +optional
+	MaxIdleConns *int `json:"maxIdleConns,omitempty"`
+
+	// ConnMaxLifetime caps how long a connection may be reused. An
+	// unset or zero value allows connections to live forever — usually
+	// undesirable behind load balancers and managed proxies that may
+	// close long-lived connections from their side. Recommended: a few
+	// minutes.
+	// +optional
+	ConnMaxLifetime *metav1.Duration `json:"connMaxLifetime,omitempty"`
+
+	// ConnMaxIdleTime caps how long a connection may sit idle in the
+	// pool before being closed. An unset or zero value allows idle
+	// connections to live forever.
+	// +optional
+	ConnMaxIdleTime *metav1.Duration `json:"connMaxIdleTime,omitempty"`
+
+	// DialTimeout bounds the TCP connect and TLS handshake that open
+	// new connections to the database. An unset or zero value leaves
+	// the go-sql-driver default (no timeout) in place. Recommended
+	// for any deployment behind a proxy that can hang on connect.
+	// +optional
+	DialTimeout *metav1.Duration `json:"dialTimeout,omitempty"`
+}
+
+// ToPoolValues unpacks the optional pool spec into plain values
+// suitable for mysql.NewConnectionPoolConfig. Returns the zero value
+// for any field not set, including when the receiver itself is nil.
+func (s *ConnectionPoolSpec) ToPoolValues() (maxOpen, maxIdle int, lifetime, idleTime, dialTimeout time.Duration) {
+	if s == nil {
+		return 0, 0, 0, 0, 0
+	}
+	if s.MaxOpenConns != nil {
+		maxOpen = *s.MaxOpenConns
+	}
+	if s.MaxIdleConns != nil {
+		maxIdle = *s.MaxIdleConns
+	}
+	if s.ConnMaxLifetime != nil {
+		lifetime = s.ConnMaxLifetime.Duration
+	}
+	if s.ConnMaxIdleTime != nil {
+		idleTime = s.ConnMaxIdleTime.Duration
+	}
+	if s.DialTimeout != nil {
+		dialTimeout = s.DialTimeout.Duration
+	}
+	return
 }
 
 // TLSConfig defines the TLS configuration for the provider when tls=custom.

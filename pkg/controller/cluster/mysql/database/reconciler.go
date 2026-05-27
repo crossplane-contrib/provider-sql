@@ -63,7 +63,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.NewWithConfig}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -94,7 +94,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, pool *mysql.ConnectionPoolConfig) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Database] = &connector{}
@@ -131,7 +131,9 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	maxOpen, maxIdle, lifetime, idleTime, dialTimeout := pc.Spec.ConnectionPool.ToPoolValues()
+	poolCfg := mysql.NewConnectionPoolConfig(maxOpen, maxIdle, lifetime, idleTime, dialTimeout)
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, poolCfg)}, nil
 }
 
 type external struct{ db xsql.DB }

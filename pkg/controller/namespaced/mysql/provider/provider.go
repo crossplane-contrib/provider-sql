@@ -20,14 +20,19 @@ type ProviderInfo struct {
 	SecretData         map[string][]byte
 	TLS                *string
 	TLSConfig          *v1alpha1.TLSConfig
+	// ConnectionPool is the pool tuning carried from whichever
+	// ProviderConfig kind (namespaced or cluster) was referenced.
+	// nil preserves database/sql defaults.
+	ConnectionPool *v1alpha1.ConnectionPoolSpec
 }
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
-		secretKey  *client.ObjectKey
-		tlsMode    *string
-		tlsConfig  *v1alpha1.TLSConfig
-		keyMapping map[string]string
+		secretKey   *client.ObjectKey
+		tlsMode     *string
+		tlsConfig   *v1alpha1.TLSConfig
+		keyMapping  map[string]string
+		connectionPool *v1alpha1.ConnectionPoolSpec
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -50,6 +55,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = providerConfig.Spec.TLS
 		tlsConfig = providerConfig.Spec.TLSConfig
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		connectionPool = providerConfig.Spec.ConnectionPool
 
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
@@ -69,6 +75,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = clusterProviderConfig.Spec.TLS
 		tlsConfig = clusterProviderConfig.Spec.TLSConfig
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		connectionPool = clusterProviderConfig.Spec.ConnectionPool
 
 	default:
 		return ProviderInfo{}, errors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
@@ -89,5 +96,6 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
 		TLS:                tlsMode,
 		TLSConfig:          tlsConfig,
+		ConnectionPool:     connectionPool,
 	}, nil
 }
