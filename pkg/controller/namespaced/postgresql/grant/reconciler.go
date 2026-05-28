@@ -56,6 +56,8 @@ const (
 	errInvalidParams                    = "invalid parameters for grant type %s"
 	errGetServerVersion                 = "cannot get server version"
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
+	errWithInheritOnlyForMemberOf       = "withInherit is only valid for memberOf grants"
+	errInheritRequiresPG16              = "withInherit requires PostgreSQL 16 or later (server version %d)"
 
 	maxConcurrency = 5
 )
@@ -238,6 +240,9 @@ func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query
 	case v1alpha1.RoleForeignServer:
 		return createForeignServerGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleMember:
+		if gp.WithInherit != nil && serverVersion < 160000 {
+			return errors.Errorf(errInheritRequiresPG16, serverVersion)
+		}
 		return createMemberGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleRoutine:
 		return createRoutineGrantQueries(gp, ql, ro)
@@ -261,10 +266,31 @@ func createMemberGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro 
 	*ql = append(*ql,
 		xsql.Query{String: fmt.Sprintf("REVOKE %s FROM %s", mo, ro)},
 		xsql.Query{String: fmt.Sprintf("GRANT %s TO %s %s", mo, ro,
-			withOption(gp.WithOption),
+			membershipWithClauses(gp.WithOption, gp.WithInherit),
 		)},
 	)
 	return nil
+}
+
+// membershipWithClauses builds the WITH clause for role membership GRANTs,
+// combining the optional ADMIN/SET option and the optional INHERIT flag.
+// On PostgreSQL 16+, multiple options are comma-separated: WITH ADMIN OPTION, INHERIT FALSE.
+func membershipWithClauses(option *v1alpha1.GrantOption, inherit *bool) string {
+	var parts []string
+	if option != nil {
+		parts = append(parts, fmt.Sprintf("%s OPTION", string(*option)))
+	}
+	if inherit != nil {
+		if *inherit {
+			parts = append(parts, "INHERIT TRUE")
+		} else {
+			parts = append(parts, "INHERIT FALSE")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "WITH " + strings.Join(parts, ", ")
 }
 
 func createRoutineGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
@@ -561,6 +587,10 @@ func resolveGrantType(gp v1alpha1.GrantParameters) (v1alpha1.GrantType, error) {
 		return v1alpha1.RoleMember, nil
 	}
 
+	if gp.WithInherit != nil {
+		return "", errors.New(errWithInheritOnlyForMemberOf)
+	}
+
 	return gp.IdentifyGrantType()
 }
 
@@ -729,6 +759,9 @@ func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, ser
 	case v1alpha1.RoleForeignServer:
 		return selectForeignServerGrantQuery(gp, q)
 	case v1alpha1.RoleMember:
+		if gp.WithInherit != nil && serverVersion < 160000 {
+			return errors.Errorf(errInheritRequiresPG16, serverVersion)
+		}
 		return selectMemberGrantQuery(gp, q)
 	case v1alpha1.RoleRoutine:
 		return selectRoutineGrantQuery(gp, q)
@@ -749,16 +782,26 @@ func selectMemberGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	// A simpler query would use ::regrole to cast the roleid and member oids
 	// to their role names, but that throws an error for nonexistent roles
 	// rather than returning false.
-	q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
-		"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
-		"INNER JOIN pg_roles r ON m.member = r.oid " +
-		"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
-		"m.admin_option = $3)"
-
 	q.Parameters = []interface{}{
 		gp.Role,
 		gp.MemberOf,
 		ao,
+	}
+
+	if gp.WithInherit != nil {
+		// inherit_option is a pg_auth_members column added in PostgreSQL 16.
+		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
+			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+			"INNER JOIN pg_roles r ON m.member = r.oid " +
+			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
+			"m.admin_option = $3 AND m.inherit_option = $4)"
+		q.Parameters = append(q.Parameters, *gp.WithInherit)
+	} else {
+		q.String = "SELECT EXISTS(SELECT 1 FROM pg_auth_members m " +
+			"INNER JOIN pg_roles mo ON m.roleid = mo.oid " +
+			"INNER JOIN pg_roles r ON m.member = r.oid " +
+			"WHERE r.rolname=$1 AND mo.rolname=$2 AND " +
+			"m.admin_option = $3)"
 	}
 	return nil
 }

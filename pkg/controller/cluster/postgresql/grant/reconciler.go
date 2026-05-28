@@ -62,6 +62,7 @@ const (
 	errGetServerVersion                 = "cannot get server version"
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
 	errWithInheritOnlyForMemberOf       = "withInherit is only valid for memberOf grants"
+	errInheritRequiresPG16              = "withInherit requires PostgreSQL 16 or later (server version %d)"
 
 	maxConcurrency = 5
 )
@@ -281,6 +282,9 @@ func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query
 	case v1alpha1.RoleForeignServer:
 		return createForeignServerGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleMember:
+		if gp.WithInherit != nil && serverVersion < 160000 {
+			return errors.Errorf(errInheritRequiresPG16, serverVersion)
+		}
 		return createMemberGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleRoutine:
 		return createRoutineGrantQueries(gp, ql, ro)
@@ -797,6 +801,9 @@ func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, ser
 	case v1alpha1.RoleForeignServer:
 		return selectForeignServerGrantQuery(gp, q)
 	case v1alpha1.RoleMember:
+		if gp.WithInherit != nil && serverVersion < 160000 {
+			return errors.Errorf(errInheritRequiresPG16, serverVersion)
+		}
 		return selectMemberGrantQuery(gp, q)
 	case v1alpha1.RoleRoutine:
 		return selectRoutineGrantQuery(gp, q)

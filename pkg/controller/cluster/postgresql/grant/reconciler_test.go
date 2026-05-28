@@ -195,7 +195,8 @@ func TestObserve(t *testing.T) {
 	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
-		db xsql.DB
+		db            xsql.DB
+		serverVersion int
 	}
 
 	type args struct {
@@ -635,6 +636,7 @@ func TestObserve(t *testing.T) {
 		"SuccessRoleMembershipWithInheritNil": {
 			reason: "WithInherit nil should produce a 3-parameter query (no inherit_option filter)",
 			fields: fields{
+				serverVersion: 160000,
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						if len(q.Parameters) != 3 {
@@ -667,6 +669,7 @@ func TestObserve(t *testing.T) {
 		"SuccessRoleMembershipWithInheritFalse": {
 			reason: "WithInherit false should produce a 4-parameter query with $4 == false",
 			fields: fields{
+				serverVersion: 160000,
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						if len(q.Parameters) != 4 {
@@ -704,6 +707,7 @@ func TestObserve(t *testing.T) {
 		"SuccessRoleMembershipWithInheritTrue": {
 			reason: "WithInherit true should produce a 4-parameter query with $4 == true",
 			fields: fields{
+				serverVersion: 160000,
 				db: mockDB{
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 						if len(q.Parameters) != 4 {
@@ -746,7 +750,7 @@ func TestObserve(t *testing.T) {
 			if db == nil {
 				db = mockDB{}
 			}
-			e := external{db: db}
+			e := external{db: db, serverVersion: tc.fields.serverVersion}
 			got, err := e.Observe(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -763,7 +767,8 @@ func TestCreate(t *testing.T) {
 	goa := v1alpha1.GrantOptionAdmin
 
 	type fields struct {
-		db xsql.DB
+		db            xsql.DB
+		serverVersion int
 	}
 
 	type args struct {
@@ -1044,6 +1049,7 @@ func TestCreate(t *testing.T) {
 		"RoleMembershipWithInheritNil": {
 			reason: "WithInherit nil should produce a GRANT with no WITH clause",
 			fields: fields{
+				serverVersion: 160000,
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
 						if len(ql) != 2 {
@@ -1074,6 +1080,7 @@ func TestCreate(t *testing.T) {
 		"RoleMembershipWithInheritFalse": {
 			reason: "WithInherit false should produce a GRANT with WITH INHERIT FALSE",
 			fields: fields{
+				serverVersion: 160000,
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
 						if len(ql) != 2 {
@@ -1105,6 +1112,7 @@ func TestCreate(t *testing.T) {
 		"RoleMembershipWithInheritFalseAndAdminOption": {
 			reason: "WithInherit false and WithOption ADMIN should produce WITH ADMIN OPTION, INHERIT FALSE",
 			fields: fields{
+				serverVersion: 160000,
 				db: &mockDB{
 					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
 						if len(ql) != 2 {
@@ -1142,7 +1150,7 @@ func TestCreate(t *testing.T) {
 			if db == nil {
 				db = mockDB{}
 			}
-			e := external{db: db}
+			e := external{db: db, serverVersion: tc.fields.serverVersion}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want error, +got error:\n%s\n", tc.reason, diff)
