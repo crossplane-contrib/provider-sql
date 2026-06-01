@@ -24,7 +24,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
-	"github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
@@ -38,6 +38,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
@@ -80,7 +81,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.ModernManaged) error
-		newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+		newDB func(creds map[string][]byte, tls *string, binlog *bool, pool *mysql.ConnectionPoolConfig) xsql.DB
 	}
 
 	type args struct {
@@ -311,7 +312,7 @@ func TestObserve(t *testing.T) {
 						return mockRowsToSQLRows(
 							sqlmock.NewRows([]string{"Grants"}).
 								AddRow("GRANT CREATE, DROP ON `success-db`.* TO 'no-user'@%").
-								RowError(0, &mysql.MySQLError{Number: errCodeNoSuchGrant}),
+								RowError(0, &mysqldriver.MySQLError{Number: errCodeNoSuchGrant}),
 						), nil
 					},
 				},
@@ -1132,7 +1133,7 @@ func TestDelete(t *testing.T) {
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						if strings.HasPrefix(q.String, "REVOKE") {
-							return &mysql.MySQLError{Number: errCodeNoSuchGrant}
+							return &mysqldriver.MySQLError{Number: errCodeNoSuchGrant}
 						}
 
 						return nil
