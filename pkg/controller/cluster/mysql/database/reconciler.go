@@ -19,18 +19,14 @@ package database
 import (
 	"context"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
@@ -39,6 +35,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql/tls"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/setup"
 )
 
 const (
@@ -52,43 +49,21 @@ const (
 	errCreateDB = "cannot create database"
 	errDropDB   = "cannot drop database"
 	errUpdateDB = "cannot update database"
-
-	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
-	name := managed.ControllerName(v1alpha1.DatabaseGroupKind)
-
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-
-	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-	}
-	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
-		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
-	}
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.DatabaseGroupVersionKind),
-		reconcilerOptions...,
-	)
-
-	if err := mgr.Add(statemetrics.NewMRStateRecorder(
-		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
-		&v1alpha1.DatabaseList{}, o.MetricOptions.PollStateMetricInterval,
-	)); err != nil {
-		return err
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		For(&v1alpha1.Database{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: maxConcurrency,
-		}).
-		Complete(r)
+	return setup.Setup(mgr, o, setup.ControllerConfig{
+		GVK:      v1alpha1.DatabaseGroupVersionKind,
+		Resource: &v1alpha1.Database{},
+		List:     &v1alpha1.DatabaseList{},
+		Connector: managed.WithTypedExternalConnector(&connector{
+			kube:  mgr.GetClient(),
+			track: t.Track,
+			newDB: mysql.New,
+		}),
+	})
 }
 
 type connector struct {

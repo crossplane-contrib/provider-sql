@@ -19,18 +19,14 @@ package database
 import (
 	"context"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
@@ -38,6 +34,7 @@ import (
 	clusterv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/setup"
 )
 
 const (
@@ -52,42 +49,21 @@ const (
 	errSelectDB = "cannot select database"
 	errCreateDB = "cannot create database"
 	errDropDB   = "cannot drop database"
-
-	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Database managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
-	name := managed.ControllerName(clusterv1alpha1.DatabaseGroupKind)
-
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &clusterv1alpha1.ProviderConfigUsage{})
-
-	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newClient: mssql.New}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-	}
-	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
-		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
-	}
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(clusterv1alpha1.DatabaseGroupVersionKind),
-		reconcilerOptions...,
-	)
-	if err := mgr.Add(statemetrics.NewMRStateRecorder(
-		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
-		&clusterv1alpha1.DatabaseList{}, o.MetricOptions.PollStateMetricInterval,
-	)); err != nil {
-		return err
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		For(&clusterv1alpha1.Database{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: maxConcurrency,
-		}).
-		Complete(r)
+	return setup.Setup(mgr, o, setup.ControllerConfig{
+		GVK:      clusterv1alpha1.DatabaseGroupVersionKind,
+		Resource: &clusterv1alpha1.Database{},
+		List:     &clusterv1alpha1.DatabaseList{},
+		Connector: managed.WithTypedExternalConnector(&connector{
+			kube:      mgr.GetClient(),
+			track:     t.Track,
+			newClient: mssql.New,
+		}),
+	})
 }
 
 type connector struct {

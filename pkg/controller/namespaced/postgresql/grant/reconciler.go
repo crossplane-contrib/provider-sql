@@ -21,17 +21,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
@@ -40,6 +36,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/setup"
 )
 
 const (
@@ -56,8 +53,6 @@ const (
 	errInvalidParams                    = "invalid parameters for grant type %s"
 	errGetServerVersion                 = "cannot get server version"
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
-
-	maxConcurrency = 5
 )
 
 type connector struct {
@@ -917,35 +912,17 @@ func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query
 
 // Setup adds a controller that reconciles Grant managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
-	name := managed.ControllerName(v1alpha1.GrantGroupKind)
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-
-	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-	}
-	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
-		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
-	}
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.GrantGroupVersionKind),
-		reconcilerOptions...,
-	)
-	if err := mgr.Add(statemetrics.NewMRStateRecorder(
-		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
-		&v1alpha1.GrantList{}, o.MetricOptions.PollStateMetricInterval,
-	)); err != nil {
-		return err
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		For(&v1alpha1.Grant{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: maxConcurrency,
-		}).
-		Complete(r)
+	return setup.Setup(mgr, o, setup.ControllerConfig{
+		GVK:      v1alpha1.GrantGroupVersionKind,
+		Resource: &v1alpha1.Grant{},
+		List:     &v1alpha1.GrantList{},
+		Connector: managed.WithTypedExternalConnector(&connector{
+			kube:  mgr.GetClient(),
+			track: t.Track,
+			newDB: postgresql.New,
+		}),
+	})
 }
 
 func (c *external) Update(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalUpdate, error) {
