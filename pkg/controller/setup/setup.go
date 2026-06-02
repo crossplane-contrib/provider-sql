@@ -39,6 +39,7 @@ type ControllerConfig struct {
 	Resource  client.Object
 	List      resource.ManagedList
 	Connector managed.ReconcilerOption
+	ExtraOpts []managed.ReconcilerOption
 }
 
 // Setup registers a managed resource controller with safe-start support.
@@ -53,6 +54,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options, cfg ControllerConfig) error
 			managed.WithPollInterval(o.PollInterval),
 			managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
 		}
+		opts = append(opts, cfg.ExtraOpts...)
 		if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 			opts = append(opts, managed.WithManagementPolicies())
 		}

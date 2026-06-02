@@ -69,6 +69,9 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 			track: t.Track,
 			newDB: mysql.New,
 		}),
+		ExtraOpts: []managed.ReconcilerOption{
+			managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
+		},
 	})
 }
 

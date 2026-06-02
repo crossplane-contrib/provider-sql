@@ -59,6 +59,9 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 			track:     t.Track,
 			newClient: mssql.New,
 		}),
+		ExtraOpts: []managed.ReconcilerOption{
+			managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
+		},
 	})
 }
 
