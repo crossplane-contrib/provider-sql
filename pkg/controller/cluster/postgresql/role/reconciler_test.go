@@ -80,6 +80,70 @@ func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
 	return m.MockGetServerVersion(ctx)
 }
 
+func Test_clusterSecretMapper(t *testing.T) {
+	secret := &corev1.Secret{}
+	secret.Name = "pwsecret"
+	secret.Namespace = "ns-a"
+
+	mock := &test.MockClient{
+		MockList: func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+			rs := &v1alpha1.RoleList{
+				Items: []v1alpha1.Role{
+					{ObjectMeta: v1.ObjectMeta{Namespace: "ns-a", Name: "r1"}, Spec: v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &xpv1.SecretKeySelector{SecretReference: xpv1.SecretReference{Name: "pwsecret", Namespace: "ns-a"}}}}},
+					{ObjectMeta: v1.ObjectMeta{Namespace: "ns-b", Name: "r2"}, Spec: v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &xpv1.SecretKeySelector{SecretReference: xpv1.SecretReference{Name: "other", Namespace: "ns-b"}}}}},
+				},
+			}
+			*list.(*v1alpha1.RoleList) = *rs
+			return nil
+		},
+	}
+
+	reqs := clusterSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name: %v", reqs[0])
+	}
+}
+
+func Test_clusterSecretMapper_SecretDataChange(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{Name: "pwsecret", Namespace: "ns-a"},
+		Data:       map[string][]byte{"password": []byte("old")},
+	}
+
+	mock := &test.MockClient{
+		MockList: func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+			rs := &v1alpha1.RoleList{
+				Items: []v1alpha1.Role{
+					{ObjectMeta: v1.ObjectMeta{Namespace: "ns-a", Name: "r1"}, Spec: v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &xpv1.SecretKeySelector{SecretReference: xpv1.SecretReference{Name: "pwsecret", Namespace: "ns-a"}}}}},
+					{ObjectMeta: v1.ObjectMeta{Namespace: "ns-b", Name: "r2"}, Spec: v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &xpv1.SecretKeySelector{SecretReference: xpv1.SecretReference{Name: "other", Namespace: "ns-b"}}}}},
+				},
+			}
+			*list.(*v1alpha1.RoleList) = *rs
+			return nil
+		},
+	}
+
+	reqs := clusterSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name: %v", reqs[0])
+	}
+
+	secret.Data["password"] = []byte("new")
+	reqs = clusterSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request after password change, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name after password change: %v", reqs[0])
+	}
+}
+
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
