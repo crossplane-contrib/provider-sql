@@ -289,6 +289,13 @@ spec:
                 - objectType
                 - targetRole
                 type: object
+                x-kubernetes-validations:
+                - message: schema is required when objectType is not schema
+                  rule: '!has(self.objectType) || self.objectType == ''schema'' ||
+                    has(self.schema)'
+                - message: schema must not be set when objectType is schema
+                  rule: '!has(self.objectType) || self.objectType != ''schema'' ||
+                    !has(self.schema)'
               managementPolicies:
                 default:
                 - '*'
