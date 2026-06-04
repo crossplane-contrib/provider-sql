@@ -83,6 +83,74 @@ func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
 	return m.MockGetServerVersion(ctx)
 }
 
+func Test_namespacedSecretMapper(t *testing.T) {
+	secret := &corev1.Secret{}
+	secret.Name = "pwsecret"
+	secret.Namespace = "myns"
+
+	mock := &test.MockClient{
+		MockList: func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+			rs := &v1alpha1.RoleList{
+				Items: []v1alpha1.Role{
+					{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "myns", Name: "r1"},
+						Spec:       v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &common.LocalSecretKeySelector{LocalSecretReference: common.LocalSecretReference{Name: "pwsecret"}}}},
+					},
+				},
+			}
+			*list.(*v1alpha1.RoleList) = *rs
+			return nil
+		},
+	}
+
+	reqs := namespacedSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name: %v", reqs[0])
+	}
+}
+
+func Test_namespacedSecretMapper_SecretDataChange(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "pwsecret", Namespace: "myns"},
+		Data:       map[string][]byte{"password": []byte("old")},
+	}
+
+	mock := &test.MockClient{
+		MockList: func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+			rs := &v1alpha1.RoleList{
+				Items: []v1alpha1.Role{
+					{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "myns", Name: "r1"},
+						Spec:       v1alpha1.RoleSpec{ForProvider: v1alpha1.RoleParameters{PasswordSecretRef: &common.LocalSecretKeySelector{LocalSecretReference: common.LocalSecretReference{Name: "pwsecret"}}}},
+					},
+				},
+			}
+			*list.(*v1alpha1.RoleList) = *rs
+			return nil
+		},
+	}
+
+	reqs := namespacedSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name: %v", reqs[0])
+	}
+
+	secret.Data["password"] = []byte("new")
+	reqs = namespacedSecretMapper(mock, secret)
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request after password change, got %d", len(reqs))
+	}
+	if reqs[0].Name != "r1" {
+		t.Fatalf("unexpected reconcile name after password change: %v", reqs[0])
+	}
+}
+
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.ModernManaged) error { return nil }
