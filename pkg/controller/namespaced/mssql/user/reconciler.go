@@ -119,6 +119,8 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
 	}
 
+	// To add version-gated logic, call userDB.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{
 		userDB:  userDB,
 		loginDB: loginDB,

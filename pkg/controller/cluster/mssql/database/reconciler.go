@@ -124,6 +124,8 @@ func (c *connector) Connect(ctx context.Context, mg *clusterv1alpha1.Database) (
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{db: c.newClient(secretData, "")}, nil
 }
 

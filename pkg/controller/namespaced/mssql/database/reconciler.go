@@ -104,6 +104,8 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database
 		return nil, err
 	}
 
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{db: c.newClient(providerInfo.SecretData, "")}, nil
 }
 

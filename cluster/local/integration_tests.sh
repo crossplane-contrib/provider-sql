@@ -203,7 +203,7 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
+  MARIADB_VERSION="${MARIADB_VERSION:-12}" envsubst '${MARIADB_VERSION}' < "${scriptdir}/mariadb.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for MariaDB to be ready"
   "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
@@ -228,7 +228,7 @@ setup_mariadb_tls() {
   "
 
   # Deploy MariaDB using official mariadb image with TLS
-  "${KUBECTL}" apply -f "${scriptdir}/mariadb.tls.server.yaml"
+  MARIADB_VERSION="${MARIADB_VERSION:-12}" envsubst '${MARIADB_VERSION}' < "${scriptdir}/mariadb.tls.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for MariaDB to be ready"
   "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s

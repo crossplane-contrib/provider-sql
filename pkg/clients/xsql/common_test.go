@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRemapCredentialKeys(t *testing.T) {
@@ -109,4 +111,45 @@ func TestRemapCredentialKeys(t *testing.T) {
 			t.Error("RemapCredentialKeys mutated the original data map")
 		}
 	})
+}
+
+func TestParseVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    int
+		wantErr bool
+	}{
+		// MySQL-style versions
+		{name: "MySQL_Standard", version: "8.0.35", want: 80035},
+		{name: "MySQL_WithSuffix", version: "8.0.35-0ubuntu0.22.04.1", want: 80035},
+		{name: "MySQL_MajorMinorOnly", version: "8.0", want: 80000},
+		{name: "MySQL_9", version: "9.1.0", want: 90100},
+		{name: "MariaDB", version: "10.11.6-MariaDB", want: 101106},
+
+		// MSSQL-style versions (build number > 99, ignored)
+		{name: "MSSQL_2022", version: "16.0.1125.1", want: 160000},
+		{name: "MSSQL_2019", version: "15.0.4355.3", want: 150000},
+		{name: "MSSQL_NonZeroMinor", version: "16.5.100.1", want: 160500},
+
+		// PostgreSQL-style (for reference, PG uses its own query)
+		{name: "ThreeDigitPatch", version: "14.2.1", want: 140201},
+		{name: "PatchExactly99", version: "14.0.99", want: 140099},
+		{name: "PatchOver99", version: "14.0.100", want: 140000},
+
+		// Errors
+		{name: "InvalidFormat", version: "invalid", wantErr: true},
+		{name: "EmptyString", version: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseVersion(tt.version)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
