@@ -73,6 +73,8 @@ func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
 	return m.MockGetServerVersion(ctx)
 }
 
+func ptrString(s string) *string { return &s }
+
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 
@@ -534,6 +536,101 @@ func TestCreate(t *testing.T) {
 				},
 			},
 		},
+		"AuthenticationPluginWithAuthString": {
+			reason:    "When AuthenticationPlugin is set the user must be created via IDENTIFIED WITH ... AS, with no password",
+			comparePw: true,
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.HasPrefix(q.String, "CREATE USER ") {
+							return errors.New("unexpected query: " + q.String)
+						}
+						if !strings.Contains(q.String, "IDENTIFIED WITH `AWSAuthenticationPlugin` AS 'RDS'") {
+							return errors.New("expected IDENTIFIED WITH clause, got: " + q.String)
+						}
+						if strings.Contains(q.String, "IDENTIFIED BY") {
+							return errors.New("password clause should not be emitted, got: " + q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS"),
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c: managed.ExternalCreation{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
+		},
+		"AuthenticationPluginNoAuthString": {
+			reason:    "When AuthenticationPlugin has no AuthString the AS clause must be omitted",
+			comparePw: true,
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.HasPrefix(q.String, "CREATE USER ") {
+							return errors.New("unexpected query: " + q.String)
+						}
+						if !strings.Contains(q.String, "IDENTIFIED WITH `auth_socket`") {
+							return errors.New("expected IDENTIFIED WITH clause, got: " + q.String)
+						}
+						if strings.Contains(q.String, " AS ") {
+							return errors.New("AS clause should not be emitted, got: " + q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name: "auth_socket",
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c: managed.ExternalCreation{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -683,6 +780,136 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 			want: want{},
+		},
+		"AuthenticationPluginSkipsAlterPassword": {
+			reason: "When AuthenticationPlugin is already applied (observed == desired), Update must be a no-op for the password path — no ALTER USER ... IDENTIFIED BY",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "IDENTIFIED BY") {
+							return errors.New("ALTER USER ... IDENTIFIED BY must not be run for plugin-auth users, got: " + q.String)
+						}
+						if strings.Contains(q.String, "IDENTIFIED WITH") {
+							return errors.New("ALTER USER ... IDENTIFIED WITH must not run when observed plugin matches desired, got: " + q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS"),
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS"),
+							},
+						},
+					},
+				},
+			},
+			want: want{},
+		},
+		"AuthenticationPluginDriftPasswordToPlugin": {
+			reason: "When observed has no plugin (password user) and desired has AuthenticationPlugin, Update must emit ALTER USER ... IDENTIFIED WITH",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "IDENTIFIED WITH `AWSAuthenticationPlugin` AS 'RDS'") {
+							return errors.New("expected ALTER USER ... IDENTIFIED WITH `AWSAuthenticationPlugin` AS 'RDS', got: " + q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS"),
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				c: managed.ExternalUpdate{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
+		},
+		"AuthenticationPluginDriftAuthStringChange": {
+			reason: "When observed plugin matches desired name but authString differs, Update must emit ALTER USER ... IDENTIFIED WITH for the new authString",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if !strings.Contains(q.String, "IDENTIFIED WITH `AWSAuthenticationPlugin` AS 'RDS2'") {
+							return errors.New("expected ALTER USER with new authString RDS2, got: " + q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS2"),
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name:       "AWSAuthenticationPlugin",
+								AuthString: ptrString("RDS"),
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				c: managed.ExternalUpdate{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
 		},
 		"UpdatePassword": {
 			reason: "The password must be updated",
