@@ -39,6 +39,8 @@ kind: Role
 metadata:
   name: ownerrole
   namespace: default
+  labels:
+    role: owner
 spec:
   writeConnectionSecretToRef:
     name: ownerrole-secret

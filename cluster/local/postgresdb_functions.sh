@@ -110,6 +110,23 @@ setup_postgresdb_tests(){
   echo_step_completed
 }
 
+check_database_owner_ref() {
+  echo_step "check if database created with ownerRef has correct owner"
+
+  local owner
+  owner=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d postgres -wtAc \
+    "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = 'db-owner-ref';")
+  owner=$(echo "${owner}" | xargs)
+
+  if [ "${owner}" = "ownerrole" ]; then
+    echo_info "ownerRef resolved correctly: owner=${owner}"
+  else
+    echo_error "ERROR: expected owner 'ownerrole' but got '${owner}'"
+  fi
+
+  echo_step_completed
+}
+
 check_all_roles_privileges() {
   # check if granting mechanism is working properly
   echo_step "check if grant mechanism is working"
@@ -431,6 +448,7 @@ integration_tests_postgres() {
   setup_observe_only_database
   setup_postgresdb_tests
   check_observe_only_database
+  check_database_owner_ref
   check_all_roles_privileges
   check_all_schema_privileges
   check_custom_object_privileges

@@ -40,7 +40,19 @@ type DatabaseParameters struct {
 	// use the default (namely, the user executing the command). To create a
 	// database owned by another role, you must be a direct or indirect member
 	// of that role, or be a superuser.
+	// +optional
+	// +crossplane:generate:reference:type=Role
 	Owner *string `json:"owner,omitempty"`
+
+	// OwnerRef references the role object that will own this database.
+	// +immutable
+	// +optional
+	OwnerRef *xpv1.NamespacedReference `json:"ownerRef,omitempty"`
+
+	// OwnerSelector selects a reference to a Role that will own this database.
+	// +immutable
+	// +optional
+	OwnerSelector *xpv1.NamespacedSelector `json:"ownerSelector,omitempty"`
 
 	// The name of the template from which to create the new database, or
 	// DEFAULT to use the default template (template1).
