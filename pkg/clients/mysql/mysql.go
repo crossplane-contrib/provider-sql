@@ -27,7 +27,6 @@ type mySQLDB struct {
 
 // New returns a new MySQL database client.
 func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
-	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])

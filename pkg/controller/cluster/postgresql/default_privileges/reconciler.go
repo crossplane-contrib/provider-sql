@@ -132,7 +132,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 		database = *mg.Spec.ForProvider.Database
 	}
 
-	return &external{db: c.newDB(s.Data, database, clients.ToString(pc.Spec.SSLMode))}, nil
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	return &external{db: c.newDB(secretData, database, clients.ToString(pc.Spec.SSLMode))}, nil
 }
 
 type external struct {

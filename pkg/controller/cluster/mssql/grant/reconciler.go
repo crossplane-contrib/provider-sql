@@ -124,7 +124,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	return &external{db: c.newClient(s.Data, ptr.Deref(mg.Spec.ForProvider.Database, ""))}, nil
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	return &external{db: c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))}, nil
 }
 
 type external struct{ db xsql.DB }

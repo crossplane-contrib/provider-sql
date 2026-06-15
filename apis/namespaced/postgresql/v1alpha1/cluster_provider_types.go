@@ -48,6 +48,12 @@ type ClusterProviderCredentials struct {
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
 	ConnectionSecretRef xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
+
+	// SecretKeyMapping allows overriding the default secret key names used
+	// to read credentials from the connection secret. When not specified,
+	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
+	// +optional
+	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
 }
 
 // A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.
