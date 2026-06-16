@@ -164,7 +164,7 @@ func withOption(option *v1alpha1.GrantOption) string {
 
 func inSchema(params *v1alpha1.DefaultPrivilegesParameters) string {
 	// PostgreSQL does not allow IN SCHEMA with ON SCHEMAS.
-	if params.Schema != nil && *params.ObjectType != "schema" {
+	if params.Schema != nil && (params.ObjectType == nil || *params.ObjectType != "schema") {
 		return fmt.Sprintf("IN SCHEMA %s", pq.QuoteIdentifier(*params.Schema))
 	}
 	return ""
