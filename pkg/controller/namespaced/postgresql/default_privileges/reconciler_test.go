@@ -931,6 +931,35 @@ func TestDelete(t *testing.T) {
 			},
 			want: nil,
 		},
+		"SuccessSchemaObjectType": {
+			reason: "Delete with objectType schema should not include IN SCHEMA and should target SCHEMAS",
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("grantee-role"),
+							ObjectType: ptr.To("schema"),
+							TargetRole: ptr.To("target-role"),
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "IN SCHEMA") {
+							t.Errorf("REVOKE for objectType schema should not contain IN SCHEMA, got: %s", q.String)
+						}
+						if !strings.Contains(q.String, "ON SCHEMAS") {
+							t.Errorf("REVOKE should target SCHEMAS, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			want: nil,
+		},
 		"SuccessVerifySQL": {
 			reason: "Delete should generate correct REVOKE SQL with proper role placement",
 			args: args{
