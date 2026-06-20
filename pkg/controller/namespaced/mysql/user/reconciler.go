@@ -117,7 +117,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 	}
 
 	return &external{
-		db:   c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog, false),
+		db:   c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog, providerInfo.Cleartext),
 		kube: c.kube,
 	}, nil
 }
