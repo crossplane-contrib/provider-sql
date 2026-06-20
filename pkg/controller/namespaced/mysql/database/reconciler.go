@@ -112,7 +112,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog, false)}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog, providerInfo.Cleartext)}, nil
 }
 
 type external struct{ db xsql.DB }

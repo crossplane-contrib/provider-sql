@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -22,12 +23,18 @@ type ProviderInfo struct {
 	SSLMode            *string
 }
 
+// injectIAM generates and injects an AWS IAM auth token. It is a package
+// variable so tests can replace it with a stub.
+var injectIAM = awsiam.Inject
+
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
 		secretKey       *client.ObjectKey
 		defaultDatabase string
 		sslMode         *string
 		keyMapping      map[string]string
+		source          v1alpha1.PostgreSQLConnectionSource
+		region          *string
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -51,6 +58,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		defaultDatabase = providerConfig.Spec.DefaultDatabase
 		sslMode = providerConfig.Spec.SSLMode
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		source = providerConfig.Spec.Credentials.Source
+		region = providerConfig.Spec.Credentials.Region
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
 			ObjectMeta: metav1.ObjectMeta{
@@ -70,6 +79,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		defaultDatabase = clusterProviderConfig.Spec.DefaultDatabase
 		sslMode = clusterProviderConfig.Spec.SSLMode
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		source = clusterProviderConfig.Spec.Credentials.Source
+		region = clusterProviderConfig.Spec.Credentials.Region
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
 	}
@@ -84,9 +95,21 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		return ProviderInfo{}, provErrors.GetSecretError(err)
 	}
 
+	secretData := xsql.RemapCredentialKeys(s.Data, keyMapping)
+
+	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		if err := injectIAM(ctx, region, secretData); err != nil {
+			return ProviderInfo{}, provErrors.GenerateIAMTokenError(err)
+		}
+		// IAM auth requires TLS. Cert verification depends on the operator
+		// supplying the RDS CA (e.g. via trust-manager or a mounted secret).
+		requireMode := "require"
+		sslMode = &requireMode
+	}
+
 	return ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
-		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
+		SecretData:         secretData,
 		DefaultDatabase:    defaultDatabase,
 		SSLMode:            sslMode,
 	}, nil
