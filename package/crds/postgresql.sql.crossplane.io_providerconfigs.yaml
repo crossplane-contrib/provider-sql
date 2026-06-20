@@ -70,6 +70,12 @@ spec:
                     - name
                     - namespace
                     type: object
+                  region:
+                    description: |-
+                      Region is the AWS region used to generate the IAM authentication token
+                      when source is AWSIAMAuth. When unset it falls back to a "region" key in
+                      the connection secret, then to the controller's AWS environment.
+                    type: string
                   secretKeyMapping:
                     description: |-
                       SecretKeyMapping allows overriding the default secret key names used
@@ -97,6 +103,7 @@ spec:
                     description: Source of the provider credentials.
                     enum:
                     - PostgreSQLConnectionSecret
+                    - AWSIAMAuth
                     type: string
                 required:
                 - source

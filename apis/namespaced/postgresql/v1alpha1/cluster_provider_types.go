@@ -41,7 +41,7 @@ type ClusterProviderConfigSpec struct {
 // ClusterProviderCredentials required to authenticate.
 type ClusterProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret
+	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret;AWSIAMAuth
 	Source PostgreSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
@@ -54,6 +54,12 @@ type ClusterProviderCredentials struct {
 	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
 	// +optional
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+
+	// Region is the AWS region used to generate the IAM authentication token
+	// when source is AWSIAMAuth. When unset it falls back to a "region" key in
+	// the connection secret, then to the controller's AWS environment.
+	// +optional
+	Region *string `json:"region,omitempty"`
 }
 
 // A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.
