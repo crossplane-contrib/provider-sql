@@ -47,6 +47,19 @@ func New(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsq
 	}
 }
 
+// EnsureTLS returns a TLS mode that guarantees an encrypted connection, for use
+// with AWS IAM authentication. If mode is unset or non-encrypting
+// ("preferred"/"false") it returns "skip-verify" (encrypted but unverified);
+// otherwise it returns mode unchanged so an operator-configured verifying mode
+// ("true"/"custom", backed by the RDS CA) is preserved.
+func EnsureTLS(mode *string) *string {
+	if mode == nil || *mode == "false" || *mode == "preferred" {
+		skipVerify := "skip-verify"
+		return &skipVerify
+	}
+	return mode
+}
+
 // DSN returns the DSN URL. When cleartext is true, allowCleartextPasswords=true
 // is appended (required for AWS RDS IAM authentication).
 func DSN(username, password, endpoint, port, tls string, binlog *bool, cleartext bool) string {

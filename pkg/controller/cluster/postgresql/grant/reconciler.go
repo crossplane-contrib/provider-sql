@@ -41,6 +41,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -50,6 +51,8 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+
+	errGenerateIAMToken = "cannot generate AWS IAM authentication token"
 
 	errNotGrant     = "managed resource is not a Grant custom resource"
 	errSelectGrant  = "cannot select grant"
@@ -78,6 +81,10 @@ const (
 	// Version-gated features must therefore not treat it as an old server.
 	versionUnknown = 0
 )
+
+// injectIAM generates and injects an AWS IAM auth token. It is a package
+// variable so tests can replace it with a stub.
+var injectIAM = awsiam.Inject
 
 type connector struct {
 	kube  client.Client
@@ -129,7 +136,15 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	xdb := c.newDB(secretData, connectDatabase(mg.Spec.ForProvider, pc.Spec.DefaultDatabase), clients.ToString(pc.Spec.SSLMode))
+
+	sslMode := clients.ToString(pc.Spec.SSLMode)
+	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
+			return nil, errors.Wrap(err, errGenerateIAMToken)
+		}
+		sslMode = "require"
+	}
+	xdb := c.newDB(secretData, connectDatabase(mg.Spec.ForProvider, pc.Spec.DefaultDatabase), sslMode)
 
 	// A server that cannot report its version is not a reason to fail: only
 	// table grants are version dependent, and ExpandPrivilegesWithVersion

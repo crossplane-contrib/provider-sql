@@ -38,6 +38,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -47,6 +48,8 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+
+	errGenerateIAMToken = "cannot generate AWS IAM authentication token"
 
 	errSelectExtension = "cannot select extension"
 	errCreateExtension = "cannot create extension"
@@ -88,6 +91,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+// injectIAM generates and injects an AWS IAM auth token. It is a package
+// variable so tests can replace it with a stub.
+var injectIAM = awsiam.Inject
+
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
@@ -123,13 +130,21 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Extension) (manage
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
 
+	sslMode := clients.ToString(pc.Spec.SSLMode)
+	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
+			return nil, errors.Wrap(err, errGenerateIAMToken)
+		}
+		sslMode = "require"
+	}
+
 	// We do not want to create an extension on the default DB
 	// if the user was expecting a database name to be resolved.
 	if mg.Spec.ForProvider.Database != nil {
-		return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+		return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, sslMode)}, nil
 	}
 
-	return &external{db: c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode))}, nil
+	return &external{db: c.newDB(secretData, pc.Spec.DefaultDatabase, sslMode)}, nil
 }
 
 type external struct{ db xsql.DB }

@@ -66,6 +66,14 @@ func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
+	// Stub the AWS IAM token injection so the success case needs no AWS access.
+	origInject := injectIAM
+	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
+		creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("iam-token")
+		return nil
+	}
+	defer func() { injectIAM = origInject }()
+
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
@@ -160,6 +168,50 @@ func TestConnect(t *testing.T) {
 				},
 			},
 			want: errors.Wrap(errBoom, errGetSecret),
+		},
+		"SuccessAWSIAMAuth": {
+			reason: "When source is AWSIAMAuth, a token is injected as the password, cleartext is enabled and TLS is forced.",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{Namespace: "ns", Name: "s"}
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								xpv1.ResourceCredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+								xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+								xpv1.ResourceCredentialsSecretUserKey:     []byte("crossplane_admin"),
+							}
+						}
+						return nil
+					}),
+				},
+				track: nopUsage,
+				newDB: func(creds map[string][]byte, tls *string, _ *bool, cleartext bool) xsql.DB {
+					if !cleartext {
+						t.Error("expected cleartext=true for AWS IAM auth")
+					}
+					if got := string(creds[xpv1.ResourceCredentialsSecretPasswordKey]); got != "iam-token" {
+						t.Errorf("expected injected token as password, got %q", got)
+					}
+					if tls == nil || *tls != "skip-verify" {
+						t.Errorf("expected TLS forced to skip-verify, got %v", tls)
+					}
+					return mockDB{}
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							ProviderConfigReference: &xpv1.Reference{},
+						},
+					},
+				},
+			},
+			want: nil,
 		},
 	}
 
