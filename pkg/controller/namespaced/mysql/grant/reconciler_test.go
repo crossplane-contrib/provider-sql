@@ -80,7 +80,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.ModernManaged) error
-		newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+		newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
 	}
 
 	type args struct {

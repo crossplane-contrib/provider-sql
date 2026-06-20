@@ -102,7 +102,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
@@ -139,7 +139,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, false)}, nil
 }
 
 type external struct{ db xsql.DB }
