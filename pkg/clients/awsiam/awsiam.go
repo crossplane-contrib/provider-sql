@@ -24,6 +24,7 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/pkg/errors"
@@ -37,6 +38,7 @@ const (
 	errMissingConnDetails = "connection secret must contain endpoint, port and username for AWS IAM authentication"
 	errNoRegion           = "AWS region could not be resolved: set spec.credentials.region, a \"region\" key in the connection secret, or the controller's AWS region (e.g. AWS_REGION)"
 	errBuildToken         = "cannot generate AWS RDS IAM authentication token"
+	errLoadConfig         = "cannot load AWS configuration"
 )
 
 // TokenBuilder has the same signature as auth.BuildAuthToken from the AWS SDK.
@@ -90,4 +92,17 @@ func InjectToken(ctx context.Context, creds map[string][]byte, region string,
 
 	creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(token)
 	return nil
+}
+
+// Inject loads AWS configuration from the environment, resolves the region
+// (ProviderConfig field > secret "region" key > environment) and injects an RDS
+// IAM authentication token into creds as the password. It is the entry point a
+// reconciler's Connect() calls when the credentials source is AWS IAM auth.
+func Inject(ctx context.Context, specRegion *string, creds map[string][]byte) error {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return errors.Wrap(err, errLoadConfig)
+	}
+	region := ResolveRegion(specRegion, creds, cfg.Region)
+	return InjectToken(ctx, creds, region, cfg.Credentials, auth.BuildAuthToken)
 }

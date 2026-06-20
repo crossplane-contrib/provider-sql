@@ -40,6 +40,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql/tls"
@@ -51,6 +52,8 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
+
+	errGenerateIAMToken = "cannot generate AWS IAM authentication token"
 
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -99,6 +102,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+// injectIAM generates and injects an AWS IAM auth token. It is a package
+// variable so tests can replace it with a stub.
+var injectIAM = awsiam.Inject
+
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
@@ -139,7 +146,19 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, false)}, nil
+
+	cleartext := false
+	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
+			return nil, errors.Wrap(err, errGenerateIAMToken)
+		}
+		cleartext = true
+		// IAM auth requires TLS. The operator supplies the RDS CA (e.g. via
+		// trust-manager or a mounted secret); honour a verifying tls mode if set,
+		// otherwise fall back to an encrypted (unverified) connection.
+		tlsName = mysql.EnsureTLS(tlsName)
+	}
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, cleartext)}, nil
 }
 
 type external struct{ db xsql.DB }
