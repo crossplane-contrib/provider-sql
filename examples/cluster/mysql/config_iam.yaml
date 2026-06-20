@@ -1,0 +1,30 @@
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+spec:
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      namespace: crossplane-system
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # tls "true" verifies the server certificate against the pod trust store. The
+  # Amazon RDS CA must be made available to the provider pod (see
+  # docs/aws-iam-auth.md), for example with trust-manager. Use tls: custom to
+  # point at a mounted RDS CA secret instead. If TLS is left unset, IAM auth
+  # falls back to an encrypted but unverified connection.
+  tls: "true"
+---
+# The connection secret holds only endpoint, port and username - no password.
+# The provider generates a short-lived IAM token and uses it as the password.
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: aurora-conn
+#   namespace: crossplane-system
+# stringData:
+#   endpoint: my-cluster.cluster-xxxxxxxx.us-east-1.rds.amazonaws.com
+#   port: "3306"
+#   username: crossplane_admin

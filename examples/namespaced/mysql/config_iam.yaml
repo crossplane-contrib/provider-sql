@@ -1,0 +1,15 @@
+---
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+  namespace: default
+spec:
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # See docs/aws-iam-auth.md for the RDS CA trust setup. tls: "true" verifies
+  # against the pod trust store; tls: custom points at a mounted RDS CA secret.
+  tls: "true"
