@@ -53,6 +53,16 @@ type DatabaseParameters struct {
 	// +optional
 	Strategy *DatabaseStrategy `json:"strategy,omitempty"`
 
+	// ForceDrop controls whether the database is dropped with the WITH (FORCE)
+	// option, which terminates every existing connection to the database
+	// before dropping it. This is useful when an application (e.g. a long-lived
+	// connection pool) keeps the database in use and would otherwise cause the
+	// drop to fail with SQLSTATE 55006 (object_in_use).
+	// This field only affects deletion and requires PostgreSQL 13+.
+	// Defaults to false.
+	// +optional
+	ForceDrop *bool `json:"forceDrop,omitempty"`
+
 	// Character set encoding to use in the new database. Specify a string
 	// constant (e.g., 'SQL_ASCII'), or an integer encoding number, or DEFAULT
 	// to use the default encoding (namely, the encoding of the template

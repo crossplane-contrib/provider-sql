@@ -207,6 +207,11 @@ func (in *DatabaseParameters) DeepCopyInto(out *DatabaseParameters) {
 		*out = new(DatabaseStrategy)
 		**out = **in
 	}
+	if in.ForceDrop != nil {
+		in, out := &in.ForceDrop, &out.ForceDrop
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Encoding != nil {
 		in, out := &in.Encoding, &out.Encoding
 		*out = new(string)
