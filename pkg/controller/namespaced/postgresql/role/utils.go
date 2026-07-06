@@ -63,7 +63,8 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		return newPwd, changed, nil
 	}
 
-	return "", c.shouldResetPassword(ctx, role), nil
+	shouldReset, err := c.shouldResetPassword(ctx, role)
+	return "", shouldReset, err
 }
 
 // shouldResetPassword returns true when a password change is needed for the non-BYOP path.
@@ -71,11 +72,11 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 // password, no reset is needed; if the secret is
 // absent or empty, a role restoration is assumed and a reset is triggered.
 // Also returns true when PasswordRotationTrigger is set to a time after LastPasswordChange.
-func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) bool {
+func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
 	last := role.Status.AtProvider.LastPasswordChange
 	if last == nil {
 		if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-			return true
+			return true, nil
 		}
 		if role.Spec.WriteConnectionSecretToReference != nil {
 			nn := types.NamespacedName{
@@ -83,16 +84,20 @@ func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role)
 				Namespace: role.Namespace,
 			}
 			s := &corev1.Secret{}
-			if err := c.kube.Get(ctx, nn, s); err == nil {
-				if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
-					return false
+			if err := c.kube.Get(ctx, nn, s); err != nil {
+				if resource.IgnoreNotFound(err) != nil {
+					return false, err
 				}
+				return true, nil
+			}
+			if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
+				return false, nil
 			}
 		}
-		return true
+		return true, nil
 	}
 	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time)
+		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
 	}
-	return false
+	return false, nil
 }
