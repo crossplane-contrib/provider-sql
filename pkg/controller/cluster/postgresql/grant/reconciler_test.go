@@ -742,6 +742,31 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ErrRoleMembershipWithInheritOnPG15": {
+			reason: "WithInherit on a server older than PostgreSQL 16 should return an error before any query is run",
+			fields: fields{
+				serverVersion: 150000,
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						return fmt.Errorf("Scan should not be called when server version is below 16")
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Errorf(errInheritRequiresPG16, 150000),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -1140,6 +1165,31 @@ func TestCreate(t *testing.T) {
 			},
 			want: want{
 				err: nil,
+			},
+		},
+		"ErrRoleMembershipWithInheritOnPG15": {
+			reason: "WithInherit on a server older than PostgreSQL 16 should return an error before any query is run",
+			fields: fields{
+				serverVersion: 150000,
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						return fmt.Errorf("ExecTx should not be called when server version is below 16")
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.Errorf(errInheritRequiresPG16, 150000), errCreateGrant),
 			},
 		},
 	}
