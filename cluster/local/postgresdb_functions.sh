@@ -39,6 +39,10 @@ create_grantable_objects() {
   CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1 START WITH 1000 INCREMENT BY 1;
   CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2 START WITH 1000 INCREMENT BY 1;
   CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  -- Two arguments on purpose: a routine Grant on a single-argument routine is
+  -- observed correctly even when the Observe query cross joins argument rows
+  -- with privilege rows, so only a multi-argument routine catches that bug.
+  CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure_multiarg(arg1 TEXT, arg2 TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
   CREATE TABLE \"$TARGET_SCHEMA\".test_table_column(test_column INT NULL);
   CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   CREATE SERVER test_foreign_server FOREIGN DATA WRAPPER test_foreign_data_wrapper;
@@ -59,6 +63,7 @@ delete_grantable_objects() {
   DROP FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   DROP TABLE \"$TARGET_SCHEMA\".test_table_column;
   DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure(TEXT);
+  DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure_multiarg(TEXT, TEXT);
   DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1;
   DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2;
   DROP TABLE \"$TARGET_SCHEMA\".test_table;

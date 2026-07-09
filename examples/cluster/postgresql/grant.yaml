@@ -136,6 +136,34 @@ spec:
         args:
         - TEXT
 ---
+# A routine Grant on a single-argument routine is observed correctly even when
+# the Observe query cross joins argument rows with privilege rows. Only a
+# multi-argument routine catches that: the GRANT succeeds, but Observe never
+# reports the grant as existing, so this resource never becomes Ready.
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-routine-multiarg
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    routines:
+      - name: test_procedure_multiarg
+        args:
+        # Argument types must name a pg_type entry that also matches
+        # pg_catalog.format_type() output, which is what Observe compares
+        # against. TEXT satisfies both; INTEGER would not (pg_type calls it
+        # int4, format_type calls it integer).
+        - TEXT
+        - TEXT
+---
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Grant
 metadata:
