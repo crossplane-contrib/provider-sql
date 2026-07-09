@@ -820,13 +820,22 @@ func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	// Join grantee. Filter by routine name and signature, schema name and grantee name.
 	// Finally, perform a permission comparison against expected
 	// permissions.
+	//
+	// The argument types are formatted in a correlated subquery rather than by
+	// joining unnest(p.proargtypes) into the outer query. Joining would cross
+	// the argument rows with the aclexplode() privilege rows, so
+	// array_agg(acl.privilege_type) would collect one entry per argument and
+	// the HAVING equality below could only ever hold for functions with a
+	// single argument.
 	q.String = "SELECT COUNT(*) = $1 AS ct " +
 		"FROM (SELECT " +
 		// format routine args
-		"p.proname || '(' || coalesce(array_to_string(array_agg(pg_catalog.format_type(t, NULL) ORDER BY args.ord), ',')) || ')' " +
+		"p.proname || '(' || coalesce((" +
+		"SELECT array_to_string(array_agg(pg_catalog.format_type(a.t, NULL) ORDER BY a.ord), ',') " +
+		"FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)" +
+		"), '') || ')' " +
 		"AS signature " +
 		"FROM pg_proc p " +
-		"LEFT JOIN unnest(p.proargtypes) WITH ORDINALITY AS args(t, ord) on true " +
 		"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
 		"aclexplode(p.proacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
@@ -834,7 +843,7 @@ func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		"WHERE n.nspname=$2 " +
 		"AND s.rolname=$3 " +
 		"AND acl.is_grantable=$4 " +
-		"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid " +
+		"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid, p.proname, p.proargtypes " +
 		// Check privileges match. Convoluted right-hand-side is necessary to
 		// ensure identical sort order of the input permissions.
 		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
