@@ -68,10 +68,11 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 }
 
 // shouldResetPassword returns true when a password change is needed for the non-BYOP path.
-// When LastPasswordChange is nil: checks the connection secret — if it already has a
-// password, no reset is needed; if the secret is
-// absent or empty, a role restoration is assumed and a reset is triggered.
-// Also returns true when PasswordRotationTrigger is set to a time after LastPasswordChange.
+// When LastPasswordChange is set, only a PasswordRotationTrigger newer than it forces a
+// reset. When LastPasswordChange is nil the connection secret decides: a populated secret
+// means Create already ran, while an absent or empty secret means the role was restored
+// out-of-band and needs a fresh password. Without a connection secret reference there is
+// nowhere to publish a regenerated password, so no reset is attempted.
 func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
 	last := role.Status.AtProvider.LastPasswordChange
 	if last == nil {
