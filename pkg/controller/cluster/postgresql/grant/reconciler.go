@@ -64,6 +64,12 @@ const (
 	errInheritRequiresPG16              = "withInherit requires PostgreSQL 16 or later (server version %d)"
 
 	maxConcurrency = 5
+
+	// versionUnknown is the serverVersion sentinel used when the backend cannot
+	// report server_version_num. It means "assume the newest behaviour":
+	// ExpandPrivilegesWithVersion already treats 0 as "include every privilege".
+	// Version-gated features must therefore not treat it as an old server.
+	versionUnknown = 0
 )
 
 type connector struct {
@@ -125,7 +131,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	// does not expose server_version_num (CockroachDB, connection proxies).
 	serverVersion, err := xdb.GetServerVersion(ctx)
 	if err != nil {
-		serverVersion = 0
+		serverVersion = versionUnknown
 	}
 
 	return &external{
@@ -319,7 +325,7 @@ func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query
 	case v1alpha1.RoleForeignServer:
 		return createForeignServerGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleMember:
-		if gp.WithInherit != nil && serverVersion < 160000 {
+		if gp.WithInherit != nil && serverVersion != versionUnknown && serverVersion < 160000 {
 			return errors.Errorf(errInheritRequiresPG16, serverVersion)
 		}
 		return createMemberGrantQueries(gp, ql, ro)
@@ -854,7 +860,7 @@ func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, ser
 	case v1alpha1.RoleForeignServer:
 		return selectForeignServerGrantQuery(gp, q)
 	case v1alpha1.RoleMember:
-		if gp.WithInherit != nil && serverVersion < 160000 {
+		if gp.WithInherit != nil && serverVersion != versionUnknown && serverVersion < 160000 {
 			return errors.Errorf(errInheritRequiresPG16, serverVersion)
 		}
 		return selectMemberGrantQuery(gp, q)
