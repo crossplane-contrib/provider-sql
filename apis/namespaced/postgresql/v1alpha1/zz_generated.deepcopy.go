@@ -197,6 +197,16 @@ func (in *DatabaseParameters) DeepCopyInto(out *DatabaseParameters) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.OwnerRef != nil {
+		in, out := &in.OwnerRef, &out.OwnerRef
+		*out = new(v1.NamespacedReference)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.OwnerSelector != nil {
+		in, out := &in.OwnerSelector, &out.OwnerSelector
+		*out = new(v1.NamespacedSelector)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Template != nil {
 		in, out := &in.Template, &out.Template
 		*out = new(string)

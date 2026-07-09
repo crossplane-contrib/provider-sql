@@ -13,6 +13,33 @@ import (
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ResolveReferences of this Database.
+func (mg *Database) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPINamespacedResolver(c, mg)
+
+	var rsp reference.NamespacedResolutionResponse
+	var err error
+
+	rsp, err = r.Resolve(ctx, reference.NamespacedResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Owner),
+		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
+		Reference:    mg.Spec.ForProvider.OwnerRef,
+		Selector:     mg.Spec.ForProvider.OwnerSelector,
+		To: reference.To{
+			List:    &RoleList{},
+			Managed: &Role{},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "mg.Spec.ForProvider.Owner")
+	}
+	mg.Spec.ForProvider.Owner = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.OwnerRef = rsp.ResolvedReference
+
+	return nil
+}
+
 // ResolveReferences of this DefaultPrivileges.
 func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {
 	r := reference.NewAPINamespacedResolver(c, mg)
