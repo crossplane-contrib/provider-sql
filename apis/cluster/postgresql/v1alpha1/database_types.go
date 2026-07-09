@@ -44,12 +44,10 @@ type DatabaseParameters struct {
 	Owner *string `json:"owner,omitempty"`
 
 	// OwnerRef references the role object that will own this database.
-	// +immutable
 	// +optional
 	OwnerRef *xpv1.Reference `json:"ownerRef,omitempty"`
 
 	// OwnerSelector selects a reference to a Role that will own this database.
-	// +immutable
 	// +optional
 	OwnerSelector *xpv1.Selector `json:"ownerSelector,omitempty"`
 
