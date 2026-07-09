@@ -41,12 +41,9 @@ import (
 //
 //	owner, CONNECT only          -> exists     (was: never)
 //	owner, all three             -> exists
-//	owner, before Create ran     -> not exists (datacl is NULL; Create must run)
+//	owner, datacl still NULL     -> not exists (nothing granted yet; Create runs)
 //	non-owner, exact match       -> exists
 //	non-owner holding a superset -> not exists (equality preserved)
-//
-// The pre-Create case matters: an "owner => exists" short-circuit would skip
-// Create altogether, and with it `revokePublicOnDb`.
 func TestSelectDatabaseGrantQueryToleratesOwnerImplicitPrivileges(t *testing.T) {
 	gp := v1alpha1.GrantParameters{
 		Role:       ptr.To("svc"),
@@ -76,11 +73,60 @@ func TestSelectDatabaseGrantQueryToleratesOwnerImplicitPrivileges(t *testing.T) 
 		t.Errorf("non-owner grantees must still be compared with set equality. Query:\n%s", q.String)
 	}
 
-	// datacl must still be required: short-circuiting on ownership alone would
-	// skip Create, and with it revokePublicOnDb.
+	// datacl must still be inspected: an unconditional "owner => exists"
+	// short-circuit would skip Create for owners entirely.
 	if !strings.Contains(q.String, "aclexplode(db.datacl) as acl") {
-		t.Errorf("the query no longer inspects datacl; Create (and revokePublicOnDb) "+
+		t.Errorf("the query no longer inspects datacl; Create "+
 			"would be skipped for owners. Query:\n%s", q.String)
+	}
+
+	// Without revokePublicOnDb the query must not mention PUBLIC — its shape
+	// (and behaviour) is unchanged for plain database grants.
+	if strings.Contains(q.String, "acl.grantee = 0") {
+		t.Errorf("plain database grants must not check PUBLIC's ACL. Query:\n%s", q.String)
+	}
+
+	if len(q.Parameters) != 4 {
+		t.Fatalf("got %d parameters, want 4", len(q.Parameters))
+	}
+}
+
+// TestSelectDatabaseGrantQueryChecksPublicWhenRevoked pins the Observe side of
+// `revokePublicOnDb`.
+//
+// The REVOKE ALL ... FROM PUBLIC is only issued by Create, so Observe must
+// treat "PUBLIC still holds privileges" as drift. Nothing about the role's own
+// privileges implies Create ever ran: ANY grant or revoke on the database — by
+// another Grant resource or by hand — materialises datacl with PUBLIC's
+// default CONNECT/TEMPORARY entries, which would otherwise satisfy the owner
+// containment check and park the resource Ready with PUBLIC never revoked.
+//
+// Verified against PostgreSQL 16 with the query this function emits:
+//
+//	owner grant, datacl materialised by an unrelated GRANT -> not exists
+//	  (PUBLIC entries present; Create runs and revokes them)
+//	same, after REVOKE ALL FROM PUBLIC                     -> exists
+//	PUBLIC re-granted CONNECT afterwards                   -> not exists (drift)
+func TestSelectDatabaseGrantQueryChecksPublicWhenRevoked(t *testing.T) {
+	gp := v1alpha1.GrantParameters{
+		Role:             ptr.To("svc"),
+		Database:         ptr.To("svcdb"),
+		Privileges:       v1alpha1.GrantPrivileges{"CONNECT"},
+		RevokePublicOnDb: ptr.To(true),
+	}
+
+	q := &xsql.Query{}
+	if err := selectDatabaseGrantQuery(gp, q); err != nil {
+		t.Fatalf("selectDatabaseGrantQuery: %v", err)
+	}
+
+	// PUBLIC is grantee oid 0 in aclexplode(); it has no pg_roles row, so the
+	// check must not go through the pg_roles join.
+	if !strings.Contains(q.String, "AND NOT EXISTS(SELECT 1 ") ||
+		!strings.Contains(q.String, "acl.grantee = 0") {
+		t.Errorf("revokePublicOnDb grants must observe PUBLIC's ACL entries as "+
+			"drift; otherwise the REVOKE ... FROM PUBLIC is never (re)applied once "+
+			"the role's own privileges are in place. Query:\n%s", q.String)
 	}
 
 	if len(q.Parameters) != 4 {

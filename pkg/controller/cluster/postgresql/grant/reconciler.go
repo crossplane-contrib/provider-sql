@@ -746,9 +746,6 @@ func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 	// it. Compare with containment for the owner, and with equality for every
 	// other grantee, whose privileges the provider fully controls.
 	//
-	// Note this deliberately still requires datacl to be non-empty, i.e. that
-	// Create has run at least once. Short-circuiting on ownership alone would
-	// skip Create entirely, and with it `revokePublicOnDb`.
 	q.String = "SELECT EXISTS(SELECT 1 " +
 		"FROM pg_database db, " +
 		"aclexplode(db.datacl) as acl " +
@@ -766,6 +763,20 @@ func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 		"ELSE array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
 		"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)) " +
 		"END)"
+
+	// The desired state of a revokePublicOnDb grant includes "PUBLIC holds no
+	// privileges on the database", so Observe must check it: the role's own
+	// privileges being present says nothing about whether Create (which issues
+	// the REVOKE ... FROM PUBLIC) ever ran — any unrelated GRANT materialises
+	// datacl with PUBLIC's default CONNECT and TEMPORARY. PUBLIC is grantee 0
+	// in aclexplode(); it is not a pg_roles row.
+	if gp.RevokePublicOnDb != nil && *gp.RevokePublicOnDb {
+		q.String += " AND NOT EXISTS(SELECT 1 " +
+			"FROM pg_database db, " +
+			"aclexplode(db.datacl) as acl " +
+			"WHERE db.datname=$1 " +
+			"AND acl.grantee = 0)"
+	}
 
 	q.Parameters = []interface{}{
 		gp.Database,
