@@ -111,7 +111,7 @@ setup_postgresdb_tests(){
 }
 
 check_database_owner_ref() {
-  echo_step "check if database created with ownerRef has correct owner"
+  echo_step "check if database created with ownerSelector has correct owner"
 
   local owner
   owner=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d postgres -wtAc \
@@ -119,7 +119,7 @@ check_database_owner_ref() {
   owner=$(echo "${owner}" | xargs)
 
   if [ "${owner}" = "ownerrole" ]; then
-    echo_info "ownerRef resolved correctly: owner=${owner}"
+    echo_info "ownerSelector resolved correctly: owner=${owner}"
   else
     echo_error "ERROR: expected owner 'ownerrole' but got '${owner}'"
   fi
