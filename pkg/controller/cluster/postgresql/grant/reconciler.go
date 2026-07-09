@@ -731,6 +731,18 @@ func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 	// Join grantee. Filter by database name and grantee name.
 	// Finally, perform a permission comparison against expected
 	// permissions.
+	//
+	// The owner of a database implicitly holds CONNECT, CREATE and TEMPORARY on
+	// it, and PostgreSQL materialises all three into datacl as soon as anything
+	// is granted or revoked. A Grant that asks for a subset -- say only CONNECT
+	// -- would therefore never satisfy an exact set comparison, and Observe
+	// would report the grant as missing forever while Create kept reapplying
+	// it. Compare with containment for the owner, and with equality for every
+	// other grantee, whose privileges the provider fully controls.
+	//
+	// Note this deliberately still requires datacl to be non-empty, i.e. that
+	// Create has run at least once. Short-circuiting on ownership alone would
+	// skip Create entirely, and with it `revokePublicOnDb`.
 	q.String = "SELECT EXISTS(SELECT 1 " +
 		"FROM pg_database db, " +
 		"aclexplode(db.datacl) as acl " +
@@ -739,11 +751,15 @@ func selectDatabaseGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error 
 		"WHERE db.datname=$1 " +
 		"AND s.rolname=$2 " +
 		"AND acl.is_grantable=$3 " +
-		"GROUP BY db.datname, s.rolname, acl.is_grantable " +
+		"GROUP BY db.datname, s.rolname, acl.is_grantable, db.datdba, s.oid " +
 		// Check privileges match. Convoluted right-hand-side is necessary to
 		// ensure identical sort order of the input permissions.
-		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-		"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)))"
+		"HAVING CASE WHEN db.datdba = s.oid " +
+		"THEN array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"@> (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)) " +
+		"ELSE array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
+		"= (SELECT array(SELECT unnest($4::text[]) as perms ORDER BY perms ASC)) " +
+		"END)"
 
 	q.Parameters = []interface{}{
 		gp.Database,
