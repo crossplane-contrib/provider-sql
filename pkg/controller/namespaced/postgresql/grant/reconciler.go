@@ -54,7 +54,6 @@ const (
 
 	errUnsupportedGrant                 = "grant type not supported: %s"
 	errInvalidParams                    = "invalid parameters for grant type %s"
-	errGetServerVersion                 = "cannot get server version"
 	errMemberOfWithDatabaseOrPrivileges = "cannot set privileges or database in the same grant as memberOf"
 	errWithInheritOnlyForMemberOf       = "withInherit is only valid for memberOf grants"
 	errInheritRequiresPG16              = "withInherit requires PostgreSQL 16 or later (server version %d)"
@@ -98,19 +97,17 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, err
 	}
 
-	// Use the grant's target database when specified, falling back to the
-	// ProviderConfig's default. This matters for object-level grants (table,
-	// schema, sequence, etc.) which must run against the correct database.
-	db := providerInfo.DefaultDatabase
-	if mg.Spec.ForProvider.Database != nil && *mg.Spec.ForProvider.Database != "" {
-		db = *mg.Spec.ForProvider.Database
-	}
+	xdb := c.newDB(providerInfo.SecretData, connectDatabase(mg.Spec.ForProvider, providerInfo.DefaultDatabase), clients.ToString(providerInfo.SSLMode))
 
-	xdb := c.newDB(providerInfo.SecretData, db, clients.ToString(providerInfo.SSLMode))
-
+	// A server that cannot report its version is not a reason to fail: only
+	// table grants are version dependent, and ExpandPrivilegesWithVersion
+	// treats 0 as "latest", which is what this provider assumed before the
+	// version check existed. Failing here would gate Observe, Create *and*
+	// Delete, wedging the finalizer on any PostgreSQL-compatible backend that
+	// does not expose server_version_num (CockroachDB, connection proxies).
 	serverVersion, err := xdb.GetServerVersion(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, errGetServerVersion)
+		serverVersion = 0
 	}
 
 	return &external{
@@ -118,6 +115,42 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		kube:          c.kube,
 		serverVersion: serverVersion,
 	}, nil
+}
+
+// connectDatabase returns the database the provider should open a session
+// against for the given grant.
+//
+// Grants on objects *inside* a database (schemas, tables, columns, sequences,
+// routines, foreign data wrappers, foreign servers) must be applied and
+// observed from a session on that database, because their catalogs are
+// database local.
+//
+// Database-level grants and role membership are cluster wide: GRANT ... ON
+// DATABASE x and the pg_database / pg_auth_members lookups all work from any
+// session. Connecting to the grant's target for those would impose a needless
+// ordering dependency (the database must already exist and be connectable) and
+// can lock the provider out of the very database it must reconnect to, e.g.
+// after `revokePublicOnDb: true` removes PUBLIC's CONNECT privilege.
+func connectDatabase(gp v1alpha1.GrantParameters, defaultDatabase string) string {
+	gt, err := resolveGrantType(gp)
+	if err != nil {
+		// Not resolvable yet (unresolved refs). Observe will surface the error;
+		// use the default database so we can at least connect.
+		return defaultDatabase
+	}
+
+	switch gt {
+	case v1alpha1.RoleDatabase, v1alpha1.RoleMember:
+		return defaultDatabase
+	case v1alpha1.RoleSchema, v1alpha1.RoleTable, v1alpha1.RoleColumn,
+		v1alpha1.RoleSequence, v1alpha1.RoleRoutine,
+		v1alpha1.RoleForeignDataWrapper, v1alpha1.RoleForeignServer:
+		if gp.Database != nil && *gp.Database != "" {
+			return *gp.Database
+		}
+	}
+
+	return defaultDatabase
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalCreation, error) {
