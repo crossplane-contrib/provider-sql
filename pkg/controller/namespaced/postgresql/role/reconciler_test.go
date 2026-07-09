@@ -29,7 +29,9 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -1143,9 +1145,62 @@ func TestGetPassword(t *testing.T) {
 		want   want
 	}{
 		"NilLastPasswordChange": {
-			reason: "nil LastPasswordChange should trigger a reset (handles restoration scenario)",
+			reason: "nil LastPasswordChange with no connection secret reference should not reset (nowhere to publish a regenerated password)",
 			args: args{
 				role: &v1alpha1.Role{},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerNilLastChangeSecretHasPassword": {
+			reason: "PasswordRotationTrigger with nil LastPasswordChange must not reset when the connection secret already has a password (Create just ran)",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now()},
+						},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NilLastPasswordChangeSecretNotFound": {
+			reason: "nil LastPasswordChange with a missing connection secret should trigger a reset (restoration scenario)",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
+				},
 			},
 			want: want{pwd: "", changed: true},
 		},
@@ -1274,17 +1329,27 @@ func TestUpdatePasswordReset(t *testing.T) {
 		want   want
 	}{
 		"NilLastPasswordChangeGeneratesPassword": {
-			reason: "nil LastPasswordChange should generate a new password (restoration scenario)",
+			reason: "nil LastPasswordChange with a connection secret reference but missing secret should generate a new password (restoration scenario)",
 			fields: fields{execQuery: new(string)},
 			args: args{
 				mg: &v1alpha1.Role{
 					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
 						Annotations: map[string]string{
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
 				},
-				kube: &test.MockClient{},
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
+				},
 			},
 			want: want{
 				err:               nil,

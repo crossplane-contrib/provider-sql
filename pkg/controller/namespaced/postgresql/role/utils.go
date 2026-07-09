@@ -68,36 +68,33 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 }
 
 // shouldResetPassword returns true when a password change is needed for the non-BYOP path.
-// When LastPasswordChange is nil: checks the connection secret — if it already has a
-// password, no reset is needed; if the secret is
-// absent or empty, a role restoration is assumed and a reset is triggered.
-// Also returns true when PasswordRotationTrigger is set to a time after LastPasswordChange.
+// When LastPasswordChange is set, only a PasswordRotationTrigger newer than it forces a
+// reset. When LastPasswordChange is nil the connection secret decides: a populated secret
+// means Create already ran, while an absent or empty secret means the role was restored
+// out-of-band and needs a fresh password. Without a connection secret reference there is
+// nowhere to publish a regenerated password, so no reset is attempted.
 func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
 	last := role.Status.AtProvider.LastPasswordChange
-	if last == nil {
+	if last != nil {
 		if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-			return true, nil
+			return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
 		}
-		if role.Spec.WriteConnectionSecretToReference != nil {
-			nn := types.NamespacedName{
-				Name:      role.Spec.WriteConnectionSecretToReference.Name,
-				Namespace: role.Namespace,
-			}
-			s := &corev1.Secret{}
-			if err := c.kube.Get(ctx, nn, s); err != nil {
-				if resource.IgnoreNotFound(err) != nil {
-					return false, err
-				}
-				return true, nil
-			}
-			if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
-				return false, nil
-			}
+		return false, nil
+	}
+	if role.Spec.WriteConnectionSecretToReference == nil {
+		return false, nil
+	}
+	nn := types.NamespacedName{
+		Name:      role.Spec.WriteConnectionSecretToReference.Name,
+		Namespace: role.Namespace,
+	}
+	s := &corev1.Secret{}
+	err := c.kube.Get(ctx, nn, s)
+	if err != nil {
+		if resource.IgnoreNotFound(err) != nil {
+			return false, errors.Wrap(err, errGetConnectionSecretFailed)
 		}
 		return true, nil
 	}
-	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
-	}
-	return false, nil
+	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
 }

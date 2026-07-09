@@ -75,15 +75,26 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 // nowhere to publish a regenerated password, so no reset is attempted.
 func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
 	last := role.Status.AtProvider.LastPasswordChange
-     if last != nil {
-             if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-                     return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
-             }
-             return false, nil
-     }
+	if last != nil {
+		if role.Spec.ForProvider.PasswordRotationTrigger != nil {
+			return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
+		}
+		return false, nil
 	}
-	if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-		return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
+	if role.Spec.WriteConnectionSecretToReference == nil {
+		return false, nil
 	}
-	return false, nil
+	nn := types.NamespacedName{
+		Name:      role.Spec.WriteConnectionSecretToReference.Name,
+		Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
+	}
+	s := &corev1.Secret{}
+	err := c.kube.Get(ctx, nn, s)
+	if err != nil {
+		if resource.IgnoreNotFound(err) != nil {
+			return false, errors.Wrap(err, errGetConnectionSecretFailed)
+		}
+		return true, nil
+	}
+	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
 }

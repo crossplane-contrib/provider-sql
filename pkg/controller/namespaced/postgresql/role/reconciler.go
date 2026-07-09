@@ -51,13 +51,14 @@ import (
 const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
-	errSelectRole              = "cannot select role"
-	errCreateRole              = "cannot create role"
-	errDropRole                = "cannot drop role"
-	errUpdateRole              = "cannot update role"
-	errGetPasswordSecretFailed = "cannot get password secret"
-	errComparePrivileges       = "cannot compare desired and observed privileges"
-	errSetRoleConfigs          = "cannot set role configuration parameters"
+	errSelectRole                = "cannot select role"
+	errCreateRole                = "cannot create role"
+	errDropRole                  = "cannot drop role"
+	errUpdateRole                = "cannot update role"
+	errGetPasswordSecretFailed   = "cannot get password secret"
+	errGetConnectionSecretFailed = "cannot get connection secret"
+	errComparePrivileges         = "cannot compare desired and observed privileges"
+	errSetRoleConfigs            = "cannot set role configuration parameters"
 
 	maxConcurrency = 5
 )
