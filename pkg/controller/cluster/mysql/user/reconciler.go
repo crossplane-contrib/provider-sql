@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -78,6 +79,12 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		reconcilerOptions...,
 	)
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
+		&v1alpha1.UserList{}, o.MetricOptions.PollStateMetricInterval,
+	)); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.User{}).
@@ -126,8 +133,9 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.User) (managed.Typ
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
+	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
 	return &external{
-		db:   c.newDB(s.Data, tlsName, mg.Spec.ForProvider.BinLog),
+		db:   c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog),
 		kube: c.kube,
 	}, nil
 }

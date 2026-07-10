@@ -27,7 +27,6 @@ type mySQLDB struct {
 
 // New returns a new MySQL database client.
 func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
-	// TODO(negz): Support alternative connection secret formats?
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
@@ -116,6 +115,13 @@ func (c mySQLDB) GetConnectionDetails(username, password string) managed.Connect
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
 	}
+}
+
+// GetServerVersion is not supported by the MySQL client (only used by PostgreSQL).
+func (c mySQLDB) GetServerVersion(ctx context.Context) (int, error) {
+	// This method should never be called for MySQL clients
+	// but is implemented to satisfy the xsql.DB interface
+	return 0, nil
 }
 
 // QuoteIdentifier for MySQL queries

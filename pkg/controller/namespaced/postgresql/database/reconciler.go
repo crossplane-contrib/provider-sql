@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/lib/pq"
@@ -48,6 +49,7 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
 	errSelectDB          = "cannot select database"
+	errSelectServerVer   = "cannot determine PostgreSQL server version"
 	errCreateDB          = "cannot create database"
 	errAlterDBOwner      = "cannot alter database owner"
 	errAlterDBConnLimit  = "cannot alter database connection limit"
@@ -55,7 +57,8 @@ const (
 	errAlterDBIsTmpl     = "cannot alter database is template"
 	errDropDB            = "cannot drop database"
 
-	maxConcurrency = 5
+	maxConcurrency                   = 5
+	minDatabaseStrategyServerVersion = 150000
 )
 
 // Setup adds a controller that reconciles Database managed resources.
@@ -77,6 +80,12 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		resource.ManagedKind(namespacedv1alpha1.DatabaseGroupVersionKind),
 		reconcilerOptions...,
 	)
+	if err := mgr.Add(statemetrics.NewMRStateRecorder(
+		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
+		&namespacedv1alpha1.DatabaseList{}, o.MetricOptions.PollStateMetricInterval,
+	)); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&namespacedv1alpha1.Database{}).
@@ -171,6 +180,11 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Database)
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalCreation, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
+	if mg.Spec.ForProvider.Strategy != nil {
+		if err := c.ensureDatabaseStrategySupport(ctx); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errCreateDB)
+		}
+	}
 
 	var b strings.Builder
 	b.WriteString("CREATE DATABASE ")
@@ -183,6 +197,10 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) 
 	if mg.Spec.ForProvider.Template != nil {
 		b.WriteString(" TEMPLATE ")
 		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Template))
+	}
+	if mg.Spec.ForProvider.Strategy != nil {
+		b.WriteString(" STRATEGY ")
+		b.WriteString(string(*mg.Spec.ForProvider.Strategy))
 	}
 	if mg.Spec.ForProvider.Encoding != nil {
 		b.WriteString(" ENCODING ")
@@ -201,16 +219,28 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Database) 
 		b.WriteString(quoteIfIdentifier(*mg.Spec.ForProvider.Tablespace))
 	}
 	if mg.Spec.ForProvider.AllowConnections != nil {
-		b.WriteString(fmt.Sprintf(" ALLOW_CONNECTIONS %t", *mg.Spec.ForProvider.AllowConnections))
+		fmt.Fprintf(&b, " ALLOW_CONNECTIONS %t", *mg.Spec.ForProvider.AllowConnections)
 	}
 	if mg.Spec.ForProvider.ConnectionLimit != nil {
-		b.WriteString(fmt.Sprintf(" CONNECTION LIMIT %d", *mg.Spec.ForProvider.ConnectionLimit))
+		fmt.Fprintf(&b, " CONNECTION LIMIT %d", *mg.Spec.ForProvider.ConnectionLimit)
 	}
 	if mg.Spec.ForProvider.IsTemplate != nil {
-		b.WriteString(fmt.Sprintf(" IS_TEMPLATE %t", *mg.Spec.ForProvider.IsTemplate))
+		fmt.Fprintf(&b, " IS_TEMPLATE %t", *mg.Spec.ForProvider.IsTemplate)
 	}
 
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateDB)
+}
+
+func (c *external) ensureDatabaseStrategySupport(ctx context.Context) error {
+	var serverVersion int
+	err := c.db.Scan(ctx, xsql.Query{String: "SELECT current_setting('server_version_num')::integer"}, &serverVersion)
+	if err != nil {
+		return errors.Wrap(err, errSelectServerVer)
+	}
+	if serverVersion < minDatabaseStrategyServerVersion {
+		return errors.Errorf("database strategy requires PostgreSQL 15+; found server_version_num=%d", serverVersion)
+	}
+	return nil
 }
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalUpdate, error) { //nolint:gocyclo
@@ -266,8 +296,8 @@ func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Database) 
 }
 
 func upToDate(observed, desired namespacedv1alpha1.DatabaseParameters) bool {
-	// Template is only used at create time.
-	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(namespacedv1alpha1.DatabaseParameters{}, "Template"))
+	// Template and strategy are only used at create time.
+	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(namespacedv1alpha1.DatabaseParameters{}, "Template", "Strategy"))
 }
 
 func lateInit(observed namespacedv1alpha1.DatabaseParameters, desired *namespacedv1alpha1.DatabaseParameters) bool {

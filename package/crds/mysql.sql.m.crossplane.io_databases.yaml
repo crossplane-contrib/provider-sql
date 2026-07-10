@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: databases.mysql.sql.m.crossplane.io
 spec:
   group: mysql.sql.m.crossplane.io
@@ -62,6 +62,16 @@ spec:
                       operations of this database are propagated to replicas. Defaults
                       to true
                     type: boolean
+                  defaultCharacterSet:
+                    description: |-
+                      DefaultCharacterSet defines the default character set for this database.
+                      See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+                    type: string
+                  defaultCollation:
+                    description: |-
+                      DefaultCollation defines the default collation for this database.
+                      See https://dev.mysql.com/doc/refman/8.0/en/charset-database.html
+                    type: string
                 type: object
               managementPolicies:
                 default:

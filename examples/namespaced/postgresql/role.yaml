@@ -39,6 +39,8 @@ kind: Role
 metadata:
   name: ownerrole
   namespace: default
+  labels:
+    role: owner
 spec:
   writeConnectionSecretToRef:
     name: ownerrole-secret
@@ -48,6 +50,21 @@ spec:
       login: true
       createRole: true
       inherit: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: no-grants-role
+  namespace: default
+spec:
+  writeConnectionSecretToRef:
+    name: no-grants-role-secret
+  forProvider:
+    privileges:
+      login: true
   providerConfigRef:
     kind: ProviderConfig
     name: default

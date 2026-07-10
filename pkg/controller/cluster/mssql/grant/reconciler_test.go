@@ -45,6 +45,7 @@ type mockDB struct {
 	MockScan                 func(ctx context.Context, q xsql.Query, dest ...interface{}) error
 	MockQuery                func(ctx context.Context, q xsql.Query) (*sql.Rows, error)
 	MockGetConnectionDetails func(username, password string) managed.ConnectionDetails
+	MockGetServerVersion     func(ctx context.Context) (int, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -65,6 +66,9 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return m.MockGetConnectionDetails(username, password)
+}
+func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	return m.MockGetServerVersion(ctx)
 }
 
 func TestConnect(t *testing.T) {

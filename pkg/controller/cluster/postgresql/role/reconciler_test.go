@@ -42,9 +42,10 @@ import (
 )
 
 type mockDB struct {
-	MockExec   func(ctx context.Context, q xsql.Query) error
-	MockExecTx func(ctx context.Context, ql []xsql.Query) error
-	MockScan   func(ctx context.Context, q xsql.Query, dest ...interface{}) error
+	MockExec             func(ctx context.Context, q xsql.Query) error
+	MockExecTx           func(ctx context.Context, ql []xsql.Query) error
+	MockScan             func(ctx context.Context, q xsql.Query, dest ...interface{}) error
+	MockGetServerVersion func(ctx context.Context) (int, error)
 }
 
 func (m mockDB) Exec(ctx context.Context, q xsql.Query) error {
@@ -70,6 +71,13 @@ func (m mockDB) GetConnectionDetails(rolename, password string) managed.Connecti
 		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
 		xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
 	}
+}
+
+func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
+	if m.MockGetServerVersion == nil {
+		return 0, nil
+	}
+	return m.MockGetServerVersion(ctx)
 }
 
 func TestConnect(t *testing.T) {
@@ -1096,6 +1104,124 @@ func TestDelete(t *testing.T) {
 			_, err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestConnectWithSecretKeyMapping(t *testing.T) {
+	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
+
+	type fields struct {
+		kube  client.Client
+		track func(context.Context, resource.LegacyManaged) error
+		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		mg     *v1alpha1.Role
+		want   map[string][]byte // creds passed to newDB
+	}{
+		"RemapsCustomKeys": {
+			reason: "Custom secret keys should be remapped to standard Crossplane keys",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{
+								Name:      "pg-secret",
+								Namespace: "default",
+							}
+							o.Spec.Credentials.SecretKeyMapping = &v1alpha1.SecretKeyMapping{
+								Endpoint: "host",
+								Username: "user",
+							}
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								"host":     []byte("pg.example.com"),
+								"port":     []byte("5432"),
+								"user":     []byte("admin"),
+								"password": []byte("secret"),
+							}
+						}
+						return nil
+					},
+				},
+				track: nopUsage,
+			},
+			mg: &v1alpha1.Role{
+				Spec: v1alpha1.RoleSpec{
+					ResourceSpec: xpv1.ResourceSpec{
+						ProviderConfigReference: &xpv1.Reference{},
+					},
+				},
+			},
+			want: map[string][]byte{
+				"host":     []byte("pg.example.com"),
+				"port":     []byte("5432"),
+				"user":     []byte("admin"),
+				"password": []byte("secret"),
+				"endpoint": []byte("pg.example.com"),
+				"username": []byte("admin"),
+			},
+		},
+		"NoMappingPassesDataUnchanged": {
+			reason: "Without secretKeyMapping, creds should be passed as-is",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{
+								Name:      "pg-secret",
+								Namespace: "default",
+							}
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								"endpoint": []byte("pg.example.com"),
+								"port":     []byte("5432"),
+								"username": []byte("admin"),
+								"password": []byte("secret"),
+							}
+						}
+						return nil
+					},
+				},
+				track: nopUsage,
+			},
+			mg: &v1alpha1.Role{
+				Spec: v1alpha1.RoleSpec{
+					ResourceSpec: xpv1.ResourceSpec{
+						ProviderConfigReference: &xpv1.Reference{},
+					},
+				},
+			},
+			want: map[string][]byte{
+				"endpoint": []byte("pg.example.com"),
+				"port":     []byte("5432"),
+				"username": []byte("admin"),
+				"password": []byte("secret"),
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var captured map[string][]byte
+			tc.fields.newDB = func(creds map[string][]byte, database string, sslmode string) xsql.DB {
+				captured = creds
+				return mockDB{}
+			}
+			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
+			_, err := e.Connect(context.Background(), tc.mg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if diff := cmp.Diff(tc.want, captured); diff != "" {
+				t.Errorf("\n%s\ncreds passed to newDB: -want, +got:\n%s", tc.reason, diff)
 			}
 		})
 	}

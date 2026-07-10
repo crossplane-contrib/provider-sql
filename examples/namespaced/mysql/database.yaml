@@ -4,7 +4,11 @@ metadata:
   name: example-db
   namespace: default
 spec:
-  forProvider: {}
+  forProvider:
+    # Optional: set the default character set for the database
+    defaultCharacterSet: utf8mb4
+    # Optional: set the default collation for the database
+    defaultCollation: utf8mb4_bin
   providerConfigRef:
     kind: ProviderConfig
     name: default
