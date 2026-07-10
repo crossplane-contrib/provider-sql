@@ -315,6 +315,36 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"OmittedAuthPluginDoesNotForceReconciliation": {
+			reason: "We should not compare auth plugins when authPlugin is omitted from the spec",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(dest) >= 5 {
+							if plugin, ok := dest[4].(**string); ok {
+								observedPlugin := "authentication_ldap_simple"
+								*plugin = &observedPlugin
+							}
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -518,6 +548,24 @@ func TestCreate(t *testing.T) {
 			want: want{
 				err: nil,
 				c:   managed.ExternalCreation{},
+			},
+		},
+		"ErrMissingAuthPluginWhenPasswordDisabled": {
+			reason: "We should reject disabling passwords without an explicit auth plugin",
+			fields: fields{
+				db: &mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							UsePassword: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.New(errMissingAuthPlugin),
 			},
 		},
 	}
@@ -901,6 +949,47 @@ func TestUpdate(t *testing.T) {
 						AtProvider: v1alpha1.UserObservation{
 							AuthPlugin: ptr.To("authentication_ldap_simple"),
 						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SkipPasswordLookupWhenPasswordDisabled": {
+			reason: "We should not read password secrets when usePassword is false",
+			fields: fields{
+				db: &mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
+							PasswordSecretRef: &xpv1.SecretKeySelector{
+								SecretReference: xpv1.SecretReference{
+									Name: "should-not-be-read",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						return errBoom
 					},
 				},
 			},

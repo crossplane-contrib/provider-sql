@@ -53,6 +53,7 @@ const (
 	errUpdateUser              = "cannot update user"
 	errGetPasswordSecretFailed = "cannot get password secret"
 	errCompareResourceOptions  = "cannot compare desired and observed resource options"
+	errMissingAuthPlugin       = "usePassword=false requires a non-empty authPlugin"
 
 	maxConcurrency = 5
 )
@@ -180,6 +181,10 @@ func changedResourceOptions(existing []string, desired []string) ([]string, erro
 }
 
 func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalObservation, error) {
+	if err := validateAuthConfig(mg.Spec.ForProvider.AuthPlugin, checkUsePassword(mg)); err != nil {
+		return managed.ExternalObservation{}, err
+	}
+
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 
 	observed := &namespacedv1alpha1.UserParameters{
@@ -215,9 +220,12 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (ma
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	_, pwdChanged, err := c.getPassword(ctx, mg)
-	if err != nil {
-		return managed.ExternalObservation{}, err
+	pwdChanged := false
+	if checkUsePassword(mg) {
+		_, pwdChanged, err = c.getPassword(ctx, mg)
+		if err != nil {
+			return managed.ExternalObservation{}, err
+		}
 	}
 
 	mg.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
@@ -233,6 +241,10 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (ma
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
 	mg.SetConditions(xpv1.Creating())
+
+	if err := validateAuthConfig(mg.Spec.ForProvider.AuthPlugin, checkUsePassword(mg)); err != nil {
+		return managed.ExternalCreation{}, err
+	}
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
@@ -291,6 +303,10 @@ func (c *external) executeCreateUserQuery(ctx context.Context, username string, 
 }
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
+	if err := validateAuthConfig(mg.Spec.ForProvider.AuthPlugin, checkUsePassword(mg)); err != nil {
+		return managed.ExternalUpdate{}, err
+	}
+
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 
 	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
@@ -348,6 +364,18 @@ func checkUsePassword(mg *namespacedv1alpha1.User) bool {
 	return *mg.Spec.ForProvider.UsePassword
 }
 
+func authPluginManaged(authPlugin *string) bool {
+	return authPlugin != nil && *authPlugin != ""
+}
+
+func validateAuthConfig(authPlugin *string, usePassword bool) error {
+	if !usePassword && !authPluginManaged(authPlugin) {
+		return errors.New(errMissingAuthPlugin)
+	}
+
+	return nil
+}
+
 // defaultAuthPlugin returns the authentication plugin to use.
 // If the input is nil or an empty string, it returns "" to indicate using the server default.
 // Otherwise, it returns the specified plugin name.
@@ -360,14 +388,20 @@ func defaultAuthPlugin(plugin *string) string {
 
 // UpdatePassword updates the password and/or auth plugin for a user if either has changed
 func (c *external) UpdatePassword(ctx context.Context, mg *namespacedv1alpha1.User, username string, host string) (managed.ConnectionDetails, error) {
-	pw, pwChanged, err := c.getPassword(ctx, mg)
-	if err != nil {
-		return nil, err
+	pw := ""
+	pwChanged := false
+	if checkUsePassword(mg) {
+		var err error
+		pw, pwChanged, err = c.getPassword(ctx, mg)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	pluginChanged := false
-	desiredPlugin := defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
-	if mg.Status.AtProvider.AuthPlugin != nil {
+	desiredPlugin := ""
+	if authPluginManaged(mg.Spec.ForProvider.AuthPlugin) {
+		desiredPlugin = defaultAuthPlugin(mg.Spec.ForProvider.AuthPlugin)
 		observedPlugin := defaultAuthPlugin(mg.Status.AtProvider.AuthPlugin)
 		pluginChanged = desiredPlugin != observedPlugin
 	}
@@ -421,10 +455,12 @@ func buildIdentifiedClause(plugin string, pw *string) string {
 
 func upToDate(observed *namespacedv1alpha1.UserParameters, desired *namespacedv1alpha1.UserParameters) bool {
 	// Check auth plugin
-	observedPlugin := defaultAuthPlugin(observed.AuthPlugin)
-	desiredPlugin := defaultAuthPlugin(desired.AuthPlugin)
-	if observedPlugin != desiredPlugin {
-		return false
+	if authPluginManaged(desired.AuthPlugin) {
+		observedPlugin := defaultAuthPlugin(observed.AuthPlugin)
+		desiredPlugin := defaultAuthPlugin(desired.AuthPlugin)
+		if observedPlugin != desiredPlugin {
+			return false
+		}
 	}
 
 	// Check resource options

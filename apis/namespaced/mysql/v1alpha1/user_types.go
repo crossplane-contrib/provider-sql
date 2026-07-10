@@ -47,7 +47,7 @@ type UserParameters struct {
 	// Common values include "mysql_native_password", "caching_sha2_password", "authentication_ldap_simple".
 	// See https://dev.mysql.com/doc/refman/8.0/en/authentication-plugins.html
 	// +optional
-	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
+	// +kubebuilder:validation:Pattern:=^[a-z0-9_]+$
 	AuthPlugin *string `json:"authPlugin,omitempty"`
 
 	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true

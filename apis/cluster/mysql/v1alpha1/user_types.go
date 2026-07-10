@@ -51,7 +51,7 @@ type UserParameters struct {
 	// This allows compatibility with different MySQL/MariaDB versions and their default authentication methods.
 	// Common plugins: caching_sha2_password (MySQL 8.0+), mysql_native_password, authentication_ldap_simple, etc.
 	// +optional
-	// +kubebuilder:validation:Pattern:=^([a-z]+_)+[a-z]+$
+	// +kubebuilder:validation:Pattern:=^[a-z0-9_]+$
 	AuthPlugin *string `json:"authPlugin,omitempty"`
 
 	// UsePassword indicate whether the provided AuthPlugin requires setting a password, defaults to true
