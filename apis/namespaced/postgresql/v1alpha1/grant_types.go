@@ -304,6 +304,7 @@ type Routine struct {
 }
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
+// +kubebuilder:validation:XValidation:rule="!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)",message="withInherit may only be set on memberOf grants"
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
@@ -408,6 +409,15 @@ type GrantParameters struct {
 	// +optional
 	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	ForeignServers []string `json:"foreignServers,omitempty"`
+
+	// WithInherit controls whether the grantee automatically inherits the privileges
+	// of the granted role. When set to false, emits WITH INHERIT FALSE (PostgreSQL 16+),
+	// granting membership without automatic privilege inheritance. Only valid when
+	// memberOf is set. When omitted, PostgreSQL's default behavior (inherit true) applies.
+	// Note: this field is only evaluated when non-nil. Removing it from the manifest
+	// does NOT revert the database-side setting; set withInherit: true explicitly to revert.
+	// +optional
+	WithInherit *bool `json:"withInherit,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.

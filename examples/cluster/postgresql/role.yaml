@@ -32,6 +32,8 @@ apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Role
 metadata:
   name: ownerrole
+  labels:
+    role: owner
 spec:
   deletionPolicy:  Orphan
   writeConnectionSecretToRef:
