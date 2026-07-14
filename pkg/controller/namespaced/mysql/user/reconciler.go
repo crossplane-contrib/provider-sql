@@ -217,14 +217,17 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (ma
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
 	}
 
-	// Hydrate observed.AuthenticationPlugin only when the user is configured
-	// with a non-default-password plugin. Password plugins (caching_sha2_password,
-	// mysql_native_password, sha256_password) store an opaque hash in
-	// authentication_string and are the implicit default when the user was
-	// created with IDENTIFIED BY '<pwd>' — we leave AuthenticationPlugin nil in
-	// that case so the comparison against a spec without AuthenticationPlugin
-	// reports up-to-date.
-	if pluginName != "" && !isPasswordPlugin(pluginName) {
+	// Hydrate observed.AuthenticationPlugin when the spec opts into a plugin, or
+	// when the user carries a non-default-password plugin. Password plugins
+	// (caching_sha2_password, mysql_native_password, sha256_password) store an
+	// opaque hash in authentication_string and are the implicit default when the
+	// user was created with IDENTIFIED BY '<pwd>', so when the spec does NOT
+	// request a plugin we leave AuthenticationPlugin nil to match a spec that
+	// omits it. When the spec DOES request one — including a password plugin — we
+	// must hydrate the observed value, otherwise upToDate() can never converge and
+	// the resource reconciles forever.
+	specifiesPlugin := mg.Spec.ForProvider.AuthenticationPlugin != nil
+	if pluginName != "" && (specifiesPlugin || !isPasswordPlugin(pluginName)) {
 		observed.AuthenticationPlugin = &namespacedv1alpha1.AuthenticationPlugin{Name: pluginName}
 		if authString != "" {
 			as := authString

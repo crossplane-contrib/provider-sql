@@ -306,6 +306,37 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"AuthenticationPluginPasswordPluginConverges": {
+			reason: "When the spec requests a password-based plugin, Observe must hydrate the observed plugin so ResourceUpToDate converges \u2014 otherwise the User reconciles forever",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if p, ok := dest[4].(*string); ok { // dest[4] = &pluginName
+							*p = "mysql_native_password"
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthenticationPlugin: &v1alpha1.AuthenticationPlugin{
+								Name: "mysql_native_password",
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
 	}
 
 	for name, tc := range cases {
