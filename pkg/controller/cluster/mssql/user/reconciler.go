@@ -50,6 +50,7 @@ const (
 	errGetSecret    = "cannot get credentials Secret"
 
 	errSelectUser             = "cannot select user"
+	errSelectLogin            = "cannot select login %s"
 	errCreateUser             = "cannot create user %s"
 	errCreateLogin            = "cannot create login %s"
 	errDropUser               = "error dropping user %s"
@@ -203,19 +204,8 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
 		}
 	} else {
-		// Create traditional LOGIN + USER approach
-		loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
-		if err := c.loginDB.Exec(ctx, xsql.Query{
-			String: loginQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateLogin, meta.GetExternalName(mg))
-		}
-
-		userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteIdentifier(meta.GetExternalName(mg)))
-		if err := c.userDB.Exec(ctx, xsql.Query{
-			String: userQuery,
-		}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+		if err := c.createLoginAndUser(ctx, mg, pw); err != nil {
+			return managed.ExternalCreation{}, err
 		}
 	}
 
@@ -260,6 +250,50 @@ func (c *external) Disconnect(ctx context.Context) error {
 	return nil
 }
 
+// createLoginAndUser creates the traditional server-level LOGIN plus the
+// database USER mapped to it. The LOGIN is a server-level object shared by all
+// databases, so a single login can back USERs in multiple databases. It is
+// only created when it does not already exist, so a second User for the same
+// login (in a different database) does not fail with "server principal already
+// exists" and retries after a partial failure are idempotent.
+func (c *external) createLoginAndUser(ctx context.Context, mg *v1alpha1.User, pw string) error {
+	exists, err := c.loginExists(ctx, meta.GetExternalName(mg))
+	if err != nil {
+		return errors.Wrapf(err, errSelectLogin, meta.GetExternalName(mg))
+	}
+	if !exists {
+		loginQuery := fmt.Sprintf("CREATE LOGIN %s WITH PASSWORD=%s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteValue(pw))
+		if err := c.loginDB.Exec(ctx, xsql.Query{
+			String: loginQuery,
+		}); err != nil {
+			return errors.Wrapf(err, errCreateLogin, meta.GetExternalName(mg))
+		}
+	}
+
+	userQuery := fmt.Sprintf("CREATE USER %s FOR LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg)), mssql.QuoteIdentifier(meta.GetExternalName(mg)))
+	if err := c.userDB.Exec(ctx, xsql.Query{
+		String: userQuery,
+	}); err != nil {
+		return errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+	}
+	return nil
+}
+
+// loginExists reports whether a server-level SQL login with the given name
+// already exists, queried against loginDB (the login database, normally
+// master). It lets Create and Delete treat the shared login idempotently.
+func (c *external) loginExists(ctx context.Context, name string) (bool, error) {
+	var got string
+	err := c.loginDB.Scan(ctx, xsql.Query{
+		String:     "SELECT name FROM sys.sql_logins WHERE name = @p1",
+		Parameters: []interface{}{name},
+	}, &got)
+	if xsql.IsNoRows(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (c *external) killLoginSessions(ctx context.Context, loginName string) error {
 	query := fmt.Sprintf("SELECT session_id FROM sys.dm_exec_sessions WHERE login_name = %s", mssql.QuoteValue(loginName))
 	rows, err := c.userDB.Query(ctx, xsql.Query{String: query})
@@ -296,12 +330,20 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 		return managed.ExternalDelete{}, errors.Wrapf(err, errDropUser, meta.GetExternalName(mg))
 	}
 
-	// Only drop LOGIN if this is not a contained user
+	// Only drop LOGIN if this is not a contained user, and only when it still
+	// exists. A shared login may already have been dropped by a sibling User
+	// (or orphaned on purpose), so guard the DROP to keep Delete idempotent.
 	if !isContained {
-		if err := c.loginDB.Exec(ctx, xsql.Query{
-			String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
-		}); err != nil {
-			return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(mg))
+		exists, err := c.loginExists(ctx, meta.GetExternalName(mg))
+		if err != nil {
+			return managed.ExternalDelete{}, errors.Wrapf(err, errSelectLogin, meta.GetExternalName(mg))
+		}
+		if exists {
+			if err := c.loginDB.Exec(ctx, xsql.Query{
+				String: fmt.Sprintf("DROP LOGIN %s", mssql.QuoteIdentifier(meta.GetExternalName(mg))),
+			}); err != nil {
+				return managed.ExternalDelete{}, errors.Wrapf(err, errDropLogin, meta.GetExternalName(mg))
+			}
 		}
 	}
 
