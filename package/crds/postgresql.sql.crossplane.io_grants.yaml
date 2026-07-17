@@ -462,6 +462,15 @@ spec:
                       pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
                       type: string
                     type: array
+                  withInherit:
+                    description: |-
+                      WithInherit controls whether the grantee automatically inherits the privileges
+                      of the granted role. When set to false, emits WITH INHERIT FALSE (PostgreSQL 16+),
+                      granting membership without automatic privilege inheritance. Only valid when
+                      memberOf is set. When omitted, PostgreSQL's default behavior (inherit true) applies.
+                      Note: this field is only evaluated when non-nil. Removing it from the manifest
+                      does NOT revert the database-side setting; set withInherit: true explicitly to revert.
+                    type: boolean
                   withOption:
                     description: |-
                       WithOption allows an option to be set on the grant.
@@ -472,6 +481,10 @@ spec:
                     - GRANT
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: withInherit may only be set on memberOf grants
+                  rule: '!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef)
+                    || has(self.memberOfSelector)'
               managementPolicies:
                 default:
                 - '*'
