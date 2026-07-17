@@ -1,0 +1,17 @@
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+  namespace: default
+spec:
+  # defaultDatabase: postgres
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # IAM auth forces sslMode=require. For full server-cert verification set
+  # sslMode: verify-full and supply the Amazon RDS CA to the pod
+  # (see docs/aws-iam-auth.md).
+  sslMode: require
