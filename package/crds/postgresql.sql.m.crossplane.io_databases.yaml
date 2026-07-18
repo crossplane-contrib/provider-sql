@@ -75,6 +75,16 @@ spec:
                       database). The character sets supported by the PostgreSQL server are
                       described in Section 23.3.1. See below for additional restrictions.
                     type: string
+                  forceDrop:
+                    description: |-
+                      ForceDrop controls whether the database is dropped with the WITH (FORCE)
+                      option, which terminates every existing connection to the database
+                      before dropping it. This is useful when an application (e.g. a long-lived
+                      connection pool) keeps the database in use and would otherwise cause the
+                      drop to fail with SQLSTATE 55006 (object_in_use).
+                      This field only affects deletion and requires PostgreSQL 13+.
+                      Defaults to false.
+                    type: boolean
                   isTemplate:
                     description: |-
                       If true, then this database can be cloned by any user with CREATEDB
