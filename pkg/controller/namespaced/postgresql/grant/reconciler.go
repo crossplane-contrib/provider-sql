@@ -602,10 +602,18 @@ func quotedSignatures(sc string, rs []v1alpha1.Routine) []string {
 	for i, r := range rs {
 		args := make([]string, len(r.Arguments))
 		for j, arg := range r.Arguments {
-			// Type names must be lowercased before quoting: quoted identifiers are
-			// case-sensitive in PostgreSQL, but type names like TEXT are stored as
-			// "text" in pg_catalog, so "TEXT" would fail to resolve.
-			args[j] = pq.QuoteIdentifier(strings.ToLower(arg))
+			// Type names are emitted lowercased but *unquoted*. Quoting a type
+			// name bypasses PostgreSQL's grammar-level alias resolution: the
+			// parser accepts "int4" (a literal pg_type.typname) but never
+			// "integer", because integer is a grammar keyword mapped to int4.
+			// Observe compares against pg_catalog.format_type(), which emits the
+			// canonical spelling "integer" -- so a quoted type name can never
+			// satisfy both sides. Unquoted, integer/int4/int all resolve and
+			// agree with what Observe reads back.
+			//
+			// Safe because the CRD restricts arguments to identifier characters:
+			// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+			args[j] = strings.ToLower(arg)
 		}
 		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(args, ",") + ")"
 	}
@@ -657,7 +665,11 @@ func selectColumnGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		"INNER JOIN pg_attribute attr on c.oid = attr.attrelid, " +
 		"aclexplode(attr.attacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-		"WHERE c.relkind = 'r' " +
+		// GRANT ... ON TABLE accepts every relkind below, storing the ACL on
+		// that pg_class row, so Observe must read them all back. Filtering to
+		// 'r' alone made grants on views, partitioned tables, materialized
+		// views and foreign tables Create successfully and then never observe.
+		"WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') " +
 		// Filter by table, schema, role and grantable setting
 		"AND n.nspname=$2 " +
 		"AND s.rolname=$3 " +
@@ -1009,7 +1021,11 @@ func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query
 		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
 		"aclexplode(c.relacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-		"WHERE c.relkind = 'r' " +
+		// GRANT ... ON TABLE accepts every relkind below, storing the ACL on
+		// that pg_class row, so Observe must read them all back. Filtering to
+		// 'r' alone made grants on views, partitioned tables, materialized
+		// views and foreign tables Create successfully and then never observe.
+		"WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') " +
 		// Filter by table, schema, role and grantable setting
 		"AND n.nspname=$2 " +
 		"AND s.rolname=$3 " +

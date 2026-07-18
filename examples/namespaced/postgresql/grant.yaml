@@ -192,12 +192,66 @@ spec:
     routines:
       - name: test_procedure_multiarg
         args:
-        # Argument types must name a pg_type entry that also matches
-        # pg_catalog.format_type() output, which is what Observe compares
-        # against. TEXT satisfies both; INTEGER would not (pg_type calls it
-        # int4, format_type calls it integer).
+        # Argument types are written in the spelling pg_catalog.format_type()
+        # returns, which is what Observe compares against -- so INTEGER, not
+        # int4. The provider emits type names unquoted, which is what lets
+        # PostgreSQL resolve the grammar alias integer -> int4 on the GRANT
+        # while Observe still matches format_type()'s "integer".
         - TEXT
         - TEXT
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# A routine Grant on a non-text-like argument type. TEXT-like types resolve
+# either way, so they cannot catch a regression that re-quotes argument type
+# names: quoted, "integer" fails to GRANT (no such pg_type entry) and "int4"
+# never matches what Observe reads back. This resource only becomes Ready if
+# the GRANT and the Observe query agree on the spelling.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-routine-int
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - ALL
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    routines:
+      - name: test_procedure_int
+        args:
+        - INTEGER
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# A table Grant on a VIEW. GRANT ... ON TABLE accepts views, partitioned
+# tables, materialized views and foreign tables, so Observe must read those
+# relkinds back. Filtering pg_class to relkind = 'r' makes this Create
+# successfully and then never become Ready.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-view
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - SELECT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - test_view
   providerConfigRef:
     kind: ProviderConfig
     name: default
