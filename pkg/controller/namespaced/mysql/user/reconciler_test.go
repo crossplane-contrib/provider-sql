@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
@@ -295,7 +296,15 @@ func TestObserve(t *testing.T) {
 			reason: "We should return no error if we can successfully select our user",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						// Set authPlugin to empty string (default)
+						if len(dest) >= 5 {
+							if pluginPtr, ok := dest[4].(*string); ok {
+								*pluginPtr = ""
+							}
+						}
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -317,7 +326,15 @@ func TestObserve(t *testing.T) {
 			reason: "We should return ResourceUpToDate=false if the password changed",
 			fields: fields{
 				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						// Set authPlugin to empty string (default)
+						if len(dest) >= 5 {
+							if pluginPtr, ok := dest[4].(*string); ok {
+								*pluginPtr = ""
+							}
+						}
+						return nil
+					},
 				},
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
@@ -353,6 +370,35 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{
 					ResourceExists:   true,
 					ResourceUpToDate: false,
+				},
+				err: nil,
+			},
+		},
+		"OmittedAuthPluginDoesNotForceReconciliation": {
+			reason: "We should not compare auth plugins when authPlugin is omitted from the spec",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(dest) >= 5 {
+							if pluginPtr, ok := dest[4].(*string); ok {
+								*pluginPtr = "authentication_ldap_simple"
+							}
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
 				},
 				err: nil,
 			},
@@ -534,6 +580,52 @@ func TestCreate(t *testing.T) {
 				},
 			},
 		},
+		"UserWithAnAuthPluginThatNotRequiresPassword": {
+			reason:    "A user that uses an authentication plugin that does not require password should not receive connection details and no error should happen",
+			comparePw: true,
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalCreation{},
+			},
+		},
+		"ErrMissingAuthPluginWhenPasswordDisabled": {
+			reason: "We should reject disabling passwords without an explicit auth plugin",
+			fields: fields{
+				db: &mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							UsePassword: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.New(errMissingAuthPlugin),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -670,6 +762,11 @@ func TestUpdate(t *testing.T) {
 							},
 						},
 					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: ptr.To(""),
+						},
+					},
 				},
 				kube: &test.MockClient{
 					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
@@ -793,6 +890,7 @@ func TestUpdate(t *testing.T) {
 								"MAX_CONNECTIONS_PER_HOUR 0",
 								"MAX_USER_CONNECTIONS 0",
 							},
+							AuthPlugin: ptr.To(""),
 						},
 					},
 				},
@@ -809,6 +907,128 @@ func TestUpdate(t *testing.T) {
 			},
 			want: want{
 				err: nil,
+			},
+		},
+		"UserWithAnAuthPluginThatNotRequiresPassword": {
+			reason: "A user that uses an authentication plugin that does not require password should not receive connection details and no error should happen",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"SkipPasswordLookupWhenPasswordDisabled": {
+			reason: "We should not read password secrets when usePassword is false",
+			fields: fields{
+				db: &mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							AuthPlugin:  ptr.To("authentication_ldap_simple"),
+							UsePassword: ptr.To(false),
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
+									Name: "should-not-be-read",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						return errBoom
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
+			},
+		},
+		"UpdatedAuthPlugin": {
+			reason: "We should execute an SQL query if the auth plugin is not synced.",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordSecretRef: &common.LocalSecretKeySelector{
+								LocalSecretReference: common.LocalSecretReference{
+									Name: "connection-secret",
+								},
+								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+							},
+							AuthPlugin: ptr.To(""),
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							AuthPlugin: ptr.To("authentication_ldap_simple"),
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, key client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{},
+						}
+						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c:   managed.ExternalUpdate{},
 			},
 		},
 	}
