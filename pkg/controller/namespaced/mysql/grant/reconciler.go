@@ -121,6 +121,8 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Grant) (
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
+	// To add version-gated logic, call db.GetServerVersion(ctx) here
+	// and store it in the external struct (see PostgreSQL grant reconciler).
 	return &external{db: c.newDB(providerInfo.SecretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
 }
 

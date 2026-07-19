@@ -13,7 +13,7 @@ setup_mssql() {
   echo_step "Verifying secret creation"
   "${KUBECTL}" get secret mssql-creds -o yaml
 
-  "${KUBECTL}" apply -f ${scriptdir}/mssql.server.yaml
+  MSSQL_VERSION="${MSSQL_VERSION:-2022-CU24-ubuntu-22.04}" envsubst '${MSSQL_VERSION}' < "${scriptdir}/mssql.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for MSSQL Server to be ready"
   "${KUBECTL}" rollout status statefulset/mssql --timeout=300s

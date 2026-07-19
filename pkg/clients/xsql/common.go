@@ -3,6 +3,9 @@ package xsql
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"database/sql"
 
@@ -23,6 +26,41 @@ type DB interface {
 	Query(ctx context.Context, q Query) (*sql.Rows, error)
 	GetConnectionDetails(username, password string) managed.ConnectionDetails
 	GetServerVersion(ctx context.Context) (int, error)
+}
+
+// ParseVersion parses a database version string into an integer
+// encoded as major*10000 + minor*100 + patch.
+// Suffixes after '-' are stripped (e.g. "8.0.35-ubuntu" → 80035).
+// Patch values above 99 are ignored (e.g. MSSQL build numbers).
+func ParseVersion(version string) (int, error) {
+	if idx := strings.IndexByte(version, '-'); idx >= 0 {
+		version = version[:idx]
+	}
+
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("unexpected version format: %s", version)
+	}
+
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, fmt.Errorf("parsing major version %q: %w", parts[0], err)
+	}
+
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, fmt.Errorf("parsing minor version %q: %w", parts[1], err)
+	}
+
+	var patch int
+	if len(parts) == 3 {
+		p, err := strconv.Atoi(parts[2])
+		if err == nil && p <= 99 {
+			patch = p
+		}
+	}
+
+	return major*10000 + minor*100 + patch, nil
 }
 
 // IsNoRows returns true if the supplied error indicates no rows were returned.
