@@ -38,6 +38,8 @@ type DefaultPrivilegesStatus struct {
 }
 
 // DefaultPrivilegesParameters defines the desired state of a Default Grant.
+// +kubebuilder:validation:XValidation:rule="!has(self.objectType) || self.objectType == 'schema' || has(self.schema)",message="schema is required when objectType is not schema"
+// +kubebuilder:validation:XValidation:rule="!has(self.objectType) || self.objectType != 'schema' || !has(self.schema)",message="schema must not be set when objectType is schema"
 type DefaultPrivilegesParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
@@ -94,8 +96,9 @@ type DefaultPrivilegesParameters struct {
 	// +optional
 	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
 
-	// Schema in which the default privileges are applied
-	// +required
+	// Schema in which the default privileges are applied.
+	// Not applicable when objectType is schema.
+	// +optional
 	Schema *string `json:"schema,omitempty"`
 }
 
