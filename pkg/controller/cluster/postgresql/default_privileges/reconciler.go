@@ -56,6 +56,8 @@ const (
 	errNoRole                  = "role not passed or could not be resolved"
 	errNoTargetRole            = "target role not passed or could not be resolved"
 	errNoObjectType            = "object type not passed"
+	errNoSchema                = "schema is required when objectType is not schema"
+	errSchemaWithSchemaType    = "schema must not be set when objectType is schema"
 
 	maxConcurrency = 5
 )
@@ -175,16 +177,15 @@ func withOption(option *v1alpha1.GrantOption) string {
 }
 
 func inSchema(params *v1alpha1.DefaultPrivilegesParameters) string {
-	if params.Schema != nil {
+	// PostgreSQL does not allow IN SCHEMA with ON SCHEMAS.
+	if params.Schema != nil && (params.ObjectType == nil || *params.ObjectType != "schema") {
 		return fmt.Sprintf("IN SCHEMA %s", pq.QuoteIdentifier(*params.Schema))
 	}
 	return ""
 }
 
 func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
-
 	roleName := pq.QuoteIdentifier(*gp.Role)
-
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
 
 	query := strings.TrimSpace(fmt.Sprintf(
@@ -192,7 +193,7 @@ func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 		targetRoleName,
 		inSchema(&gp),
 		strings.Join(gp.Privileges.ToStringSlice(), ","),
-		*gp.ObjectType,
+		strings.ToUpper(*gp.ObjectType),
 		roleName,
 		withOption(gp.WithOption),
 	))
@@ -208,7 +209,7 @@ func deleteDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %sS FROM %s",
 		targetRoleName,
 		inSchema(&gp),
-		*gp.ObjectType,
+		strings.ToUpper(*gp.ObjectType),
 		roleName,
 	))
 
@@ -248,6 +249,14 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.DefaultPrivileges) 
 
 	if mg.Spec.ForProvider.ObjectType == nil {
 		return managed.ExternalObservation{}, errors.New(errNoObjectType)
+	}
+
+	if *mg.Spec.ForProvider.ObjectType != "schema" && mg.Spec.ForProvider.Schema == nil {
+		return managed.ExternalObservation{}, errors.New(errNoSchema)
+	}
+
+	if *mg.Spec.ForProvider.ObjectType == "schema" && mg.Spec.ForProvider.Schema != nil {
+		return managed.ExternalObservation{}, errors.New(errSchemaWithSchemaType)
 	}
 
 	gp := mg.Spec.ForProvider
