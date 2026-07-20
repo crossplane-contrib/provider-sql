@@ -5,11 +5,11 @@ on:
     inputs:
       version:
         description: "Version string to use while publishing the package (e.g. v1.0.0-alpha.1)"
-        default: ''
+        default: ""
         required: false
       go-version:
-        description: 'Go version to use if building needs to be done'
-        default: '1.26'
+        description: "Go version to use if building needs to be done"
+        default: "1.26"
         required: false
 
 jobs:
@@ -24,3 +24,22 @@ jobs:
       GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
       XPKG_MIRROR_TOKEN: ${{ secrets.XPKG_TOKEN }}
       XPKG_MIRROR_ACCESS_ID: ${{ secrets.XPKG_ACCESS_ID }}
+
+  add-extensions:
+    needs: publish-provider-package
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true
+
+      - name: Login to Upbound Marketplace
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: xpkg.upbound.io
+          username: ${{ secrets.XPKG_ACCESS_ID }}
+          password: ${{ secrets.XPKG_TOKEN }}
+
+      - name: Append extensions
+        run: make xpkg.append VERSION=${{ github.event.inputs.version }}
