@@ -1553,3 +1553,195 @@ func TestDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestGrantSQL(t *testing.T) {
+	cases := map[string]struct {
+		reason                string
+		gp                    v1alpha1.GrantParameters
+		wantSelectContains    []string
+		wantSelectNotContains []string
+		wantRevoke            string
+		wantGrant             string
+		wantDelete            string
+	}{
+		"RoutineSelectQueryDoesNotCrossJoinArgsWithACL": {
+			// Joining unnest(p.proargtypes) into the outer query crosses one row
+			// per ARGUMENT with aclexplode()'s one row per PRIVILEGE, so
+			// array_agg(acl.privilege_type) collects one entry per argument.
+			// EXECUTE is the only privilege a routine holds, so the HAVING
+			// equality against ARRAY['EXECUTE'] holds only at a single argument.
+			// Verified on PostgreSQL 16: 0- and 1-argument routines are observed,
+			// 2- and 9-argument routines never are. Observe then reports
+			// ResourceExists=false forever while the GRANT itself succeeds.
+			//
+			// This asserts the shape of the query, not its result: only a real
+			// server can execute it. See the multi-argument routine Grant in
+			// examples/namespaced/postgresql/grant.yaml, which fails to become
+			// Ready in e2e if the cross join comes back.
+			reason: "unnest(p.proargtypes) must be a correlated subquery, not joined into the ACL aggregation",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text", "int4"}}},
+			},
+			wantSelectContains: []string{
+				"FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)",
+				// Without the argument rows, proname/proargtypes group only via
+				// pg_proc's primary-key functional dependency. Spell them out.
+				"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid, p.proname, p.proargtypes",
+			},
+			wantSelectNotContains: []string{"LEFT JOIN unnest(p.proargtypes)"},
+		},
+		"TableGrantObservesAllGrantableRelkinds": {
+			reason: "GRANT ... ON TABLE accepts views, partitioned tables, matviews and foreign tables, so Observe must read those relkinds back or the Grant Creates successfully and never converges",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"myview"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"ColumnGrantObservesAllGrantableRelkinds": {
+			reason: "Column grants on views fail the same way as table grants when Observe filters to relkind 'r'",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"myview"},
+				Columns:    []string{"mycol"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"SequenceGrantStillFiltersToSequenceRelkind": {
+			reason: "The sequence query's relkind = 'S' filter is correct and must not be widened along with the table and column queries",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"myseq"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantSelectContains: []string{"c.relkind = 'S'"},
+		},
+		"RoutineArgumentTypeNamesAreNotQuoted": {
+			reason: "Routine argument type names must NOT be quoted: quoting bypasses PostgreSQL's grammar-level alias resolution, so the parser accepts \"int4\" but never \"integer\" -- while Observe compares against format_type(), which emits \"integer\". Quoted, no spelling satisfies both sides. Injection is bounded by the CRD's identifier-only pattern on args.",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"integer"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(integer) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+		},
+		"RoutineSchemaAndNameAreStillQuoted": {
+			reason: "Unquoting type names must not unquote the schema or routine name, which are user-supplied identifiers",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("my-schema"),
+				Routines:   []v1alpha1.Routine{{Name: "my-func", Arguments: []string{"text"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "my-schema"."my-func"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
+		},
+		"RoutineArgumentsUppercaseTypeNamesAreLowercased": {
+			reason: "Uppercase type names like TEXT are lowercased to match the canonical spelling pg_catalog.format_type() returns, which is what Observe compares against",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if len(tc.wantSelectContains) > 0 || len(tc.wantSelectNotContains) > 0 {
+				var q xsql.Query
+				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+					t.Fatalf("selectGrantQuery: %v", err)
+				}
+				for _, want := range tc.wantSelectContains {
+					if !strings.Contains(q.String, want) {
+						t.Errorf("%s\nwant query to contain %q\ngot: %s", tc.reason, want, q.String)
+					}
+				}
+				for _, notWant := range tc.wantSelectNotContains {
+					if strings.Contains(q.String, notWant) {
+						t.Errorf("%s\nwant query NOT to contain %q\ngot: %s", tc.reason, notWant, q.String)
+					}
+				}
+			}
+
+			if tc.wantRevoke != "" || tc.wantGrant != "" {
+				var ql []xsql.Query
+				if err := createGrantQueriesWithVersion(tc.gp, &ql, 0); err != nil {
+					t.Fatalf("createGrantQueries: %v", err)
+				}
+				if len(ql) < 2 {
+					t.Fatalf("expected at least 2 queries, got %d", len(ql))
+				}
+				if tc.wantRevoke != "" {
+					if diff := cmp.Diff(tc.wantRevoke, ql[0].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries REVOKE (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+				if tc.wantGrant != "" {
+					if diff := cmp.Diff(tc.wantGrant, ql[1].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries GRANT (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+			}
+
+			if tc.wantDelete != "" {
+				var q xsql.Query
+				if err := deleteGrantQuery(tc.gp, &q); err != nil {
+					t.Fatalf("deleteGrantQuery: %v", err)
+				}
+				if diff := cmp.Diff(tc.wantDelete, q.String); diff != "" {
+					t.Errorf("%s\ndeleteGrantQuery (-want +got):\n%s", tc.reason, diff)
+				}
+			}
+		})
+	}
+}
+
+// TestRoutineSignature pins the signature format the Observe query compares
+// against. pg_catalog.format_type() emits comma-separated canonical type names
+// with no spaces, which is what routineSignature must produce for
+// `sub.signature = ANY($6)` to match.
+func TestRoutineSignature(t *testing.T) {
+	cases := map[string]struct {
+		r    v1alpha1.Routine
+		want string
+	}{
+		"NoArguments":       {v1alpha1.Routine{Name: "f"}, "f()"},
+		"OneArgument":       {v1alpha1.Routine{Name: "f", Arguments: []string{"text"}}, "f(text)"},
+		"MultipleArguments": {v1alpha1.Routine{Name: "f", Arguments: []string{"text", "int4"}}, "f(text,int4)"},
+		"UppercaseLowered":  {v1alpha1.Routine{Name: "f", Arguments: []string{"TEXT"}}, "f(text)"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if diff := cmp.Diff(tc.want, routineSignature(tc.r)); diff != "" {
+				t.Errorf("routineSignature() (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

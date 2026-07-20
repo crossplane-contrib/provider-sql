@@ -1525,12 +1525,13 @@ func TestDelete(t *testing.T) {
 // properly quoted and ACL column references are qualified with their table alias.
 func TestGrantSQL(t *testing.T) {
 	cases := map[string]struct {
-		reason             string
-		gp                 v1alpha1.GrantParameters
-		wantSelectContains string
-		wantRevoke         string
-		wantGrant          string
-		wantDelete         string
+		reason                string
+		gp                    v1alpha1.GrantParameters
+		wantSelectContains    []string
+		wantSelectNotContains []string
+		wantRevoke            string
+		wantGrant             string
+		wantDelete            string
 	}{
 		"SchemaSelectQueryUsesQualifiedACL": {
 			reason: "aclexplode must reference n.nspacl to avoid scoping issues with JOIN precedence",
@@ -1540,7 +1541,7 @@ func TestGrantSQL(t *testing.T) {
 				Role:       ptr.To("myrole"),
 				Privileges: v1alpha1.GrantPrivileges{"USAGE"},
 			},
-			wantSelectContains: "aclexplode(n.nspacl)",
+			wantSelectContains: []string{"aclexplode(n.nspacl)"},
 		},
 		"DatabaseSelectQueryUsesQualifiedACL": {
 			reason: "aclexplode must reference db.datacl to avoid scoping issues with JOIN precedence",
@@ -1549,7 +1550,37 @@ func TestGrantSQL(t *testing.T) {
 				Role:       ptr.To("myrole"),
 				Privileges: v1alpha1.GrantPrivileges{"CONNECT"},
 			},
-			wantSelectContains: "aclexplode(db.datacl)",
+			wantSelectContains: []string{"aclexplode(db.datacl)"},
+		},
+		"RoutineSelectQueryDoesNotCrossJoinArgsWithACL": {
+			// Joining unnest(p.proargtypes) into the outer query crosses one row
+			// per ARGUMENT with aclexplode()'s one row per PRIVILEGE, so
+			// array_agg(acl.privilege_type) collects one entry per argument.
+			// EXECUTE is the only privilege a routine holds, so the HAVING
+			// equality against ARRAY['EXECUTE'] holds only at a single argument.
+			// Verified on PostgreSQL 16: 0- and 1-argument routines are observed,
+			// 2- and 9-argument routines never are. Observe then reports
+			// ResourceExists=false forever while the GRANT itself succeeds.
+			//
+			// This asserts the shape of the query, not its result: only a real
+			// server can execute it. See the multi-argument routine Grant in
+			// examples/cluster/postgresql/grant.yaml, which fails to become Ready
+			// in e2e if the cross join comes back.
+			reason: "unnest(p.proargtypes) must be a correlated subquery, not joined into the ACL aggregation",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text", "int4"}}},
+			},
+			wantSelectContains: []string{
+				"FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)",
+				// Without the argument rows, proname/proargtypes group only via
+				// pg_proc's primary-key functional dependency. Spell them out.
+				"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid, p.proname, p.proargtypes",
+			},
+			wantSelectNotContains: []string{"LEFT JOIN unnest(p.proargtypes)"},
 		},
 		"ColumnNamesAreQuoted": {
 			reason: "Column names must be double-quoted to prevent SQL injection",
@@ -1589,21 +1620,70 @@ func TestGrantSQL(t *testing.T) {
 			wantGrant:  `GRANT USAGE ON FOREIGN SERVER "myserver" TO "myrole" `,
 			wantDelete: `REVOKE USAGE ON FOREIGN SERVER "myserver" FROM "myrole"`,
 		},
-		"RoutineArgumentsAreQuoted": {
-			reason: "Routine argument type names must be double-quoted to prevent SQL injection",
+		"TableGrantObservesAllGrantableRelkinds": {
+			reason: "GRANT ... ON TABLE accepts views, partitioned tables, matviews and foreign tables, so Observe must read those relkinds back or the Grant Creates successfully and never converges",
 			gp: v1alpha1.GrantParameters{
 				Database:   ptr.To("mydb"),
 				Schema:     ptr.To("myschema"),
-				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text"}}},
+				Tables:     []string{"myview"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"ColumnGrantObservesAllGrantableRelkinds": {
+			reason: "Column grants on views fail the same way as table grants when Observe filters to relkind 'r'",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"myview"},
+				Columns:    []string{"mycol"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"SequenceGrantStillFiltersToSequenceRelkind": {
+			reason: "The sequence query's relkind = 'S' filter is correct and must not be widened along with the table and column queries",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"myseq"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantSelectContains: []string{"c.relkind = 'S'"},
+		},
+		"RoutineArgumentTypeNamesAreNotQuoted": {
+			reason: "Routine argument type names must NOT be quoted: quoting bypasses PostgreSQL's grammar-level alias resolution, so the parser accepts \"int4\" but never \"integer\" -- while Observe compares against format_type(), which emits \"integer\". Quoted, no spelling satisfies both sides. Injection is bounded by the CRD's identifier-only pattern on args.",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"integer"}}},
 				Role:       ptr.To("myrole"),
 				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
 			},
-			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
-			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
-			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(integer) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+		},
+		"RoutineSchemaAndNameAreStillQuoted": {
+			reason: "Unquoting type names must not unquote the schema or routine name, which are user-supplied identifiers",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("my-schema"),
+				Routines:   []v1alpha1.Routine{{Name: "my-func", Arguments: []string{"text"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "my-schema"."my-func"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
 		},
 		"RoutineArgumentsUppercaseTypeNamesAreLowercased": {
-			reason: "Uppercase type names like TEXT must be lowercased before quoting so PostgreSQL can resolve them (quoted identifiers are case-sensitive, but pg_catalog stores type names as lowercase)",
+			reason: "Uppercase type names like TEXT are lowercased to match the canonical spelling pg_catalog.format_type() returns, which is what Observe compares against",
 			gp: v1alpha1.GrantParameters{
 				Database:   ptr.To("mydb"),
 				Schema:     ptr.To("myschema"),
@@ -1611,21 +1691,28 @@ func TestGrantSQL(t *testing.T) {
 				Role:       ptr.To("myrole"),
 				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
 			},
-			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
-			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"("text") TO "myrole" `,
-			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"("text") FROM "myrole"`,
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
 		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if tc.wantSelectContains != "" {
+			if len(tc.wantSelectContains) > 0 || len(tc.wantSelectNotContains) > 0 {
 				var q xsql.Query
 				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
 					t.Fatalf("selectGrantQuery: %v", err)
 				}
-				if !strings.Contains(q.String, tc.wantSelectContains) {
-					t.Errorf("%s\nwant query to contain %q\ngot: %s", tc.reason, tc.wantSelectContains, q.String)
+				for _, want := range tc.wantSelectContains {
+					if !strings.Contains(q.String, want) {
+						t.Errorf("%s\nwant query to contain %q\ngot: %s", tc.reason, want, q.String)
+					}
+				}
+				for _, notWant := range tc.wantSelectNotContains {
+					if strings.Contains(q.String, notWant) {
+						t.Errorf("%s\nwant query NOT to contain %q\ngot: %s", tc.reason, notWant, q.String)
+					}
 				}
 			}
 
