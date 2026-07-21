@@ -33,6 +33,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
@@ -67,6 +69,20 @@ const (
 	maxConcurrency = 5
 )
 
+func clusterSecretMapper(kube client.Client, s *corev1.Secret) []reconcile.Request {
+	var rl v1alpha1.RoleList
+	if err := kube.List(context.Background(), &rl); err != nil {
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0)
+	for _, role := range rl.Items {
+		if role.Spec.ForProvider.PasswordSecretRef != nil && role.Spec.ForProvider.PasswordSecretRef.Name == s.Name && role.Spec.ForProvider.PasswordSecretRef.Namespace == s.Namespace {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: role.Namespace, Name: role.Name}})
+		}
+	}
+	return reqs
+}
+
 // Setup adds a controller that reconciles Role managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	name := managed.ControllerName(v1alpha1.RoleGroupKind)
@@ -91,13 +107,24 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	)); err != nil {
 		return err
 	}
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.Role{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrency,
-		}).
-		Complete(r)
+		})
+
+	// Watch Secrets and enqueue cluster Roles that reference the secret as
+	// their PasswordSecretRef so password Secret changes trigger reconciliation.
+	builder = builder.Watches(&corev1.Secret{}, handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		s, ok := obj.(*corev1.Secret)
+		if !ok {
+			return nil
+		}
+		return clusterSecretMapper(mgr.GetClient(), s)
+	}))
+
+	return builder.Complete(r)
 }
 
 type connector struct {
