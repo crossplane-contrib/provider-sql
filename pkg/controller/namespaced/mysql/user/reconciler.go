@@ -23,6 +23,7 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -47,12 +48,13 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 	errTLSConfig    = "cannot load TLS config"
 
-	errSelectUser              = "cannot select user"
-	errCreateUser              = "cannot create user"
-	errDropUser                = "cannot drop user"
-	errUpdateUser              = "cannot update user"
-	errGetPasswordSecretFailed = "cannot get password secret"
-	errCompareResourceOptions  = "cannot compare desired and observed resource options"
+	errSelectUser                = "cannot select user"
+	errCreateUser                = "cannot create user"
+	errDropUser                  = "cannot drop user"
+	errUpdateUser                = "cannot update user"
+	errGetPasswordSecretFailed   = "cannot get password secret"
+	errGetConnectionSecretFailed = "cannot get connection secret"
+	errCompareResourceOptions    = "cannot compare desired and observed resource options"
 
 	maxConcurrency = 5
 )
@@ -506,10 +508,18 @@ func (c *external) UpdatePassword(ctx context.Context, cr *namespacedv1alpha1.Us
 	}
 
 	if pwchanged {
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ConnectionDetails{}, err
+			}
+		}
 		query := fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY %s", mysql.QuoteValue(username), mysql.QuoteValue(host), mysql.QuoteValue(pw))
 		if err := mysql.ExecWrapper(ctx, c.db, mysql.ExecQuery{Query: query, ErrorValue: errUpdateUser}); err != nil {
 			return managed.ConnectionDetails{}, err
 		}
+		now := metav1.Now()
+		cr.Status.AtProvider.LastPasswordChange = &now
 
 		return c.db.GetConnectionDetails(username, pw), nil
 	}
