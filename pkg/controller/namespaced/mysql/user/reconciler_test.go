@@ -19,15 +19,19 @@ package user
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/apis/common"
@@ -38,6 +42,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
@@ -1083,6 +1088,291 @@ func TestUpdate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got, cmpopts.IgnoreMapEntries(func(key string, _ []byte) bool { return key == "password" })); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestGetPassword(t *testing.T) {
+	type args struct {
+		ctx  context.Context
+		user *v1alpha1.User
+		kube client.Client
+	}
+	type want struct {
+		pwd     string
+		changed bool
+		err     error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChange": {
+			reason: "nil LastPasswordChange with no connection secret reference should not reset (nowhere to publish a regenerated password)",
+			args: args{
+				user: &v1alpha1.User{},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerNilLastChangeSecretHasPassword": {
+			reason: "PasswordRotationTrigger with nil LastPasswordChange must not reset when the connection secret already has a password (Create just ran)",
+			args: args{
+				user: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now()},
+						},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NilLastPasswordChangeSecretNotFound": {
+			reason: "nil LastPasswordChange with a missing connection secret should trigger a reset (restoration scenario)",
+			args: args{
+				user: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.UserSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
+				},
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"NilLastPasswordChangeSecretHasPassword": {
+			reason: "nil LastPasswordChange with existing connection secret password should not reset (Create already ran)",
+			args: args{
+				user: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.UserSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv1.ResourceCredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"LastPasswordChangeSetNoTrigger": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			args: args{
+				user: &v1alpha1.User{
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerAfterLastChange": {
+			reason: "PasswordRotationTrigger set after LastPasswordChange should trigger rotation",
+			args: args{
+				user: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now()},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							LastPasswordChange: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"RotationTriggerBeforeLastChange": {
+			reason: "PasswordRotationTrigger set before LastPasswordChange should not trigger rotation",
+			args: args{
+				user: &v1alpha1.User{
+					Spec: v1alpha1.UserSpec{
+						ForProvider: v1alpha1.UserParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							LastPasswordChange: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{kube: tc.args.kube}
+			pwd, changed, err := e.getPassword(tc.args.ctx, tc.args.user)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.pwd, pwd); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want pwd, +got pwd:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.changed, changed); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want changed, +got changed:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestUpdatePasswordReset(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		execQuery *string
+	}
+
+	type args struct {
+		ctx  context.Context
+		mg   *v1alpha1.User
+		kube client.Client
+	}
+
+	type want struct {
+		err               error
+		passwordGenerated bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChangeGeneratesPassword": {
+			reason: "nil LastPasswordChange with a connection secret reference but missing secret should generate a new password (restoration scenario)",
+			fields: fields{execQuery: new(string)},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.UserSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &common.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
+				},
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: true,
+			},
+		},
+		"LastPasswordChangeSetNoReset": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			fields: fields{execQuery: nil},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Status: v1alpha1.UserStatus{
+						AtProvider: v1alpha1.UserObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+				kube: &test.MockClient{},
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: false,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			execQuery := tc.fields.execQuery
+			db := &mockDB{
+				MockExec: func(ctx context.Context, q xsql.Query) error {
+					if execQuery == nil {
+						return errBoom
+					}
+					*execQuery = q.String
+					return nil
+				},
+			}
+			e := external{
+				db:   db,
+				kube: tc.args.kube,
+			}
+			got, err := e.Update(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.passwordGenerated {
+				if execQuery == nil || *execQuery == "" {
+					t.Errorf("\n%s\ne.Update(...): expected ALTER USER IDENTIFIED BY query to be executed\n", tc.reason)
+				} else if *execQuery == fmt.Sprintf("ALTER USER %s@%s IDENTIFIED BY ''", mysql.QuoteValue("example"), mysql.QuoteValue("%")) {
+					t.Errorf("\n%s\ne.Update(...): ALTER USER IDENTIFIED BY query contained an empty password\n", tc.reason)
+				}
+				if pw := got.ConnectionDetails[xpv1.ResourceCredentialsSecretPasswordKey]; len(pw) == 0 {
+					t.Errorf("\n%s\ne.Update(...): expected non-empty password in ConnectionDetails\n", tc.reason)
+				}
 			}
 		})
 	}
