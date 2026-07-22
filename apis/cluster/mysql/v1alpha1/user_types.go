@@ -68,6 +68,11 @@ type UserParameters struct {
 	// BinLog defines whether the create, delete, update operations of this user are propagated to replicas. Defaults to true
 	// +optional
 	BinLog *bool `json:"binlog,omitempty"`
+
+	// PasswordRotationTrigger triggers rotation of the auto-generated password when set to
+	// a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
+	// +optional
+	PasswordRotationTrigger *metav1.Time `json:"passwordRotationTrigger,omitempty"`
 }
 
 // AuthenticationPlugin selects the auth plugin used when creating the user.
@@ -115,6 +120,9 @@ type UserObservation struct {
 	// spec.forProvider.authenticationPlugin and what's actually configured
 	// on the DB so plugin changes are not silently ignored.
 	AuthenticationPlugin *AuthenticationPlugin `json:"authenticationPlugin,omitempty"`
+
+	// LastPasswordChange records when the provider last set the user's password.
+	LastPasswordChange *metav1.Time `json:"lastPasswordChange,omitempty"`
 }
 
 // +kubebuilder:object:root=true
