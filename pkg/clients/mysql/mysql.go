@@ -17,21 +17,7 @@ import (
 const (
 	errNotSupported = "%s not supported by mysql client"
 
-	// lockWaitTimeoutSeconds bounds how long a statement waits for a metadata
-	// lock before failing server-side. MySQL's default lock_wait_timeout is
-	// 31536000s (1 year), so a statement queued behind a lock — e.g. an
-	// ALTER USER / GRANT / DROP DATABASE waiting behind a backup, a long
-	// transaction, or concurrent DDL — stays pending on the server
-	// effectively forever. This is dangerous here because the go-sql-driver
-	// cancels a context by closing the TCP socket WITHOUT issuing KILL, so
-	// when the reconcile deadline fires the provider abandons the statement
-	// but the server thread (and its connection) keeps waiting. Every retry
-	// then issues another statement that also blocks, and account-management
-	// statements additionally serialize on a single global ACL lock, so
-	// blocked statements pile up until the server becomes unresponsive. A
-	// short lock_wait_timeout makes such statements fail fast and release
-	// instead of accumulating.
-	//
+	// prevent statements hanging indefintely server-side if timeout occurs waiting for a lock
 	// See docs/mysql-driver-context-cancellation.md for the full analysis.
 	lockWaitTimeoutSeconds = 30
 	// dialTimeout bounds TCP connection establishment so a reconcile does not
@@ -68,16 +54,7 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
-	// Use net/url UserPassword to encode the username and password
-	// This will ensure that any special characters in the username or password
-	// are percent-encoded for use in the user info portion of the DSN URL
-
-	// lock_wait_timeout and timeout are appended to every connection so that a
-	// statement blocked on a metadata lock, or a connection to an unreachable
-	// endpoint, fails fast server-side instead of piling up (see the const
-	// docs above). lock_wait_timeout is an unrecognised driver param and is
-	// therefore issued as `SET lock_wait_timeout = <n>` by go-sql-driver on
-	// connect; timeout is the driver's dial timeout.
+	// add timeouts to prevent orphaned statements and excessive waits on connection dial
 	params := fmt.Sprintf("tls=%s&lock_wait_timeout=%d&timeout=%s",
 		tls,
 		lockWaitTimeoutSeconds,
