@@ -143,6 +143,48 @@ func TestIdleSweepEvictsStalePools(t *testing.T) {
 	}
 }
 
+func TestGetPropagatesOpenError(t *testing.T) {
+	resetCache(t)
+
+	wantErr := errors.New("boom")
+	openDB = func(_, _ string, _ Config) (*sql.DB, error) {
+		return nil, wantErr
+	}
+
+	db, err := Get("mysql", "dsn-1", Default)
+	if !errors.Is(err, wantErr) {
+		t.Errorf("Get: got err %v, want %v", err, wantErr)
+	}
+	if db != nil {
+		t.Errorf("Get: expected a nil *sql.DB on error, got %v", db)
+	}
+	if _, ok := cache["mysql\x00dsn-1"]; ok {
+		t.Errorf("a failed open must not be cached")
+	}
+}
+
+func TestConfigApply(t *testing.T) {
+	db := newFakeDB()
+	defer db.Close() //nolint:errcheck // test cleanup only; the fake driver never errors on Close.
+
+	cfg := Config{
+		MaxOpenConns:    7,
+		MaxIdleConns:    3,
+		ConnMaxLifetime: 42 * time.Minute,
+		ConnMaxIdleTime: 5 * time.Minute,
+	}
+	cfg.apply(db)
+
+	// sql.DBStats only surfaces MaxOpenConnections directly, so that field is
+	// value-verified. The other three setters (SetMaxIdleConns,
+	// SetConnMaxLifetime, SetConnMaxIdleTime) have no equivalent public
+	// getter; calling apply without panicking is the extent to which they can
+	// be smoke-tested here.
+	if got := db.Stats().MaxOpenConnections; got != cfg.MaxOpenConns {
+		t.Errorf("apply: MaxOpenConnections = %d, want %d", got, cfg.MaxOpenConns)
+	}
+}
+
 func TestActivePoolNotSwept(t *testing.T) {
 	resetCache(t)
 
