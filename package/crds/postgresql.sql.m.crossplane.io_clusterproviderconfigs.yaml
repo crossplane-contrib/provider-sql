@@ -52,6 +52,35 @@ spec:
             description: A ClusterProviderConfigSpec defines the desired state of
               a ClusterProviderConfig.
             properties:
+              connectionPool:
+                description: |-
+                  ConnectionPool tunes the shared database connection pool used for
+                  connections established with this ClusterProviderConfig.
+                properties:
+                  maxConnIdleTime:
+                    description: |-
+                      MaxConnIdleTime is the maximum amount of time a connection may remain
+                      idle before being closed, as a Go duration string (e.g. "10m").
+                      Defaults to 10m.
+                    type: string
+                  maxConnLifetime:
+                    description: |-
+                      MaxConnLifetime is the maximum amount of time a connection may be reused,
+                      as a Go duration string (e.g. "1h", "30m"). Defaults to 1h.
+                    type: string
+                  maxIdleConnections:
+                    description: |-
+                      MaxIdleConnections is the maximum number of idle connections retained in
+                      the pool. Defaults to 5.
+                    minimum: 0
+                    type: integer
+                  maxOpenConnections:
+                    description: |-
+                      MaxOpenConnections is the maximum number of open connections to the
+                      database. 0 means unlimited. Defaults to 10.
+                    minimum: 0
+                    type: integer
+                type: object
               credentials:
                 description: Credentials required to authenticate to this provider.
                 properties:

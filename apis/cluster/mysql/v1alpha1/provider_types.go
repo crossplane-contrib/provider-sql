@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 )
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
@@ -39,6 +41,11 @@ type ProviderConfigSpec struct {
 	// Optional TLS configuration for sql driver. Setting this field also requires the tls field to be set to custom.
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig"`
+
+	// ConnectionPool tunes the shared database connection pool used for
+	// connections established with this ProviderConfig.
+	// +optional
+	ConnectionPool *ConnectionPool `json:"connectionPool,omitempty"`
 }
 
 // TLSConfig defines the TLS configuration for the provider when tls=custom.
@@ -52,6 +59,57 @@ type TLSConfig struct {
 // TLSSecret defines a reference to a K8s secret and its specific internal key that contains the TLS cert/keys in PEM format.
 type TLSSecret struct {
 	SecretRef xpv1.SecretKeySelector `json:"secretRef,omitempty"`
+}
+
+// ConnectionPool configures the shared database connection pool the provider
+// uses for connections established with this ProviderConfig. Managed resources
+// that target the same database server share a single pool, so these limits
+// bound the connections the provider holds against that server.
+type ConnectionPool struct {
+	// MaxOpenConnections is the maximum number of open connections to the
+	// database. 0 means unlimited. Defaults to 10.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxOpenConnections *int `json:"maxOpenConnections,omitempty"`
+
+	// MaxIdleConnections is the maximum number of idle connections retained in
+	// the pool. Defaults to 5.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxIdleConnections *int `json:"maxIdleConnections,omitempty"`
+
+	// MaxConnLifetime is the maximum amount of time a connection may be reused,
+	// as a Go duration string (e.g. "1h", "30m"). Defaults to 1h.
+	// +optional
+	MaxConnLifetime *metav1.Duration `json:"maxConnLifetime,omitempty"`
+
+	// MaxConnIdleTime is the maximum amount of time a connection may remain
+	// idle before being closed, as a Go duration string (e.g. "10m").
+	// Defaults to 10m.
+	// +optional
+	MaxConnIdleTime *metav1.Duration `json:"maxConnIdleTime,omitempty"`
+}
+
+// ToPoolConfig converts the API ConnectionPool to a pool.Config, applying
+// defaults for any unset field and for a nil receiver.
+func (p *ConnectionPool) ToPoolConfig() pool.Config {
+	c := pool.Default
+	if p == nil {
+		return c
+	}
+	if p.MaxOpenConnections != nil {
+		c.MaxOpenConns = *p.MaxOpenConnections
+	}
+	if p.MaxIdleConnections != nil {
+		c.MaxIdleConns = *p.MaxIdleConnections
+	}
+	if p.MaxConnLifetime != nil {
+		c.ConnMaxLifetime = p.MaxConnLifetime.Duration
+	}
+	if p.MaxConnIdleTime != nil {
+		c.ConnMaxIdleTime = p.MaxConnIdleTime.Duration
+	}
+	return c
 }
 
 const (

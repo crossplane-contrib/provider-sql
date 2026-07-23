@@ -40,6 +40,11 @@ type ClusterProviderConfigSpec struct {
 	// Optional TLS configuration for sql driver. Setting this field also requires the tls field to be set to custom.
 	// +optional
 	TLSConfig *TLSConfig `json:"tlsConfig"`
+
+	// ConnectionPool tunes the shared database connection pool used for
+	// connections established with this ClusterProviderConfig.
+	// +optional
+	ConnectionPool *ConnectionPool `json:"connectionPool,omitempty"`
 }
 
 // ClusterProviderCredentials required to authenticate.

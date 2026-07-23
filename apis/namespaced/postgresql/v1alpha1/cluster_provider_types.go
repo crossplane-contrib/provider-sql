@@ -36,6 +36,11 @@ type ClusterProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+
+	// ConnectionPool tunes the shared database connection pool used for
+	// connections established with this ClusterProviderConfig.
+	// +optional
+	ConnectionPool *ConnectionPool `json:"connectionPool,omitempty"`
 }
 
 // ClusterProviderCredentials required to authenticate.
