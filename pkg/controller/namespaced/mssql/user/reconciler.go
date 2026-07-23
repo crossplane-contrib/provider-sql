@@ -38,6 +38,7 @@ import (
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mssql/provider"
 )
@@ -96,7 +97,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube      client.Client
 	track     func(ctx context.Context, mg resource.ModernManaged) error
-	newClient func(creds map[string][]byte, database string) xsql.DB
+	newClient func(creds map[string][]byte, database string, poolCfg pool.Config) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*namespacedv1alpha1.User] = &connector{}
@@ -113,10 +114,10 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.User) (m
 		return nil, err
 	}
 
-	userDB := c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))
+	userDB := c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.Database, ""), providerInfo.PoolConfig)
 	loginDB := userDB
 	if mg.Spec.ForProvider.LoginDatabase != nil {
-		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""))
+		loginDB = c.newClient(providerInfo.SecretData, ptr.Deref(mg.Spec.ForProvider.LoginDatabase, ""), providerInfo.PoolConfig)
 	}
 
 	return &external{

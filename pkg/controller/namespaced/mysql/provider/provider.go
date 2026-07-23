@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -20,6 +21,7 @@ type ProviderInfo struct {
 	SecretData         map[string][]byte
 	TLS                *string
 	TLSConfig          *v1alpha1.TLSConfig
+	PoolConfig         pool.Config
 }
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
@@ -28,6 +30,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode    *string
 		tlsConfig  *v1alpha1.TLSConfig
 		keyMapping map[string]string
+		poolConfig pool.Config
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -50,6 +53,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = providerConfig.Spec.TLS
 		tlsConfig = providerConfig.Spec.TLSConfig
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = providerConfig.Spec.ConnectionPool.ToPoolConfig()
 
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
@@ -69,6 +73,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = clusterProviderConfig.Spec.TLS
 		tlsConfig = clusterProviderConfig.Spec.TLSConfig
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = clusterProviderConfig.Spec.ConnectionPool.ToPoolConfig()
 
 	default:
 		return ProviderInfo{}, errors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
@@ -89,5 +94,6 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
 		TLS:                tlsMode,
 		TLSConfig:          tlsConfig,
+		PoolConfig:         poolConfig,
 	}, nil
 }

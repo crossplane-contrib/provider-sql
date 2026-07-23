@@ -40,6 +40,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -94,7 +95,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube      client.Client
 	track     func(ctx context.Context, mg resource.LegacyManaged) error
-	newClient func(creds map[string][]byte, database string) xsql.DB
+	newClient func(creds map[string][]byte, database string, poolCfg pool.Config) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
@@ -125,7 +126,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.Database, ""))}, nil
+	poolCfg := pc.Spec.ConnectionPool.ToPoolConfig()
+	return &external{db: c.newClient(secretData, ptr.Deref(mg.Spec.ForProvider.Database, ""), poolCfg)}, nil
 }
 
 type external struct{ db xsql.DB }

@@ -41,6 +41,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -90,7 +91,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, sslmode string, poolCfg pool.Config) xsql.DB
 	}
 
 	type args struct {
@@ -1407,7 +1408,7 @@ func TestConnectWithSecretKeyMapping(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, sslmode string, poolCfg pool.Config) xsql.DB
 	}
 
 	cases := map[string]struct {
@@ -1503,7 +1504,7 @@ func TestConnectWithSecretKeyMapping(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			var captured map[string][]byte
-			tc.fields.newDB = func(creds map[string][]byte, database string, sslmode string) xsql.DB {
+			tc.fields.newDB = func(creds map[string][]byte, database string, sslmode string, poolCfg pool.Config) xsql.DB {
 				captured = creds
 				return mockDB{}
 			}

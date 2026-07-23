@@ -37,6 +37,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql/tls"
 )
@@ -94,7 +95,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, poolCfg pool.Config) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Database] = &connector{}
@@ -131,7 +132,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	poolCfg := pc.Spec.ConnectionPool.ToPoolConfig()
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, poolCfg)}, nil
 }
 
 type external struct{ db xsql.DB }

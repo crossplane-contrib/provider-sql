@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -20,6 +21,7 @@ type ProviderInfo struct {
 	SecretData         map[string][]byte
 	DefaultDatabase    string
 	SSLMode            *string
+	PoolConfig         pool.Config
 }
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
@@ -28,6 +30,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		defaultDatabase string
 		sslMode         *string
 		keyMapping      map[string]string
+		poolConfig      pool.Config
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -51,6 +54,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		defaultDatabase = providerConfig.Spec.DefaultDatabase
 		sslMode = providerConfig.Spec.SSLMode
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = providerConfig.Spec.ConnectionPool.ToPoolConfig()
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
 			ObjectMeta: metav1.ObjectMeta{
@@ -70,6 +74,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		defaultDatabase = clusterProviderConfig.Spec.DefaultDatabase
 		sslMode = clusterProviderConfig.Spec.SSLMode
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = clusterProviderConfig.Spec.ConnectionPool.ToPoolConfig()
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
 	}
@@ -89,5 +94,6 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
 		DefaultDatabase:    defaultDatabase,
 		SSLMode:            sslMode,
+		PoolConfig:         poolConfig,
 	}, nil
 }

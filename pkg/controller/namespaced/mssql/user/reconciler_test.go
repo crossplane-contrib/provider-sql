@@ -39,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 )
@@ -93,7 +94,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.ModernManaged) error
-		newDB func(creds map[string][]byte, database string) xsql.DB
+		newDB func(creds map[string][]byte, database string, _ pool.Config) xsql.DB
 	}
 
 	type args struct {
@@ -276,7 +277,9 @@ func TestConnect(t *testing.T) {
 					}),
 				},
 				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
-				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
+				newDB: func(creds map[string][]byte, database string, _ pool.Config) xsql.DB {
+					return mockDB{database: database}
+				},
 			},
 			args: args{
 				mg: &v1alpha1.User{
@@ -319,7 +322,9 @@ func TestConnect(t *testing.T) {
 					}),
 				},
 				track: func(ctx context.Context, mg resource.ModernManaged) error { return nil },
-				newDB: func(creds map[string][]byte, database string) xsql.DB { return mockDB{database: database} },
+				newDB: func(creds map[string][]byte, database string, _ pool.Config) xsql.DB {
+					return mockDB{database: database}
+				},
 			},
 			args: args{
 				mg: &v1alpha1.User{
