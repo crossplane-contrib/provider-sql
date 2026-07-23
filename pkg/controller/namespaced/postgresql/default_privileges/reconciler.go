@@ -38,6 +38,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
@@ -99,7 +100,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.ModernManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, poolCfg pool.Config) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.TypedExternalClient[*v1alpha1.DefaultPrivileges], error) {
@@ -121,7 +122,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 		database = *mg.Spec.ForProvider.Database
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, database, clients.ToString(providerInfo.SSLMode))}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, database, clients.ToString(providerInfo.SSLMode), providerInfo.PoolConfig)}, nil
 }
 
 type external struct {

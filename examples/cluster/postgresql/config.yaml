@@ -14,6 +14,13 @@ spec:
     connectionSecretRef:
       namespace: default
       name: db-conn
+  # connectionPool tunes the shared DB connection pool. All fields are optional;
+  # omitted fields use the defaults shown below.
+  connectionPool:
+    maxOpenConnections: 10
+    maxIdleConnections: 5
+    maxConnLifetime: 1h
+    maxConnIdleTime: 10m
 
 # docker run --rm -p 5432:5432  -e POSTGRES_PASSWORD=pass postgres
 # ---

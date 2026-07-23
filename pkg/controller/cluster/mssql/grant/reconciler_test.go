@@ -36,6 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -78,7 +79,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string) xsql.DB
+		newDB func(creds map[string][]byte, database string, _ pool.Config) xsql.DB
 	}
 
 	type args struct {

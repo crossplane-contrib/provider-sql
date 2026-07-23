@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mssql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -18,12 +19,14 @@ import (
 type ProviderInfo struct {
 	ProviderConfigName string
 	SecretData         map[string][]byte
+	PoolConfig         pool.Config
 }
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
 		secretKey  *client.ObjectKey
 		keyMapping map[string]string
+		poolConfig pool.Config
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -44,6 +47,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 			Namespace: mg.GetNamespace(),
 		}
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = providerConfig.Spec.ConnectionPool.ToPoolConfig()
 
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
@@ -61,6 +65,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 			Namespace: clusterProviderConfig.Spec.Credentials.ConnectionSecretRef.Namespace,
 		}
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		poolConfig = clusterProviderConfig.Spec.ConnectionPool.ToPoolConfig()
 
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
@@ -79,5 +84,6 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 	return ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
 		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
+		PoolConfig:         poolConfig,
 	}, nil
 }

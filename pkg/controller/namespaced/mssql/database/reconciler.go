@@ -35,6 +35,7 @@ import (
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mssql/provider"
 )
@@ -87,7 +88,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube      client.Client
 	track     func(ctx context.Context, mg resource.ModernManaged) error
-	newClient func(creds map[string][]byte, database string) xsql.DB
+	newClient func(creds map[string][]byte, database string, poolCfg pool.Config) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*namespacedv1alpha1.Database] = &connector{}
@@ -104,7 +105,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database
 		return nil, err
 	}
 
-	return &external{db: c.newClient(providerInfo.SecretData, "")}, nil
+	return &external{db: c.newClient(providerInfo.SecretData, "", providerInfo.PoolConfig)}, nil
 }
 
 type external struct{ db xsql.DB }

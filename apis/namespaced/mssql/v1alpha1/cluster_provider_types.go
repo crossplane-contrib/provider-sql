@@ -26,6 +26,11 @@ import (
 type ClusterProviderConfigSpec struct {
 	// Credentials required to authenticate to this provider.
 	Credentials ClusterProviderCredentials `json:"credentials"`
+
+	// ConnectionPool tunes the shared database connection pool used for
+	// connections established with this ClusterProviderConfig.
+	// +optional
+	ConnectionPool *ConnectionPool `json:"connectionPool,omitempty"`
 }
 
 // ClusterProviderCredentials required to authenticate.

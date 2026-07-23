@@ -38,6 +38,7 @@ import (
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
@@ -94,7 +95,7 @@ var _ managed.TypedExternalConnector[*namespacedv1alpha1.Schema] = &connector{}
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.ModernManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, poolCfg pool.Config) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.TypedExternalClient[*namespacedv1alpha1.Schema], error) {
@@ -113,7 +114,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Schema) 
 		return nil, errors.New(errNoDatabase)
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, *mg.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode))}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, *mg.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode), providerInfo.PoolConfig)}, nil
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Schema] = &external{}
