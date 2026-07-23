@@ -17,10 +17,39 @@ limitations under the License.
 package pool
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"testing"
 	"time"
 )
+
+// fakeConnector yields a non-nil *sql.DB via sql.OpenDB without needing a
+// registered driver. The tests never actually query, so Connect/Open only
+// need to exist; the resulting *sql.DB can be cached, compared by pointer, and
+// Closed cleanly.
+type fakeConnector struct{}
+
+func (fakeConnector) Connect(context.Context) (driver.Conn, error) { return nil, errors.New("fake") }
+func (fakeConnector) Driver() driver.Driver                        { return fakeDriver{} }
+
+type fakeDriver struct{}
+
+func (fakeDriver) Open(string) (driver.Conn, error) { return nil, errors.New("fake") }
+
+// newFakeDB returns a fresh, non-nil, closeable *sql.DB.
+func newFakeDB() *sql.DB { return sql.OpenDB(fakeConnector{}) }
+
+// realOpenDB is the production opener, restored after each test.
+func realOpenDB(driverName, dsn string, cfg Config) (*sql.DB, error) {
+	db, err := sql.Open(driverName, dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.apply(db)
+	return db, nil
+}
 
 // resetCache clears package state between tests and restores the real clock
 // and opener stub afterwards.
@@ -29,28 +58,20 @@ func resetCache(t *testing.T) {
 	mu.Lock()
 	cache = map[string]*entry{}
 	mu.Unlock()
-	openDB = func(driver, dsn string, cfg Config) (*sql.DB, error) {
-		// A closed *sql.DB is a valid, non-nil handle we can cache and Close
-		// without needing a registered driver or a real server.
-		db, _ := sql.Open("fakedriver-"+driver, dsn)
-		return db, nil
+	openDB = func(_, _ string, _ Config) (*sql.DB, error) {
+		return newFakeDB(), nil
 	}
 	now = time.Now
 	t.Cleanup(func() {
 		mu.Lock()
 		for k, e := range cache {
-			_ = e.db.Close()
+			if e.db != nil {
+				_ = e.db.Close()
+			}
 			delete(cache, k)
 		}
 		mu.Unlock()
-		openDB = func(driver, dsn string, cfg Config) (*sql.DB, error) {
-			db, err := sql.Open(driver, dsn)
-			if err != nil {
-				return nil, err
-			}
-			cfg.apply(db)
-			return db, nil
-		}
+		openDB = realOpenDB
 		now = time.Now
 	})
 }
