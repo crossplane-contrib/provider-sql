@@ -28,6 +28,7 @@ import (
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -41,10 +42,12 @@ type mssqlDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	pool     pool.Config
 }
 
-// New returns a new mssql database client.
-func New(creds map[string][]byte, database string) xsql.DB {
+// New returns a new mssql database client. The pool config tunes the shared,
+// DSN-keyed connection pool used for all queries issued by this client.
+func New(creds map[string][]byte, database string, poolCfg pool.Config) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 
@@ -67,6 +70,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 		dsn:      u.String(),
 		endpoint: endpoint,
 		port:     port,
+		pool:     poolCfg,
 	}
 }
 
@@ -77,11 +81,10 @@ func (c mssqlDB) ExecTx(_ context.Context, _ []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return err
 	}
-	defer d.Close() //nolint:errcheck
 
 	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
 	return err
@@ -89,24 +92,22 @@ func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return nil, err
 	}
-	defer d.Close() //nolint:errcheck
 
 	return d.QueryContext(ctx, q.String, q.Parameters...)
 }
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open(driverName, c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return err
 	}
-	defer db.Close() //nolint:errcheck
 
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
+	return d.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB

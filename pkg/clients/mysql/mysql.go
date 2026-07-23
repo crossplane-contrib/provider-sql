@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
 
@@ -16,6 +17,8 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
+
+	driverName = "mysql"
 )
 
 type mySQLDB struct {
@@ -23,10 +26,12 @@ type mySQLDB struct {
 	endpoint string
 	port     string
 	tls      string
+	pool     pool.Config
 }
 
-// New returns a new MySQL database client.
-func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
+// New returns a new MySQL database client. The pool config tunes the shared,
+// DSN-keyed connection pool used for all queries issued by this client.
+func New(creds map[string][]byte, tls *string, binlog *bool, poolCfg pool.Config) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
@@ -42,6 +47,7 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 		endpoint: endpoint,
 		port:     port,
 		tls:      *tls,
+		pool:     poolCfg,
 	}
 }
 
@@ -74,11 +80,10 @@ func (c mySQLDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return err
 	}
-	defer d.Close() //nolint:errcheck
 
 	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
 	return err
@@ -86,11 +91,10 @@ func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return nil, err
 	}
-	defer d.Close() //nolint:errcheck
 
 	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
 	return rows, err
@@ -98,13 +102,12 @@ func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mySQLDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return err
 	}
-	defer db.Close() //nolint:errcheck
 
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
+	return d.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB

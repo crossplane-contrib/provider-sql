@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/pool"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
 	"github.com/lib/pq/pqerror"
@@ -18,6 +19,8 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pqerror.Code("3D000")
+
+	driverName = "postgres"
 )
 
 type postgresDB struct {
@@ -25,13 +28,16 @@ type postgresDB struct {
 	endpoint string
 	port     string
 	sslmode  string
+	pool     pool.Config
 }
 
 // New returns a new PostgreSQL database client. The default database name is
 // an empty string. The underlying pq library will default to either using the
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
 // The sslmode defines the mode used to set up the connection for the provider.
-func New(creds map[string][]byte, database, sslmode string) xsql.DB {
+// The pool config tunes the shared, DSN-keyed connection pool used for all
+// queries issued by this client.
+func New(creds map[string][]byte, database, sslmode string, poolCfg pool.Config) xsql.DB {
 	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
 	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
 	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
@@ -43,6 +49,7 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 		endpoint: endpoint,
 		port:     port,
 		sslmode:  sslmode,
+		pool:     poolCfg,
 	}
 }
 
@@ -63,7 +70,7 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 // ExecTx executes an array of queries, committing if all are successful and
 // rolling back immediately on failure.
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := pool.Get(driverName, c.dsn, c.pool)
 	if err != nil {
 		return err
 	}
@@ -73,10 +80,9 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 		return err
 	}
 
-	// Rollback or Commit based on error state. Defer close in defer to make
-	// sure the connection is always closed.
+	// Rollback or Commit based on error state. The pool is shared and owned by
+	// the pool cache, so we must not close it here.
 	defer func() {
-		defer d.Close() //nolint:errcheck
 		// We always rollback, it's a no-op if the tx was already committed.
 		defer tx.Rollback() //nolint:errcheck
 
