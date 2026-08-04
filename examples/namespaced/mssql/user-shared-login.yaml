@@ -1,0 +1,66 @@
+# Shared login across databases: one User per database sharing the same
+# external-name (login/user name), passwordSecretRef and loginDatabase: master.
+# CREATE LOGIN only runs when the login is absent, so the second User reuses it.
+# Omit "Delete" from managementPolicies so deleting one User does not drop the
+# shared login and break its sibling.
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: db1
+  namespace: default
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: db2
+  namespace: default
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: shared-login-user-db1
+  namespace: default
+  annotations:
+    crossplane.io/external-name: shared-login-user
+spec:
+  managementPolicies: ["Observe", "Create", "Update", "LateInitialize"]
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+  forProvider:
+    database: db1
+    loginDatabase: master
+    passwordSecretRef:
+      name: shared-login-pw
+      key: password
+  writeConnectionSecretToRef:
+    name: shared-login-user-db1-connection-secret
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: shared-login-user-db2
+  namespace: default
+  annotations:
+    crossplane.io/external-name: shared-login-user
+spec:
+  managementPolicies: ["Observe", "Create", "Update", "LateInitialize"]
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+  forProvider:
+    database: db2
+    loginDatabase: master
+    passwordSecretRef:
+      name: shared-login-pw
+      key: password
+  writeConnectionSecretToRef:
+    name: shared-login-user-db2-connection-secret

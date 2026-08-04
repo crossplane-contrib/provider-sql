@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -460,6 +461,7 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the user should be returned",
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
@@ -470,11 +472,63 @@ func TestCreate(t *testing.T) {
 				err: errors.Wrapf(errBoom, errCreateLogin, ""),
 			},
 		},
+		"SelectLoginError": {
+			reason: "Errors selecting the existing login should be returned",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+			want: want{
+				err: errors.Wrapf(errBoom, errSelectLogin, ""),
+			},
+		},
 		"Success": {
 			reason: "No error should be returned when we successfully create a user",
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c: managed.ExternalCreation{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
+						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
+						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
+						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
+		},
+		"LoginExists": {
+			reason: "When the login already exists we should skip CREATE LOGIN and only run CREATE USER FOR LOGIN",
+			fields: fields{
+				db: &mockDB{
+					// Login already exists: Scan returns no error.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						// Fail if CREATE LOGIN is attempted for an existing login.
+						if strings.HasPrefix(q.String, "CREATE LOGIN") {
+							return errBoom
+						}
+						return nil
+					},
 				},
 			},
 			args: args{
@@ -503,6 +557,7 @@ func TestCreate(t *testing.T) {
 			comparePw: true,
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 				kube: &test.MockClient{
@@ -819,8 +874,8 @@ func TestDelete(t *testing.T) {
 			},
 			want: errors.Wrapf(errBoom, errDropUser, ""),
 		},
-		"Success": {
-			reason: "No error should be returned",
+		"SuccessLoginPresent": {
+			reason: "When the login still exists we should drop the user and the login",
 			fields: fields{
 				userDB: &mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
@@ -831,7 +886,8 @@ func TestDelete(t *testing.T) {
 					},
 				},
 				loginDB: &mockDB{
-
+					// Login present: Scan returns no error.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return nil
 					},
@@ -840,6 +896,50 @@ func TestDelete(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{},
 			},
+		},
+		"SuccessLoginAbsent": {
+			reason: "When the login was already dropped we should drop the user but not attempt to drop the login",
+			fields: fields{
+				userDB: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+				loginDB: &mockDB{
+					// Login absent: Scan returns no rows.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
+					// Fail if DROP LOGIN is attempted for a missing login.
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+		},
+		"SelectLoginError": {
+			reason: "Errors selecting the existing login should be returned",
+			fields: fields{
+				userDB: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+				loginDB: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+			want: errors.Wrapf(errBoom, errSelectLogin, ""),
 		},
 	}
 
