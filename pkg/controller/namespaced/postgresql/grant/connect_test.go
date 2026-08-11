@@ -18,19 +18,20 @@ package grant
 
 import (
 	"context"
-
 	"testing"
 
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/apis/common"
+	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 
-	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -40,7 +41,7 @@ func kubeWithSecret(defaultDB string) client.Client {
 	return &test.MockClient{
 		MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 			if o, ok := obj.(*v1alpha1.ProviderConfig); ok {
-				o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+				o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
 				o.Spec.DefaultDatabase = defaultDB
 			}
 			return nil
@@ -50,9 +51,15 @@ func kubeWithSecret(defaultDB string) client.Client {
 
 func databaseGrant(db string) *v1alpha1.Grant {
 	return &v1alpha1.Grant{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+		},
 		Spec: v1alpha1.GrantSpec{
-			ResourceSpec: xpv1.ResourceSpec{
-				ProviderConfigReference: &xpv1.Reference{},
+			ManagedResourceSpec: xpv2.ManagedResourceSpec{
+				ProviderConfigReference: &common.ProviderConfigReference{
+					Kind: v1alpha1.ProviderConfigKind,
+					Name: "example",
+				},
 			},
 			ForProvider: v1alpha1.GrantParameters{
 				Role:       ptr.To("appuser"),
@@ -82,7 +89,7 @@ func TestConnectServerVersionUnavailable(t *testing.T) {
 	c := &connector{
 		kube:  kubeWithSecret("postgres"),
 		log:   logging.NewNopLogger(),
-		track: func(context.Context, resource.LegacyManaged) error { return nil },
+		track: func(context.Context, resource.ModernManaged) error { return nil },
 		newDB: func(_ map[string][]byte, _ string, _ string) xsql.DB {
 			return mockDB{
 				MockGetServerVersion: func(context.Context) (int, error) { return 0, errBoom },
@@ -104,12 +111,9 @@ func TestConnectServerVersionUnavailable(t *testing.T) {
 // TestConnectDatabaseGrantTargetsDefaultDatabase pins the regression introduced
 // by #345.
 //
-// v0.15.0 always connected to pc.Spec.DefaultDatabase:
-//
-//	db: c.newDB(s.Data, pc.Spec.DefaultDatabase, ...)
-//
-// Post-#345 Connect targets the grant's own spec.forProvider.database when set.
-// A ROLE_DATABASE grant always sets it, so database-level grants now open a
+// v0.15.0 always connected to the ProviderConfig's default database. Post-#345
+// Connect targets the grant's own spec.forProvider.database when set. A
+// ROLE_DATABASE grant always sets it, so database-level grants now open a
 // session against the grant's target database.
 //
 // Combined with the GetServerVersion call above, this means a database-level
@@ -127,7 +131,7 @@ func TestConnectDatabaseGrantTargetsDefaultDatabase(t *testing.T) {
 	c := &connector{
 		kube:  kubeWithSecret("postgres"),
 		log:   logging.NewNopLogger(),
-		track: func(context.Context, resource.LegacyManaged) error { return nil },
+		track: func(context.Context, resource.ModernManaged) error { return nil },
 		newDB: func(_ map[string][]byte, database string, _ string) xsql.DB {
 			connectedTo = database
 			return mockDB{}
@@ -176,7 +180,7 @@ func TestConnectObjectGrantTargetsGrantDatabase(t *testing.T) {
 			c := &connector{
 				kube:  kubeWithSecret("postgres"),
 				log:   logging.NewNopLogger(),
-				track: func(context.Context, resource.LegacyManaged) error { return nil },
+				track: func(context.Context, resource.ModernManaged) error { return nil },
 				newDB: func(_ map[string][]byte, database string, _ string) xsql.DB {
 					connectedTo = database
 					return mockDB{}

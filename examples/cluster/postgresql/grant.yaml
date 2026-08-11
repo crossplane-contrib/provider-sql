@@ -157,11 +157,6 @@ spec:
     routines:
       - name: test_procedure_multiarg
         args:
-        # Argument types are written in the spelling pg_catalog.format_type()
-        # returns, which is what Observe compares against -- so INTEGER, not
-        # int4. The provider emits type names unquoted, which is what lets
-        # PostgreSQL resolve the grammar alias integer -> int4 on the GRANT
-        # while Observe still matches format_type()'s "integer".
         - TEXT
         - TEXT
 ---
@@ -187,6 +182,11 @@ spec:
     routines:
       - name: test_procedure_int
         args:
+        # Argument types are written in the spelling pg_catalog.format_type()
+        # returns, which is what Observe compares against -- so INTEGER, not
+        # int4. The provider emits type names unquoted, which is what lets
+        # PostgreSQL resolve the grammar alias integer -> int4 on the GRANT
+        # while Observe still matches format_type()'s "integer".
         - INTEGER
 ---
 # A table Grant on a VIEW. GRANT ... ON TABLE accepts views, partitioned

@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
@@ -180,7 +181,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, log: logging.NewNopLogger(), track: tc.fields.track, newDB: tc.fields.newDB}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)

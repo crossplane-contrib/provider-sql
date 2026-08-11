@@ -32,7 +32,9 @@ import (
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
@@ -69,6 +71,7 @@ const (
 
 type connector struct {
 	kube  client.Client
+	log   logging.Logger
 	track func(ctx context.Context, mg resource.ModernManaged) error
 	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
@@ -109,10 +112,11 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	// table grants are version dependent, and ExpandPrivilegesWithVersion
 	// treats 0 as "latest", which is what this provider assumed before the
 	// version check existed. Failing here would gate Observe, Create *and*
-	// Delete, wedging the finalizer on any PostgreSQL-compatible backend that
-	// does not expose server_version_num (CockroachDB, connection proxies).
+	// Delete, wedging the finalizer behind a connection proxy that does not
+	// expose server_version_num.
 	serverVersion, err := xdb.GetServerVersion(ctx)
 	if err != nil {
+		c.log.Debug("cannot determine server version, assuming latest", "error", err)
 		serverVersion = versionUnknown
 	}
 
@@ -151,8 +155,8 @@ func connectDatabase(gp v1alpha1.GrantParameters, defaultDatabase string) string
 	case v1alpha1.RoleSchema, v1alpha1.RoleTable, v1alpha1.RoleColumn,
 		v1alpha1.RoleSequence, v1alpha1.RoleRoutine,
 		v1alpha1.RoleForeignDataWrapper, v1alpha1.RoleForeignServer:
-		if gp.Database != nil && *gp.Database != "" {
-			return *gp.Database
+		if db := reference.FromPtrValue(gp.Database); db != "" {
+			return db
 		}
 	}
 
@@ -1055,7 +1059,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), log: o.Logger.WithValues("controller", name), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
