@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -38,6 +37,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -187,7 +187,7 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.Exte
 
 	var queries []xsql.Query
 
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	if err := createGrantQueriesWithVersion(mg.Spec.ForProvider, &queries, c.serverVersion); err != nil {
 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateGrant)
@@ -498,7 +498,7 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.Exte
 
 	var query xsql.Query
 
-	mg.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv2.Deleting())
 
 	err := deleteGrantQuery(mg.Spec.ForProvider, &query)
 	if err != nil {
@@ -615,7 +615,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 	}
 
 	// Grants have no way of being 'not up to date' - if they exist, they are up to date
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,

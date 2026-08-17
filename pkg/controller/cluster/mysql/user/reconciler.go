@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -37,6 +36,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/password"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
@@ -267,7 +267,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.User) (managed.Exte
 	mg.Status.AtProvider.ResourceOptionsAsClauses = resourceOptionsToClauses(observed.ResourceOptions)
 	mg.Status.AtProvider.AuthenticationPlugin = observed.AuthenticationPlugin
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:   true,
@@ -313,7 +313,7 @@ func authPluginEqual(observed, desired *v1alpha1.AuthenticationPlugin) bool {
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.User) (managed.ExternalCreation, error) {
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 	ro := resourceOptionsToClauses(mg.Spec.ForProvider.ResourceOptions)
@@ -541,7 +541,7 @@ func (c *external) Disconnect(ctx context.Context) error {
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.ExternalDelete, error) {
-	mg.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv2.Deleting())
 
 	username, host := mysql.SplitUserHost(meta.GetExternalName(mg))
 

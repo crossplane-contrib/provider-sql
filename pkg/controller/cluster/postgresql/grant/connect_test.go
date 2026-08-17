@@ -25,10 +25,10 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
@@ -40,7 +40,7 @@ func kubeWithSecret(defaultDB string) client.Client {
 	return &test.MockClient{
 		MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 			if o, ok := obj.(*v1alpha1.ProviderConfig); ok {
-				o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+				o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{}
 				o.Spec.DefaultDatabase = defaultDB
 			}
 			return nil
@@ -51,8 +51,8 @@ func kubeWithSecret(defaultDB string) client.Client {
 func databaseGrant(db string) *v1alpha1.Grant {
 	return &v1alpha1.Grant{
 		Spec: v1alpha1.GrantSpec{
-			ResourceSpec: xpv1.ResourceSpec{
-				ProviderConfigReference: &xpv1.Reference{},
+			ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+				ProviderConfigReference: &xpv2.Reference{},
 			},
 			ForProvider: v1alpha1.GrantParameters{
 				Role:       ptr.To("appuser"),
