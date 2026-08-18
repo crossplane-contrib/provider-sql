@@ -7,8 +7,10 @@ credentials) shares one pool. This caps the number of connections the provider
 holds against any one server and avoids opening a fresh connection for every
 query.
 
-The pool is tunable per `ProviderConfig` (and `ClusterProviderConfig`) for all
-three databases — MySQL, PostgreSQL, and MSSQL.
+The pool is tunable per `ProviderConfig` for all three databases — MySQL,
+PostgreSQL, and MSSQL — in both their cluster-scoped (e.g.
+`mysql.sql.crossplane.io`) and namespaced (e.g. `mysql.sql.m.crossplane.io`)
+API groups, as well as on `ClusterProviderConfig` for the namespaced APIs.
 
 ## Configuration
 
@@ -44,6 +46,15 @@ spec:
 These map directly to the Go `database/sql` pool knobs
 (`SetMaxOpenConns`, `SetMaxIdleConns`, `SetConnMaxLifetime`,
 `SetConnMaxIdleTime`).
+
+Full examples for every driver and scope:
+
+- [`examples/cluster/mysql/config.yaml`](../examples/cluster/mysql/config.yaml)
+- [`examples/cluster/postgresql/config.yaml`](../examples/cluster/postgresql/config.yaml)
+- [`examples/cluster/mssql/config.yaml`](../examples/cluster/mssql/config.yaml)
+- [`examples/namespaced/mysql/config.yaml`](../examples/namespaced/mysql/config.yaml)
+- [`examples/namespaced/postgresql/config.yaml`](../examples/namespaced/postgresql/config.yaml)
+- [`examples/namespaced/mssql/config.yaml`](../examples/namespaced/mssql/config.yaml)
 
 ## Behavior notes
 

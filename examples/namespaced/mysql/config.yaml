@@ -11,3 +11,10 @@ spec:
       name: db-conn
   # tls one of preferred(default), skip-verify, true, or custom
   tls: preferred
+  # connectionPool tunes the shared DB connection pool. All fields are optional;
+  # omitted fields use the defaults shown below.
+  connectionPool:
+    maxOpenConnections: 10
+    maxIdleConnections: 5
+    maxConnLifetime: 1h
+    maxConnIdleTime: 10m
