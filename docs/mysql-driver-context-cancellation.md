@@ -51,8 +51,9 @@ References:
 ## Why it caused an incident here
 
 1. **Every write goes through one path.** All MySQL controllers issue writes via
-   `mysql.ExecWrapper → c.db.Exec`, which opens a fresh connection per call
-   (`pkg/clients/mysql/mysql.go`). This covers, in the User controller,
+   `mysql.ExecWrapper → c.db.Exec`. At the time of the incident this opened a
+   fresh connection per call (`pkg/clients/mysql/mysql.go`); see the connection
+   pool follow-up below. This covers, in the User controller,
    `CREATE USER`, `ALTER USER ... WITH <connection limits/resource options>`,
    `ALTER USER ... IDENTIFIED WITH <plugin>`, `ALTER USER ... IDENTIFIED BY`,
    `DROP USER`; in Grant, `GRANT` / `REVOKE`; in Database,
@@ -118,12 +119,11 @@ is the application-level `KILL QUERY` pattern described above.
 
 - **Application-level `KILL QUERY` on cancel** for the non-lock hang case
   (dedicated connection + `CONNECTION_ID()` + out-of-band `KILL`).
-- **Bounded shared connection pool.** The client currently calls `sql.Open` per
-  query and closes it immediately (no reuse, no `SetMaxOpenConns` /
-  `SetConnMaxLifetime`). A shared, capped `*sql.DB` would hard-limit total
-  connections and remove per-query connect/auth overhead, but requires adding a
-  `Close()` to the `xsql.DB` interface and wiring it through `Disconnect` for
-  all three drivers (MySQL, PostgreSQL, MSSQL).
+- **Bounded shared connection pool.** Addressed separately — see
+  `docs/connection-pool.md` and #195/#434, which introduce a shared, DSN-keyed
+  `*sql.DB` pool (with `MaxOpenConns` / `MaxIdleConns` / `ConnMaxLifetime` /
+  `ConnMaxIdleTime`) across all three drivers instead of opening a new
+  connection per query.
 - **Harden the reconcile feedback loop** so a persistently failing statement
   does not re-fire every poll cycle.
 - **Make `lock_wait_timeout` configurable** (e.g. via `ProviderConfig`) for
