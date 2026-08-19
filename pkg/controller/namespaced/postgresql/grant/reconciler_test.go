@@ -1670,6 +1670,19 @@ func TestGrantSQL(t *testing.T) {
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
 			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
 		},
+		"RoutineArgumentsAllowSchemaQualifiedCompositeTypes": {
+			reason: "Composite types like AWS RDS's aws_commons._s3_uri_1 are schema-qualified; the CRD pattern must accept exactly one dot-separated identifier pair, and the qualified name is spliced in unquoted like any other type name",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("aws_s3"),
+				Routines:   []v1alpha1.Routine{{Name: "table_import_from_s3", Arguments: []string{"text", "text", "text", "aws_commons._s3_uri_1", "aws_commons._aws_credentials_1"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+		},
 	}
 
 	for name, tc := range cases {

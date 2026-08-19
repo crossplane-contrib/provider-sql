@@ -615,8 +615,9 @@ func quotedSignatures(sc string, rs []v1alpha1.Routine) []string {
 			// satisfy both sides. Unquoted, integer/int4/int all resolve and
 			// agree with what Observe reads back.
 			//
-			// Safe because the CRD restricts arguments to identifier characters:
-			// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+			// Safe because the CRD restricts arguments to a single identifier,
+			// optionally schema-qualified by exactly one more identifier:
+			// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)?$
 			args[j] = strings.ToLower(arg)
 		}
 		sigs[i] = qsc + "." + pq.QuoteIdentifier(r.Name) + "(" + strings.Join(args, ",") + ")"
