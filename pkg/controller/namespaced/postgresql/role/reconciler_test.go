@@ -906,11 +906,17 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 			},
 		},
-		"ErrComparePrivs": {
-			reason: "We should error if observed privilege list is shorter than desired privilege list",
+		"ApplyFullPrivsWhenObservationShort": {
+			reason: "We should apply the full desired privilege list, not error, when the observed privilege list is shorter than desired (e.g. status hasn't been persisted yet).",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
+						// Verify that query contains all three desired
+						// clauses, in privilegesToClauses order.
+						crn := pq.QuoteIdentifier("example")
+						if q.String != fmt.Sprintf("ALTER ROLE %s NOINHERIT CREATEDB LOGIN", crn) {
+							return errBoom
+						}
 						return nil
 					},
 				},
@@ -940,7 +946,7 @@ func TestUpdate(t *testing.T) {
 					Status: v1alpha1.RoleStatus{
 						AtProvider: v1alpha1.RoleObservation{
 							// One privilege field observed but 3 privileges
-							// to apply. Throw error.
+							// to apply. Apply the full desired set.
 							PrivilegesAsClauses: []string{"NOINHERIT"},
 						},
 					},
@@ -957,7 +963,7 @@ func TestUpdate(t *testing.T) {
 				},
 			},
 			want: want{
-				err: errors.Wrap(errors.New(errComparePrivileges), errUpdateRole),
+				err: nil,
 			},
 		},
 		"UpdateConfigurationParameters": {

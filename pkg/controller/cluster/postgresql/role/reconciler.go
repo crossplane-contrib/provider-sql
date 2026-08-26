@@ -61,7 +61,6 @@ const (
 	errUpdateRole                = "cannot update role"
 	errGetPasswordSecretFailed   = "cannot get password secret"
 	errGetConnectionSecretFailed = "cannot get connection secret"
-	errComparePrivileges         = "cannot compare desired and observed privileges"
 	errSetRoleConfigs            = "cannot set role configuration parameters"
 
 	maxConcurrency = 5
@@ -176,14 +175,13 @@ func privilegesToClauses(p v1alpha1.RolePrivilege) []string {
 	return pc
 }
 
-func changedPrivs(existing []string, desired []string) ([]string, error) {
-	out := []string{}
-
-	// Make sure existing observation has at least as many items as
-	// desired. If it does not, then we cannot safely compare
-	// privileges.
+func changedPrivs(existing []string, desired []string) []string {
+	// If existing is shorter than desired, we don't have a full prior
+	// observation to compare against (e.g. the role's status hasn't been
+	// persisted yet). Apply the full desired set rather than treating
+	// this as an unrecoverable comparison failure.
 	if len(existing) < len(desired) {
-		return nil, errors.New(errComparePrivileges)
+		return desired
 	}
 
 	// The input slices here are outputted by privilegesToClauses above.
@@ -191,12 +189,13 @@ func changedPrivs(existing []string, desired []string) ([]string, error) {
 	// same order, we can rely on each clause being in the same array
 	// position in the 'desired' and 'existing' inputs.
 
+	out := []string{}
 	for i, v := range desired {
 		if v != existing[i] {
 			out = append(out, v)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (c *external) Observe(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalObservation, error) {
@@ -355,16 +354,10 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
-		now := metav1.Now()
-		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
-	cp, err := changedPrivs(mg.Status.AtProvider.PrivilegesAsClauses, privs)
-
-	if err != nil {
-		return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
-	}
+	cp := changedPrivs(mg.Status.AtProvider.PrivilegesAsClauses, privs)
 
 	if len(cp) > 0 {
 		if err := c.db.Exec(ctx, xsql.Query{
@@ -416,8 +409,13 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 		}
 	}
 
-	// Only update connection details if password is changed
+	// Only update connection details if password is changed. Record
+	// LastPasswordChange here, once every step above has succeeded, so a
+	// later failure in this function can't strand a password that was
+	// changed in Postgres but never recorded or published.
 	if pwchanged {
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 		return managed.ExternalUpdate{
 			ConnectionDetails: c.db.GetConnectionDetails(meta.GetExternalName(mg), pw),
 		}, nil
