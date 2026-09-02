@@ -37,12 +37,9 @@ projectdir="$( cd "$( dirname "${BASH_SOURCE[0]}")"/../.. && pwd )"
 scriptdir="$(dirname "$0")"
 
 # get the build environment variables from the special build.vars target in the main makefile
-eval $(make --no-print-directory -C ${projectdir} build.vars)
+eval "$(make --no-print-directory -C "${projectdir}" build.vars)"
 
 # ------------------------------
-
-SAFEHOSTARCH="${SAFEHOSTARCH:-amd64}"
-CONTROLLER_IMAGE="${BUILD_REGISTRY}/${PROJECT_NAME}-${SAFEHOSTARCH}"
 
 K8S_CLUSTER="${K8S_CLUSTER:-${BUILD_REGISTRY}-inttests}"
 
@@ -117,7 +114,7 @@ setup_crossplane() {
 
 setup_provider() {
   echo_step "deploying provider via local.xpkg.deploy"
-  make -C "${projectdir}" local.xpkg.deploy.provider.${PACKAGE_NAME} KIND_CLUSTER_NAME="${K8S_CLUSTER}"
+  make -C "${projectdir}" "local.xpkg.deploy.provider.${PACKAGE_NAME}" KIND_CLUSTER_NAME="${K8S_CLUSTER}"
 
   echo_step "waiting for provider to be installed"
   "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
@@ -127,13 +124,13 @@ cleanup_provider() {
   echo_step "uninstalling provider"
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
-  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io runtimeconfig-${PACKAGE_NAME}
+  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io "runtimeconfig-${PACKAGE_NAME}"
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
   current=0
   step=3
-  while [[ $(kubectl get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
+  while [[ $("${KUBECTL}" get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
     echo "waiting another $step seconds"
     current=$((current + step))
     if [[ $current -ge $timeout ]]; then
@@ -192,7 +189,7 @@ setup_provider_config_tls() {
 
 cleanup_provider_config() {
   echo_step "cleaning up ProviderConfig"
-  "${KUBECTL}" delete providerconfig.mysql.sql.${APIGROUP_SUFFIX}crossplane.io default
+  "${KUBECTL}" delete "providerconfig.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" default
 }
 
 setup_mariadb_no_tls() {
@@ -244,10 +241,10 @@ cleanup_mariadb() {
 
 test_create_database() {
   echo_step "test creating MySQL Database resource"
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mysql/database.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mysql/database.yaml"
   echo_step_completed
 }
 
@@ -278,7 +275,7 @@ test_update_database_charset() {
   echo_step "test updating MySQL Database charset and collation"
 
   # Patch the database to use a different collation
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type merge \
     -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_general_ci"}}}'
 
   # Wait for the controller to reconcile the change
@@ -298,7 +295,7 @@ test_update_database_charset() {
   echo_step_completed
 
   # Restore original collation for subsequent tests
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type merge \
     -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_bin"}}}'
   sleep 10
 }
@@ -307,14 +304,14 @@ test_remove_database_charset() {
   echo_step "test removing charset/collation from spec leaves database unchanged"
 
   # Remove charset and collation from the spec (set forProvider to only have empty fields)
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type json \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type json \
     -p '[{"op":"remove","path":"/spec/forProvider/defaultCharacterSet"},{"op":"remove","path":"/spec/forProvider/defaultCollation"}]'
 
   # Wait for the controller to reconcile -- late init should re-populate the fields
   sleep 15
 
   echo_info "check database resource is still Ready"
-  "${KUBECTL}" wait --timeout 30s --for condition=Ready database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db
+  "${KUBECTL}" wait --timeout 30s --for condition=Ready "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db"
   echo_step_completed
 
   echo_info "check charset/collation unchanged in MariaDB"
@@ -342,10 +339,10 @@ test_create_user() {
   echo_step "test creating MySQL User resource"
   local user_pw="asdf1234"
   "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --save-config
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mysql/user.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mysql/user.yaml"
   echo_step_completed
 
   echo_info "check if connection secret exists"
@@ -361,7 +358,7 @@ test_update_user_password() {
     "${KUBECTL}" apply -f -
 
   # trigger reconcile
-  "${KUBECTL}" annotate -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml reconcile=now
+  "${KUBECTL}" annotate -f "${projectdir}/examples/${API_TYPE}/mysql/user.yaml" reconcile=now
 
   sleep 3
 
@@ -376,12 +373,12 @@ test_create_grant() {
   "${KUBECTL}" exec mariadb-0 -- bash -c \
   'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "CREATE TABLE \`example-db\`.\`example-table\` (id INT, status VARCHAR(50), updated_at TIMESTAMP);"'
 
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml"
   echo_step_completed
 }
 
@@ -397,10 +394,10 @@ test_all() {
 
 cleanup_test_resources() {
   echo_step "cleaning up test resources"
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/mysql/database.yaml"
+  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/mysql/user.yaml"
   "${KUBECTL}" delete secret example-pw
 }
 

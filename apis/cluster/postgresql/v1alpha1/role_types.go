@@ -90,6 +90,11 @@ type RoleParameters struct {
 	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+
+	// PasswordRotationTrigger triggers rotation of the auto-generated password when set to
+	// a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
+	// +optional
+	PasswordRotationTrigger *metav1.Time `json:"passwordRotationTrigger,omitempty"`
 }
 
 // RoleConfigurationParameter is a role configuration parameter.
@@ -105,6 +110,8 @@ type RoleObservation struct {
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
 	// ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+	// LastPasswordChange records when the provider last set the role's password.
+	LastPasswordChange *metav1.Time `json:"lastPasswordChange,omitempty"`
 }
 
 // +kubebuilder:object:root=true
