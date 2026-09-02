@@ -94,6 +94,14 @@ setup_postgresdb_tests(){
   # create DB
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
 
+  echo_step "creating bring-your-own password secret for Role"
+  # byo-password-role in role.yaml references this secret; without it that Role
+  # never becomes Ready and the readiness wait below times out.
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password \
+      --namespace default --save-config \
+      --from-literal password="${byo_role_pw}"
+
   echo_step "creating PostgresDB Role resource"
   # create grant
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
@@ -395,6 +403,7 @@ delete_postgresdb_resources(){
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
   "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true secret my-role-password -n default
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
@@ -459,6 +468,99 @@ delete_extension_test() {
   echo_step_completed
 }
 
+role_connection_password() {
+  "${KUBECTL}" get secret "$1" -n default -o jsonpath='{.data.password}' 2>/dev/null | base64 --decode
+}
+
+force_reconcile_role() {
+  "${KUBECTL}" annotate --overwrite \
+    "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/$1" "reconcile=$(date +%s)-${RANDOM}" > /dev/null
+}
+
+# Waits until role_connection_password for $1 is non-empty and different from $2,
+# up to ~60s. Prints nothing; returns non-zero on timeout.
+wait_role_password_changed() {
+  local secret=$1 previous=$2 current _
+  for _ in $(seq 1 30); do
+    current=$(role_connection_password "${secret}")
+    if [ -n "${current}" ] && [ "${current}" != "${previous}" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+check_role_passwords() {
+  # bring-your-own password: the value from my-role-password must be published to
+  # the Role's own connection secret.
+  echo_step "check Role bring-your-own password is published to the connection secret"
+  local conn_pw
+  conn_pw=$(role_connection_password byo-password-role-secret)
+  if [ "${conn_pw}" != "${byo_role_pw}" ]; then
+    echo_error "ERROR: byo-password-role connection secret password does not match my-role-password"
+  fi
+  echo_step_completed
+
+  # bring-your-own password rotation: updating my-role-password must propagate.
+  echo_step "check Role bring-your-own password update propagates to the connection secret"
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password -n default \
+      --from-literal password="${byo_role_pw}" --dry-run=client -o yaml | "${KUBECTL}" apply -f -
+  force_reconcile_role byo-password-role
+  if ! wait_role_password_changed byo-password-role-secret "${conn_pw}"; then
+    echo_error "ERROR: byo-password-role connection secret not updated after my-role-password changed"
+  fi
+  echo_step_completed
+
+  # auto-generated password recovery: losing the connection secret must
+  # regenerate the password and republish it. This also exercises the restore
+  # path where Observe has not yet populated the privilege clauses.
+  echo_step "check Role auto-generated password is regenerated when the connection secret is lost"
+  local old_pw
+  old_pw=$(role_connection_password rotating-role-secret)
+  "${KUBECTL}" delete secret rotating-role-secret -n default
+  force_reconcile_role rotating-role
+  if ! wait_role_password_changed rotating-role-secret "${old_pw}"; then
+    echo_error "ERROR: rotating-role connection secret was not regenerated after deletion"
+  fi
+  echo_step_completed
+
+  # rotation trigger: bumping passwordRotationTrigger past lastPasswordChange
+  # rotates the auto-generated password.
+  echo_step "check Role passwordRotationTrigger rotates the auto-generated password"
+  local prev_pw trigger
+  prev_pw=$(role_connection_password rotating-role-secret)
+  trigger=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p "{\"spec\":{\"forProvider\":{\"passwordRotationTrigger\":\"${trigger}\"}}}"
+  if ! wait_role_password_changed rotating-role-secret "${prev_pw}"; then
+    echo_error "ERROR: rotating-role password did not rotate after bumping passwordRotationTrigger"
+  fi
+  echo_step_completed
+
+  # object restore: deleting and recreating the Role k8s object while the database
+  # role persists must recover gracefully. Dropping Delete from managementPolicies
+  # orphans the database role on delete (spec.deletionPolicy does not exist on the
+  # namespaced API). Unlike the secret-only deletion above, the recreated object
+  # starts with an empty status and no finalizer, so its first reconcile goes
+  # through the Observe-finds-it -> Update (not Create) path with privilege
+  # clauses that may not be populated yet.
+  echo_step "check Role password recovers when the Role object is deleted and recreated"
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p '{"spec":{"managementPolicies":["Observe","Create","Update","LateInitialize"]}}'
+  "${KUBECTL}" delete "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  if ! "${KUBECTL}" wait --timeout 2m --for condition=Ready \
+      "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" > /dev/null; then
+    echo_error "ERROR: rotating-role did not become Ready after Role object recreate (possible password-recovery regression)"
+  fi
+  if [ -z "$(role_connection_password rotating-role-secret)" ]; then
+    echo_error "ERROR: rotating-role connection secret empty after Role object recreate"
+  fi
+  echo_step_completed
+}
+
 integration_tests_postgres() {
   setup_postgresdb_no_tls
   setup_provider_config_postgres_no_tls
@@ -467,6 +569,7 @@ integration_tests_postgres() {
   check_observe_only_database
   check_database_owner_ref
   check_all_roles_privileges
+  check_role_passwords
   check_all_schema_privileges
   check_custom_object_privileges
   setup_extension_test
