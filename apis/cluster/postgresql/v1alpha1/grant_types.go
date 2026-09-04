@@ -295,9 +295,10 @@ type Routine struct {
 	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Name string `json:"name,omitempty"`
 
-	// The arguments of the routine.
+	// The arguments of the routine. Each argument is a type name, optionally
+	// schema-qualified (e.g. aws_commons._s3_uri_1) for composite types.
 	// +optional
-	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)?$
 	Arguments []string `json:"args,omitempty"`
 }
 
