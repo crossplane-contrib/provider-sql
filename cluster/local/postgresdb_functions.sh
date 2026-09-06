@@ -450,6 +450,16 @@ check_extension_test() {
     echo_error "ERROR: Extensions not found in database. hstore: $hstore_installed, ltree: $ltree_installed"
   fi
 
+  # Verify the schema clause: ltree asks for my-schema, hstore defaults to public
+  echo_sub_step "Checking extension schemas"
+  ext_schemas=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT e.extname || '=' || n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname IN ('hstore', 'ltree') ORDER BY 1;" | paste -sd ' ' -)
+
+  if [[ "$ext_schemas" == "hstore=public ltree=my-schema" ]]; then
+    echo_info "Extensions are installed in the expected schemas"
+  else
+    echo_error "ERROR: Unexpected extension schemas: $ext_schemas"
+  fi
+
   echo_step_completed
 }
 

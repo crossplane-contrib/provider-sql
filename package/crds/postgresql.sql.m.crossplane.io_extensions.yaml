@@ -156,7 +156,10 @@ spec:
                     description: Extension name to be installed.
                     type: string
                   schema:
-                    description: Schema for extension install.
+                    description: |-
+                      Schema to install the extension into. It must already exist.
+                      Changing it moves the extension with ALTER EXTENSION ... SET SCHEMA,
+                      which non-relocatable extensions (e.g. postgis) reject.
                     type: string
                   version:
                     description: Version of the extension to be installed.
