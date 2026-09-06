@@ -57,8 +57,9 @@ const (
 	errAlterDBIsTmpl     = "cannot alter database is template"
 	errDropDB            = "cannot drop database"
 
-	maxConcurrency                   = 5
-	minDatabaseStrategyServerVersion = 150000
+	maxConcurrency                    = 5
+	minDatabaseStrategyServerVersion  = 150000
+	minDatabaseForceDropServerVersion = 130000
 )
 
 // Setup adds a controller that reconciles Database managed resources.
@@ -243,6 +244,20 @@ func (c *external) ensureDatabaseStrategySupport(ctx context.Context) error {
 	return nil
 }
 
+// ensureDatabaseForceDropSupport verifies that the server supports the
+// With (FORCE) option of DROP DATABASE, which was introduced in PostgreSQL 13.
+func (c *external) ensureDatabaseForceDropSupport(ctx context.Context) error {
+	var serverVersion int
+	err := c.db.Scan(ctx, xsql.Query{String: "SELECT current_setting('server_version_num')::integer"}, &serverVersion)
+	if err != nil {
+		return errors.Wrap(err, errSelectServerVer)
+	}
+	if serverVersion < minDatabaseForceDropServerVersion {
+		return errors.Errorf("forceDrop requires PostgreSQL 13+; found server_version_num=%d", serverVersion)
+	}
+	return nil
+}
+
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalUpdate, error) { //nolint:gocyclo
 	// NOTE(negz): This is only a tiny bit over our cyclomatic complexity limit,
 	// and more readable than if we refactored it to avoid the linter error.
@@ -291,13 +306,27 @@ func (c *external) Disconnect(ctx context.Context) error {
 }
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Database) (managed.ExternalDelete, error) {
-	err := c.db.Exec(ctx, xsql.Query{String: "DROP DATABASE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))})
-	return managed.ExternalDelete{}, errors.Wrap(err, errDropDB)
+	query := "DROP DATABASE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg))
+
+	// The WITH (FORCE) option terminates every existing backend connected to
+	// the target database before dropping it. It was introduced in PostgreSQL
+	// 13 and is required to drop a database that still has open connections
+	// (e.g. a long-lived application connection pool), which would otherwise
+	// fail with SQLSTATE 55006 (object_in_use).
+	if mg.Spec.ForProvider.ForceDrop != nil && *mg.Spec.ForProvider.ForceDrop {
+		if err := c.ensureDatabaseForceDropSupport(ctx); err != nil {
+			return managed.ExternalDelete{}, errors.Wrap(err, errDropDB)
+		}
+		query += " WITH (FORCE)"
+	}
+
+	return managed.ExternalDelete{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errDropDB)
 }
 
 func upToDate(observed, desired namespacedv1alpha1.DatabaseParameters) bool {
-	// Template and strategy are only used at create time.
-	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(namespacedv1alpha1.DatabaseParameters{}, "Template", "Strategy"))
+	// Template and strategy are only used at create time, and forceDrop only
+	// affects deletion. None of them are observable properties of the database.
+	return cmp.Equal(desired, observed, cmpopts.IgnoreFields(namespacedv1alpha1.DatabaseParameters{}, "Template", "Strategy", "ForceDrop"))
 }
 
 func lateInit(observed namespacedv1alpha1.DatabaseParameters, desired *namespacedv1alpha1.DatabaseParameters) bool {
