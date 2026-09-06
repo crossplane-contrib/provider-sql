@@ -57,3 +57,42 @@ spec:
   forProvider:
     privileges:
       login: true
+---
+# Auto-generated password with on-demand rotation.
+# With no passwordSecretRef, the provider generates a random password on create
+# and writes it to the connection secret below. To rotate it, set
+# passwordRotationTrigger to a timestamp later than the current
+# status.atProvider.lastPasswordChange; bump it again to rotate again.
+# Note: the trigger is ignored until lastPasswordChange has been set once - see
+# docs/postgresql-role-passwords.md.
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: rotating-role
+spec:
+  forProvider:
+    privileges:
+      login: true
+    passwordRotationTrigger: "2026-01-01T00:00:00Z"
+  writeConnectionSecretToRef:
+    name: rotating-role-secret
+    namespace: default
+---
+# Bring-your-own password.
+# The provider applies the value from the referenced secret key and re-applies it
+# whenever that secret changes. passwordRotationTrigger has no effect in this mode.
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: byo-password-role
+spec:
+  forProvider:
+    privileges:
+      login: true
+    passwordSecretRef:
+      name: my-role-password
+      namespace: default
+      key: password
+  writeConnectionSecretToRef:
+    name: byo-password-role-secret
+    namespace: default
