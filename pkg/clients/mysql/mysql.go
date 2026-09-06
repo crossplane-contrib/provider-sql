@@ -16,6 +16,13 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
+
+	// prevent statements hanging indefintely server-side if timeout occurs waiting for a lock
+	// See docs/mysql-driver-context-cancellation.md for the full analysis.
+	lockWaitTimeoutSeconds = 30
+	// dialTimeout bounds TCP connection establishment so a reconcile does not
+	// block on an unreachable endpoint.
+	dialTimeout = "10s"
 )
 
 type mySQLDB struct {
@@ -47,24 +54,21 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
-	// Use net/url UserPassword to encode the username and password
-	// This will ensure that any special characters in the username or password
-	// are percent-encoded for use in the user info portion of the DSN URL
+	// add timeouts to prevent orphaned statements and excessive waits on connection dial
+	params := fmt.Sprintf("tls=%s&lock_wait_timeout=%d&timeout=%s",
+		tls,
+		lockWaitTimeoutSeconds,
+		dialTimeout,
+	)
 	if binlog != nil {
-		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
-			username,
-			password,
-			endpoint,
-			port,
-			tls,
-			strconv.FormatBool(*binlog))
+		params += fmt.Sprintf("&sql_log_bin=%s", strconv.FormatBool(*binlog))
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?%s",
 		username,
 		password,
 		endpoint,
 		port,
-		tls)
+		params)
 }
 
 // ExecTx is unsupported in MySQL.
