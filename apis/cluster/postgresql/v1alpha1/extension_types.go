@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // ExtensionParameters are the configurable fields of a Extension.
@@ -44,23 +44,23 @@ type ExtensionParameters struct {
 	// DatabaseRef references the database object this extension is for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this extension is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.Selector `json:"databaseSelector,omitempty"`
 }
 
 // ExtensionSpec defines the desired state of an Extension.
 type ExtensionSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       ExtensionParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     ExtensionParameters `json:"forProvider"`
 }
 
 // A ExtensionStatus represents the observed state of a Extension.
 type ExtensionStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

@@ -19,8 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
@@ -53,7 +52,7 @@ type ProviderCredentials struct {
 	// Password authentication requires username and password. Azure workload
 	// identity authentication requires only endpoint and port.
 	// +optional
-	ConnectionSecretRef xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	ConnectionSecretRef xpv2.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 
 	// SecretKeyMapping allows overriding the default secret key names used
 	// to read credentials from the connection secret. When not specified,
@@ -103,7 +102,7 @@ func (m *SecretKeyMapping) ToMap() map[string]string {
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
 type ProviderConfigStatus struct {
-	xpv1.ProviderConfigStatus `json:",inline"`
+	xpv2.ProviderConfigStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

@@ -19,8 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A ProviderConfigSpec defines the desired state of a ProviderConfig.
@@ -46,9 +45,8 @@ const (
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a PostgreSQL server.
 	CredentialsSourcePostgreSQLConnectionSecret PostgreSQLConnectionSource = "PostgreSQLConnectionSecret"
-	// CredentialsSourceAzureWorkloadIdentity indicates that the provider should
-	// authenticate to Azure Database for PostgreSQL with the workload identity
-	// assigned to the provider pod.
+	// CredentialsSourceAzureWorkloadIdentity authenticates with the workload
+	// identity assigned to the provider pod.
 	CredentialsSourceAzureWorkloadIdentity PostgreSQLConnectionSource = "AzureWorkloadIdentity"
 )
 
@@ -59,14 +57,11 @@ type ProviderCredentials struct {
 	Source PostgreSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
-	// that contains the connection metadata used to connect to the provider.
-	// Password authentication requires username and password. Azure workload
-	// identity authentication requires endpoint, port, and the Entra admin role
-	// name as username. +optional
-	ConnectionSecretRef xpv1.LocalSecretReference `json:"connectionSecretRef,omitempty"`
+	// that contains the credentials that must be used to connect to the
+	// provider. +optional
+	ConnectionSecretRef xpv2.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 
 	// AzureWorkloadIdentity configures Microsoft Entra token authentication.
-	// It is used only when source is AzureWorkloadIdentity.
 	// +optional
 	AzureWorkloadIdentity *AzureWorkloadIdentityCredentials `json:"azureWorkloadIdentity,omitempty"`
 
@@ -77,11 +72,9 @@ type ProviderCredentials struct {
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
 }
 
-// AzureWorkloadIdentityCredentials configures token acquisition for Azure
-// Database for PostgreSQL.
+// AzureWorkloadIdentityCredentials configures Microsoft Entra token acquisition.
 type AzureWorkloadIdentityCredentials struct {
-	// TokenScope is the Microsoft Entra scope requested for PostgreSQL. Override
-	// this for sovereign clouds when their OSS RDBMS audience differs.
+	// TokenScope overrides the PostgreSQL Microsoft Entra token audience.
 	// +kubebuilder:default="https://ossrdbms-aad.database.windows.net/.default"
 	// +optional
 	TokenScope string `json:"tokenScope,omitempty"`
@@ -128,7 +121,7 @@ func (m *SecretKeyMapping) ToMap() map[string]string {
 
 // A ProviderConfigStatus reflects the observed state of a ProviderConfig.
 type ProviderConfigStatus struct {
-	xpv1.ProviderConfigStatus `json:",inline"`
+	xpv2.ProviderConfigStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

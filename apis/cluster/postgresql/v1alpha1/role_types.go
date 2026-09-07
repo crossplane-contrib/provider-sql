@@ -19,19 +19,19 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A RoleSpec defines the desired state of a Role.
 type RoleSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       RoleParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     RoleParameters `json:"forProvider"`
 }
 
 // A RoleStatus represents the observed state of a Role.
 type RoleStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          RoleObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 RoleObservation `json:"atProvider,omitempty"`
 }
 
 // RolePrivilege is the PostgreSQL identifier to add or remove a permission
@@ -82,7 +82,7 @@ type RoleParameters struct {
 	// PasswordSecretRef references the secret that contains the password used
 	// for this role. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv2.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 
 	// ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
 	// role in the database will be reset.

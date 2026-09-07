@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A ClusterProviderConfigSpec defines the desired state of a ClusterProviderConfig.
@@ -45,14 +45,11 @@ type ClusterProviderCredentials struct {
 	Source PostgreSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
-	// that contains the connection metadata used to connect to the provider.
-	// Password authentication requires username and password. Azure workload
-	// identity authentication requires endpoint, port, and the Entra admin role
-	// name as username. +optional
-	ConnectionSecretRef xpv1.SecretReference `json:"connectionSecretRef,omitempty"`
+	// that contains the credentials that must be used to connect to the
+	// provider. +optional
+	ConnectionSecretRef xpv2.SecretReference `json:"connectionSecretRef,omitempty"`
 
 	// AzureWorkloadIdentity configures Microsoft Entra token authentication.
-	// It is used only when source is AzureWorkloadIdentity.
 	// +optional
 	AzureWorkloadIdentity *AzureWorkloadIdentityCredentials `json:"azureWorkloadIdentity,omitempty"`
 
@@ -65,7 +62,7 @@ type ClusterProviderCredentials struct {
 
 // A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.
 type ClusterProviderConfigStatus struct {
-	xpv1.ProviderConfigStatus `json:",inline"`
+	xpv2.ProviderConfigStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true
