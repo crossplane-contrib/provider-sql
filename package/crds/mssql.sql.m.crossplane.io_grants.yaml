@@ -29,6 +29,9 @@ spec:
       name: AGE
       type: date
     - jsonPath: .spec.forProvider.user
+      name: USER
+      type: string
+    - jsonPath: .spec.forProvider.role
       name: ROLE
       type: string
     - jsonPath: .spec.forProvider.database
@@ -66,8 +69,9 @@ spec:
             description: A GrantSpec defines the desired state of a Grant.
             properties:
               forProvider:
-                description: GrantParameters define the desired state of a MSSQL grant
-                  instance.
+                description: |-
+                  GrantParameters define the desired state of a MSSQL grant instance.
+                  Exactly one of Permissions or Role must be specified.
                 properties:
                   database:
                     description: Database this grant is for.
@@ -165,6 +169,14 @@ spec:
                       type: string
                     minItems: 1
                     type: array
+                  role:
+                    description: Role is a fixed database role the user should be
+                      a member of.
+                    enum:
+                    - db_datareader
+                    - db_datawriter
+                    - db_owner
+                    type: string
                   schema:
                     description: Schema for the permissions to be granted for.
                     type: string
@@ -253,9 +265,15 @@ spec:
                             type: string
                         type: object
                     type: object
-                required:
-                - permissions
                 type: object
+                x-kubernetes-validations:
+                - message: exactly one of permissions or role must be specified
+                  rule: has(self.permissions) != has(self.role)
+                - message: schema cannot be specified with role
+                  rule: '!has(self.role) || !has(self.schema)'
+                - message: grant mode and role are immutable
+                  rule: has(self.role) == has(oldSelf.role) && (!has(self.role) ||
+                    self.role == oldSelf.role)
               managementPolicies:
                 default:
                 - '*'

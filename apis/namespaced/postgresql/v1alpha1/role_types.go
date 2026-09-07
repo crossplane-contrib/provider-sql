@@ -69,6 +69,8 @@ type RolePrivilege struct {
 }
 
 // RoleParameters define the desired state of a PostgreSQL role instance.
+// +kubebuilder:validation:XValidation:rule="!(has(self.azureEntra) && (has(self.passwordSecretRef) || has(self.passwordRotationTrigger)))",message="Azure Entra roles cannot specify passwordSecretRef or passwordRotationTrigger"
+// +kubebuilder:validation:XValidation:rule="has(self.azureEntra) == has(oldSelf.azureEntra)",message="Azure Entra authentication mode is immutable"
 type RoleParameters struct {
 	// ConnectionLimit to be applied to the role.
 	// +kubebuilder:validation:Min=-1
@@ -95,7 +97,37 @@ type RoleParameters struct {
 	// a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
 	// +optional
 	PasswordRotationTrigger *metav1.Time `json:"passwordRotationTrigger,omitempty"`
+
+	// AzureEntra creates an Azure Database for PostgreSQL role mapped to a
+	// specific Microsoft Entra object by using pgaadauth_create_principal_with_oid.
+	// +optional
+	AzureEntra *AzureEntraPrincipal `json:"azureEntra,omitempty"`
 }
+
+// AzureEntraPrincipal identifies the Microsoft Entra object represented by an
+// Azure Database for PostgreSQL role.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Azure Entra principal mapping is immutable"
+type AzureEntraPrincipal struct {
+	// ObjectID is the object ID of the Entra user, group, service principal, or
+	// managed identity. For an application, use the enterprise application's
+	// service-principal object ID, not the application/client ID.
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	ObjectID string `json:"objectId"`
+
+	// PrincipalType identifies the Entra object type. Managed identities and
+	// applications are ServicePrincipal.
+	// +kubebuilder:validation:Enum=User;ServicePrincipal;Group
+	PrincipalType AzureEntraPrincipalType `json:"principalType"`
+}
+
+// AzureEntraPrincipalType identifies an external PostgreSQL principal.
+type AzureEntraPrincipalType string
+
+const (
+	AzureEntraPrincipalTypeUser             AzureEntraPrincipalType = "User"
+	AzureEntraPrincipalTypeServicePrincipal AzureEntraPrincipalType = "ServicePrincipal"
+	AzureEntraPrincipalTypeGroup            AzureEntraPrincipalType = "Group"
+)
 
 // RoleConfigurationParameter is a role configuration parameter.
 type RoleConfigurationParameter struct {

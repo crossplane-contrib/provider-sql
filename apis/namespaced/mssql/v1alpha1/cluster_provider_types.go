@@ -31,12 +31,13 @@ type ClusterProviderConfigSpec struct {
 // ClusterProviderCredentials required to authenticate.
 type ClusterProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=MSSQLConnectionSecret
+	// +kubebuilder:validation:Enum=MSSQLConnectionSecret;AzureWorkloadIdentity
 	Source MSSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MSSQL connection secret
-	// that contains the credentials that must be used to connect to the
-	// provider.
+	// that contains the connection metadata used to connect to the provider.
+	// Password authentication requires username and password. Azure workload
+	// identity authentication requires only endpoint and port.
 	// +optional
 	ConnectionSecretRef xpv2.SecretReference `json:"connectionSecretRef,omitempty"`
 

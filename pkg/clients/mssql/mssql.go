@@ -19,10 +19,13 @@ package mssql
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/microsoft/go-mssqldb/azuread"
 	"github.com/pkg/errors"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -32,7 +35,8 @@ import (
 )
 
 const (
-	driverName = "sqlserver"
+	driverName                          = "sqlserver"
+	azureWorkloadIdentityAuthentication = azuread.ActiveDirectoryWorkloadIdentity
 
 	errNotSupported = "%s not supported by MSSQL client"
 )
@@ -41,6 +45,8 @@ type mssqlDB struct {
 	dsn      string
 	endpoint string
 	port     string
+	driver   string
+	authMode xsql.AuthenticationMode
 }
 
 // New returns a new mssql database client.
@@ -57,16 +63,22 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	if database != "" {
 		query.Add("database", database)
 	}
-	u := &url.URL{
-		Scheme:   driverName,
-		User:     url.UserPassword(string(creds[xpv2.CredentialsSecretUserKey]), string(creds[xpv2.CredentialsSecretPasswordKey])),
-		Host:     host,
-		RawQuery: query.Encode(),
+	authMode, _ := xsql.AuthenticationFromCredentials(creds)
+	driver := driverName
+	u := &url.URL{Scheme: driverName, Host: host}
+	if authMode == xsql.AuthenticationModeAzureWorkloadIdentity {
+		query.Add("fedauth", azureWorkloadIdentityAuthentication)
+		driver = azuread.DriverName
+	} else {
+		u.User = url.UserPassword(string(creds[xpv2.CredentialsSecretUserKey]), string(creds[xpv2.CredentialsSecretPasswordKey]))
 	}
+	u.RawQuery = query.Encode()
 	return mssqlDB{
 		dsn:      u.String(),
 		endpoint: endpoint,
 		port:     port,
+		driver:   driver,
+		authMode: authMode,
 	}
 }
 
@@ -77,7 +89,7 @@ func (c mssqlDB) ExecTx(_ context.Context, _ []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -89,7 +101,7 @@ func (c mssqlDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open(driverName, c.dsn)
+	d, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +112,7 @@ func (c mssqlDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open(driverName, c.dsn)
+	db, err := sql.Open(c.driver, c.dsn)
 	if err != nil {
 		return err
 	}
@@ -111,12 +123,17 @@ func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) er
 
 // GetConnectionDetails returns the connection details for a user of this DB
 func (c mssqlDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
-	return managed.ConnectionDetails{
+	details := managed.ConnectionDetails{
 		xpv2.CredentialsSecretUserKey:     []byte(username),
-		xpv2.CredentialsSecretPasswordKey: []byte(password),
 		xpv2.CredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv2.CredentialsSecretPortKey:     []byte(c.port),
 	}
+	if c.authMode == xsql.AuthenticationModeAzureWorkloadIdentity {
+		details["authentication"] = []byte(xsql.AuthenticationModeAzureWorkloadIdentity)
+	} else {
+		details[xpv2.CredentialsSecretPasswordKey] = []byte(password)
+	}
+	return details
 }
 
 // GetServerVersion is not supported by the MSSQL client (only used by PostgreSQL).
@@ -128,10 +145,30 @@ func (c mssqlDB) GetServerVersion(ctx context.Context) (int, error) {
 
 // QuoteIdentifier for mssql queries
 func QuoteIdentifier(id string) string {
-	return "[" + id + "]"
+	return "[" + strings.ReplaceAll(id, "]", "]]") + "]"
 }
 
 // QuoteValue for mssql queries
 func QuoteValue(id string) string {
 	return "'" + strings.ReplaceAll(id, "'", "''") + "'"
+}
+
+// AzureEntraSID converts an Entra object ID to the binary SID representation
+// used by SQL Server's uniqueidentifier type. SQL Server stores the first
+// three UUID components in little-endian byte order.
+func AzureEntraSID(objectID string) (string, error) {
+	id, err := uuid.Parse(objectID)
+	if err != nil {
+		return "", err
+	}
+	b := [16]byte(id)
+	reverse := func(data []byte) {
+		for left, right := 0, len(data)-1; left < right; left, right = left+1, right-1 {
+			data[left], data[right] = data[right], data[left]
+		}
+	}
+	reverse(b[0:4])
+	reverse(b[4:6])
+	reverse(b[6:8])
+	return "0x" + hex.EncodeToString(b[:]), nil
 }

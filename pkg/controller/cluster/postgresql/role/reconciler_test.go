@@ -1401,6 +1401,42 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+func TestUpToDate(t *testing.T) {
+	observed := &v1alpha1.RoleParameters{
+		ConnectionLimit: ptr.To(int32(-1)),
+		Privileges: v1alpha1.RolePrivilege{
+			SuperUser:   ptr.To(false),
+			Inherit:     ptr.To(true),
+			CreateDb:    ptr.To(false),
+			CreateRole:  ptr.To(false),
+			Login:       ptr.To(true),
+			Replication: ptr.To(false),
+			BypassRls:   ptr.To(false),
+		},
+	}
+	desired := &v1alpha1.RoleParameters{
+		ConnectionLimit: ptr.To(int32(-1)),
+		Privileges: v1alpha1.RolePrivilege{
+			SuperUser:   ptr.To(false),
+			Inherit:     ptr.To(true),
+			CreateDb:    ptr.To(false),
+			CreateRole:  ptr.To(false),
+			Login:       ptr.To(true),
+			Replication: ptr.To(false),
+			BypassRls:   ptr.To(false),
+		},
+	}
+
+	if !upToDate(observed, desired) {
+		t.Error("equal values at different pointer addresses should be up to date")
+	}
+
+	desired.Privileges.Login = ptr.To(false)
+	if upToDate(observed, desired) {
+		t.Error("different privilege values should not be up to date")
+	}
+}
+
 func TestConnectWithSecretKeyMapping(t *testing.T) {
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 

@@ -1,0 +1,70 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-sql-connection
+  namespace: default
+stringData:
+  endpoint: example.database.windows.net
+  port: "1433"
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: azure-workload-identity
+  namespace: default
+spec:
+  credentials:
+    source: AzureWorkloadIdentity
+    connectionSecretRef:
+      name: azure-sql-connection
+---
+# The provider pod's workload identity must be an Entra administrator for the
+# Azure SQL server, or an Entra principal delegated ALTER ANY USER in appdb.
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: application-identity
+  namespace: default
+  annotations:
+    crossplane.io/external-name: application-identity
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: azure-workload-identity
+  forProvider:
+    database: appdb
+    azureEntra:
+      # Application/client ID for the application's managed identity.
+      clientId: 00112233-4455-6677-8899-aabbccddeeff
+      principalType: ServicePrincipal
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: application-identity-datareader
+  namespace: default
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: azure-workload-identity
+  forProvider:
+    database: appdb
+    userRef:
+      name: application-identity
+    role: db_datareader
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: application-identity-datawriter
+  namespace: default
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: azure-workload-identity
+  forProvider:
+    database: appdb
+    userRef:
+      name: application-identity
+    role: db_datawriter

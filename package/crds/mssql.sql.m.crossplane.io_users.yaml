@@ -53,6 +53,42 @@ spec:
                 description: UserParameters define the desired state of a MSSQL user
                   instance.
                 properties:
+                  azureEntra:
+                    description: |-
+                      AzureEntra creates a contained Azure SQL database principal mapped to a
+                      specific Microsoft Entra object. Object ID based creation avoids Microsoft
+                      Graph lookups and prevents ambiguous display-name resolution.
+                    properties:
+                      clientId:
+                        description: |-
+                          ClientID is the application/client ID for a ServicePrincipal, including a
+                          managed identity. Azure SQL uses this value as the external user's SID.
+                        pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                        type: string
+                      objectId:
+                        description: ObjectID is the Entra object ID for a User or
+                          Group.
+                        pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                        type: string
+                      principalType:
+                        description: |-
+                          PrincipalType selects the Azure SQL external principal type. Managed
+                          identities and applications are ServicePrincipal.
+                        enum:
+                        - User
+                        - ServicePrincipal
+                        - Group
+                        type: string
+                    required:
+                    - principalType
+                    type: object
+                    x-kubernetes-validations:
+                    - message: ServicePrincipal requires clientId; User and Group
+                        require objectId
+                      rule: 'self.principalType == ''ServicePrincipal'' ? has(self.clientId)
+                        && !has(self.objectId) : has(self.objectId) && !has(self.clientId)'
+                    - message: Azure Entra principal mapping is immutable
+                      rule: self == oldSelf
                   contained:
                     description: |-
                       Contained specifies whether to create a contained database user (without server-level login).
@@ -256,6 +292,13 @@ spec:
                     || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector)))'
                 - message: contained field is immutable after creation
                   rule: '!has(oldSelf.contained) || self.contained == oldSelf.contained'
+                - message: Azure Entra users cannot specify passwordSecretRef, loginDatabase,
+                    or contained
+                  rule: '!(has(self.azureEntra) && (has(self.passwordSecretRef) ||
+                    has(self.loginDatabase) || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector)
+                    || (has(self.contained) && self.contained == true)))'
+                - message: Azure Entra authentication mode is immutable
+                  rule: has(self.azureEntra) == has(oldSelf.azureEntra)
               managementPolicies:
                 default:
                 - '*'

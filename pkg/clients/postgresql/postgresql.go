@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/url"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
 	"github.com/lib/pq/pqerror"
@@ -18,13 +21,21 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pqerror.Code("3D000")
+
+	defaultAzurePostgreSQLTokenScope = "https://ossrdbms-aad.database.windows.net/.default"
 )
 
 type postgresDB struct {
-	dsn      string
-	endpoint string
-	port     string
-	sslmode  string
+	username        string
+	password        string
+	endpoint        string
+	port            string
+	database        string
+	sslmode         string
+	authMode        xsql.AuthenticationMode
+	tokenScope      string
+	tokenCredential azcore.TokenCredential
+	credentialErr   error
 }
 
 // New returns a new PostgreSQL database client. The default database name is
@@ -36,14 +47,52 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	port := string(creds[xpv2.CredentialsSecretPortKey])
 	username := string(creds[xpv2.CredentialsSecretUserKey])
 	password := string(creds[xpv2.CredentialsSecretPasswordKey])
-	dsn := DSN(username, password, endpoint, port, database, sslmode)
+	authMode, tokenScope := xsql.AuthenticationFromCredentials(creds)
+
+	var tokenCredential azcore.TokenCredential
+	var credentialErr error
+	if authMode == xsql.AuthenticationModeAzureWorkloadIdentity {
+		if tokenScope == "" {
+			tokenScope = defaultAzurePostgreSQLTokenScope
+		}
+		tokenCredential, credentialErr = azidentity.NewWorkloadIdentityCredential(nil)
+	}
 
 	return postgresDB{
-		dsn:      dsn,
-		endpoint: endpoint,
-		port:     port,
-		sslmode:  sslmode,
+		username:        username,
+		password:        password,
+		endpoint:        endpoint,
+		port:            port,
+		database:        database,
+		sslmode:         sslmode,
+		authMode:        authMode,
+		tokenScope:      tokenScope,
+		tokenCredential: tokenCredential,
+		credentialErr:   credentialErr,
 	}
+}
+
+func (c postgresDB) open(ctx context.Context) (*sql.DB, error) {
+	dsn, err := c.connectionString(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sql.Open("postgres", dsn)
+}
+
+func (c postgresDB) connectionString(ctx context.Context) (string, error) {
+	if c.credentialErr != nil {
+		return "", c.credentialErr
+	}
+	password := c.password
+	if c.authMode == xsql.AuthenticationModeAzureWorkloadIdentity {
+		token, err := c.tokenCredential.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{c.tokenScope}})
+		if err != nil {
+			return "", err
+		}
+		password = token.Token
+	}
+	return DSN(c.username, password, c.endpoint, c.port, c.database, c.sslmode), nil
 }
 
 // DSN returns the DSN URL
@@ -63,13 +112,14 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 // ExecTx executes an array of queries, committing if all are successful and
 // rolling back immediately on failure.
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open(ctx)
 	if err != nil {
 		return err
 	}
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
+		d.Close() //nolint:errcheck
 		return err
 	}
 
@@ -95,7 +145,7 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open(ctx)
 	if err != nil {
 		return err
 	}
@@ -107,7 +157,7 @@ func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +169,7 @@ func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) 
 
 // Scan the results of the supplied query into the supplied destination.
 func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("postgres", c.dsn)
+	db, err := c.open(ctx)
 	if err != nil {
 		return err
 	}
@@ -130,18 +180,23 @@ func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{})
 
 // GetConnectionDetails returns the connection details for a user of this DB
 func (c postgresDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
-	return managed.ConnectionDetails{
+	details := managed.ConnectionDetails{
 		xpv2.CredentialsSecretUserKey:     []byte(username),
-		xpv2.CredentialsSecretPasswordKey: []byte(password),
 		xpv2.CredentialsSecretEndpointKey: []byte(c.endpoint),
 		xpv2.CredentialsSecretPortKey:     []byte(c.port),
 	}
+	if c.authMode == xsql.AuthenticationModeAzureWorkloadIdentity {
+		details["authentication"] = []byte(xsql.AuthenticationModeAzureWorkloadIdentity)
+	} else {
+		details[xpv2.CredentialsSecretPasswordKey] = []byte(password)
+	}
+	return details
 }
 
 // GetServerVersion returns the PostgreSQL server version as an integer
 // For example, PostgreSQL 16.2 would return 160200.
 func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
-	db, err := sql.Open("postgres", c.dsn)
+	db, err := c.open(ctx)
 	if err != nil {
 		return 0, err
 	}

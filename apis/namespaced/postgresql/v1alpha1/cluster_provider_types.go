@@ -41,13 +41,17 @@ type ClusterProviderConfigSpec struct {
 // ClusterProviderCredentials required to authenticate.
 type ClusterProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret
+	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret;AzureWorkloadIdentity
 	Source PostgreSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
 	// that contains the credentials that must be used to connect to the
 	// provider. +optional
 	ConnectionSecretRef xpv2.SecretReference `json:"connectionSecretRef,omitempty"`
+
+	// AzureWorkloadIdentity configures Microsoft Entra token authentication.
+	// +optional
+	AzureWorkloadIdentity *AzureWorkloadIdentityCredentials `json:"azureWorkloadIdentity,omitempty"`
 
 	// SecretKeyMapping allows overriding the default secret key names used
 	// to read credentials from the connection secret. When not specified,
