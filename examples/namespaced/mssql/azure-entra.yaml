@@ -42,7 +42,7 @@ spec:
 apiVersion: mssql.sql.m.crossplane.io/v1alpha1
 kind: Grant
 metadata:
-  name: application-identity-read-write
+  name: application-identity-datareader
   namespace: default
 spec:
   providerConfigRef:
@@ -52,9 +52,19 @@ spec:
     database: appdb
     userRef:
       name: application-identity
-    permissions:
-      - CONNECT
-      - SELECT
-      - INSERT
-      - UPDATE
-      - DELETE
+    role: db_datareader
+---
+apiVersion: mssql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: application-identity-datawriter
+  namespace: default
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: azure-workload-identity
+  forProvider:
+    database: appdb
+    userRef:
+      name: application-identity
+    role: db_datawriter
