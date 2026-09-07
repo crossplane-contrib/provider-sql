@@ -191,24 +191,31 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (ma
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
 	if mg.Spec.ForProvider.AzureEntra != nil {
-		sid, err := mssql.AzureEntraSID(azureEntraSQLIdentifier(mg.Spec.ForProvider.AzureEntra))
-		if err != nil {
-			return managed.ExternalCreation{}, errors.Wrap(err, "invalid Entra object ID")
-		}
-		query := fmt.Sprintf(
-			"CREATE USER %s WITH SID = %s, TYPE = %s",
-			mssql.QuoteIdentifier(meta.GetExternalName(mg)),
-			sid,
-			azureEntraSQLPrincipalType(mg.Spec.ForProvider.AzureEntra.PrincipalType),
-		)
-		if err := c.userDB.Exec(ctx, xsql.Query{String: query}); err != nil {
-			return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
-		}
-		return managed.ExternalCreation{
-			ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(mg), ""),
-		}, nil
+		return c.createAzureEntraUser(ctx, mg)
 	}
+	return c.createSQLUser(ctx, mg)
+}
 
+func (c *external) createAzureEntraUser(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
+	sid, err := mssql.AzureEntraSID(azureEntraSQLIdentifier(mg.Spec.ForProvider.AzureEntra))
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, "invalid Entra object ID")
+	}
+	query := fmt.Sprintf(
+		"CREATE USER %s WITH SID = %s, TYPE = %s",
+		mssql.QuoteIdentifier(meta.GetExternalName(mg)),
+		sid,
+		azureEntraSQLPrincipalType(mg.Spec.ForProvider.AzureEntra.PrincipalType),
+	)
+	if err := c.userDB.Exec(ctx, xsql.Query{String: query}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+	}
+	return managed.ExternalCreation{
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(mg), ""),
+	}, nil
+}
+
+func (c *external) createSQLUser(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
 	pw, _, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalCreation{}, err

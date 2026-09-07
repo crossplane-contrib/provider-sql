@@ -1,18 +1,16 @@
 package provider
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
-
-	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const defaultAzurePostgreSQLTokenScope = "https://ossrdbms-aad.database.windows.net/.default"
@@ -24,88 +22,99 @@ type ProviderInfo struct {
 	SSLMode            *string
 }
 
+type providerConfigDetails struct {
+	secretKey       client.ObjectKey
+	defaultDatabase string
+	sslMode         *string
+	keyMapping      map[string]string
+	authMode        xsql.AuthenticationMode
+	tokenScope      string
+}
+
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
-	var (
-		secretKey       *client.ObjectKey
-		defaultDatabase string
-		sslMode         *string
-		keyMapping      map[string]string
-		authMode        = xsql.AuthenticationModePassword
-		tokenScope      string
-	)
-
-	switch mg.GetProviderConfigReference().Kind {
-	case v1alpha1.ProviderConfigKind:
-		providerConfig := &v1alpha1.ProviderConfig{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      mg.GetProviderConfigReference().Name,
-				Namespace: mg.GetNamespace(),
-			},
-		}
-
-		if err := kube.Get(ctx, client.ObjectKeyFromObject(providerConfig), providerConfig); err != nil {
-			return ProviderInfo{}, provErrors.GetProviderConfigError(err)
-		}
-
-		secretKey = &client.ObjectKey{
-			Name:      providerConfig.Spec.Credentials.ConnectionSecretRef.Name,
-			Namespace: mg.GetNamespace(),
-		}
-
-		defaultDatabase = providerConfig.Spec.DefaultDatabase
-		sslMode = providerConfig.Spec.SSLMode
-		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
-		if providerConfig.Spec.Credentials.Source == v1alpha1.CredentialsSourceAzureWorkloadIdentity {
-			authMode = xsql.AuthenticationModeAzureWorkloadIdentity
-			tokenScope = defaultAzurePostgreSQLTokenScope
-			if providerConfig.Spec.Credentials.AzureWorkloadIdentity != nil && providerConfig.Spec.Credentials.AzureWorkloadIdentity.TokenScope != "" {
-				tokenScope = providerConfig.Spec.Credentials.AzureWorkloadIdentity.TokenScope
-			}
-		}
-	case v1alpha1.ClusterProviderConfigKind:
-		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: mg.GetProviderConfigReference().Name,
-			},
-		}
-
-		if err := kube.Get(ctx, client.ObjectKeyFromObject(clusterProviderConfig), clusterProviderConfig); err != nil {
-			return ProviderInfo{}, provErrors.GetClusterProviderConfigError(err)
-		}
-
-		secretKey = &client.ObjectKey{
-			Name:      clusterProviderConfig.Spec.Credentials.ConnectionSecretRef.Name,
-			Namespace: clusterProviderConfig.Spec.Credentials.ConnectionSecretRef.Namespace,
-		}
-
-		defaultDatabase = clusterProviderConfig.Spec.DefaultDatabase
-		sslMode = clusterProviderConfig.Spec.SSLMode
-		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
-		if clusterProviderConfig.Spec.Credentials.Source == v1alpha1.CredentialsSourceAzureWorkloadIdentity {
-			authMode = xsql.AuthenticationModeAzureWorkloadIdentity
-			tokenScope = defaultAzurePostgreSQLTokenScope
-			if clusterProviderConfig.Spec.Credentials.AzureWorkloadIdentity != nil && clusterProviderConfig.Spec.Credentials.AzureWorkloadIdentity.TokenScope != "" {
-				tokenScope = clusterProviderConfig.Spec.Credentials.AzureWorkloadIdentity.TokenScope
-			}
-		}
-	default:
-		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
+	details, err := getProviderConfigDetails(ctx, kube, mg)
+	if err != nil {
+		return ProviderInfo{}, err
 	}
-
-	if secretKey.Name == "" || secretKey.Namespace == "" {
+	if details.secretKey.Name == "" || details.secretKey.Namespace == "" {
 		return ProviderInfo{}, provErrors.MissingSecretRefError()
 	}
 
 	s := &corev1.Secret{}
-	err := kube.Get(ctx, *secretKey, s)
-	if err != nil {
+	if err := kube.Get(ctx, details.secretKey, s); err != nil {
 		return ProviderInfo{}, provErrors.GetSecretError(err)
 	}
 
 	return ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
-		SecretData:         xsql.WithAuthentication(xsql.RemapCredentialKeys(s.Data, keyMapping), authMode, tokenScope),
-		DefaultDatabase:    defaultDatabase,
-		SSLMode:            sslMode,
+		SecretData:         xsql.WithAuthentication(xsql.RemapCredentialKeys(s.Data, details.keyMapping), details.authMode, details.tokenScope),
+		DefaultDatabase:    details.defaultDatabase,
+		SSLMode:            details.sslMode,
 	}, nil
+}
+
+func getProviderConfigDetails(ctx context.Context, kube client.Client, mg resource.ModernManaged) (providerConfigDetails, error) {
+	ref := mg.GetProviderConfigReference()
+	switch ref.Kind {
+	case v1alpha1.ProviderConfigKind:
+		return getNamespacedProviderConfigDetails(ctx, kube, ref.Name, mg.GetNamespace())
+	case v1alpha1.ClusterProviderConfigKind:
+		return getClusterProviderConfigDetails(ctx, kube, ref.Name)
+	default:
+		return providerConfigDetails{}, provErrors.InvalidProviderConfigKindError(ref.Kind)
+	}
+}
+
+func getNamespacedProviderConfigDetails(ctx context.Context, kube client.Client, name, namespace string) (providerConfigDetails, error) {
+	config := &v1alpha1.ProviderConfig{}
+	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, config); err != nil {
+		return providerConfigDetails{}, provErrors.GetProviderConfigError(err)
+	}
+	credentials := config.Spec.Credentials
+	return newProviderConfigDetails(
+		client.ObjectKey{Name: credentials.ConnectionSecretRef.Name, Namespace: namespace},
+		config.Spec.DefaultDatabase,
+		config.Spec.SSLMode,
+		credentials.SecretKeyMapping,
+		credentials.Source,
+		credentials.AzureWorkloadIdentity,
+	), nil
+}
+
+func getClusterProviderConfigDetails(ctx context.Context, kube client.Client, name string) (providerConfigDetails, error) {
+	config := &v1alpha1.ClusterProviderConfig{}
+	if err := kube.Get(ctx, client.ObjectKey{Name: name}, config); err != nil {
+		return providerConfigDetails{}, provErrors.GetClusterProviderConfigError(err)
+	}
+	credentials := config.Spec.Credentials
+	return newProviderConfigDetails(
+		client.ObjectKey{Name: credentials.ConnectionSecretRef.Name, Namespace: credentials.ConnectionSecretRef.Namespace},
+		config.Spec.DefaultDatabase,
+		config.Spec.SSLMode,
+		credentials.SecretKeyMapping,
+		credentials.Source,
+		credentials.AzureWorkloadIdentity,
+	), nil
+}
+
+func newProviderConfigDetails(secretKey client.ObjectKey, defaultDatabase string, sslMode *string, keyMapping *v1alpha1.SecretKeyMapping, source v1alpha1.PostgreSQLConnectionSource, azureWorkloadIdentity *v1alpha1.AzureWorkloadIdentityCredentials) providerConfigDetails {
+	authMode, tokenScope := azureAuthentication(source, azureWorkloadIdentity)
+	return providerConfigDetails{
+		secretKey:       secretKey,
+		defaultDatabase: defaultDatabase,
+		sslMode:         sslMode,
+		keyMapping:      keyMapping.ToMap(),
+		authMode:        authMode,
+		tokenScope:      tokenScope,
+	}
+}
+
+func azureAuthentication(source v1alpha1.PostgreSQLConnectionSource, azureWorkloadIdentity *v1alpha1.AzureWorkloadIdentityCredentials) (xsql.AuthenticationMode, string) {
+	if source != v1alpha1.CredentialsSourceAzureWorkloadIdentity {
+		return xsql.AuthenticationModePassword, ""
+	}
+	if azureWorkloadIdentity == nil || azureWorkloadIdentity.TokenScope == "" {
+		return xsql.AuthenticationModeAzureWorkloadIdentity, defaultAzurePostgreSQLTokenScope
+	}
+	return xsql.AuthenticationModeAzureWorkloadIdentity, azureWorkloadIdentity.TokenScope
 }
