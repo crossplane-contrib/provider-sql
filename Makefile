@@ -35,8 +35,7 @@ GO111MODULE = on
 KIND_NODE_IMAGE_TAG ?= v1.36.4
 KIND_VERSION ?= v0.33.0
 KUBECTL_VERSION ?= v1.36.4
-CROSSPLANE_VERSION ?= v2.4.0
-CROSSPLANE_CLI_VERSION ?= v2.4.0
+CROSSPLANE_CLI_VERSION ?= v2.3.3
 -include build/makelib/k8s_tools.mk
 
 # ====================================================================================
