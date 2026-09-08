@@ -1,8 +1,7 @@
 package v1alpha1
 
 import (
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,7 +34,7 @@ type DefaultPrivilegesSpec struct {
 
 // A DefaultPrivilegesStatus represents the observed state of a Grant.
 type DefaultPrivilegesStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // DefaultPrivilegesParameters defines the desired state of a Default Grant.
@@ -75,12 +74,12 @@ type DefaultPrivilegesParameters struct {
 	// RoleRef to which default privileges are granted.
 	// +immutable
 	// +optional
-	RoleRef *xpv1.NamespacedReference `json:"roleRef,omitempty"`
+	RoleRef *xpv2.NamespacedReference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this default grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *xpv1.NamespacedSelector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv2.NamespacedSelector `json:"roleSelector,omitempty"`
 
 	// Database in which the default privileges are applied
 	// +optional
@@ -90,12 +89,12 @@ type DefaultPrivilegesParameters struct {
 	// DatabaseRef references the database object this default grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// Schema in which the default privileges are applied.
 	// Not applicable when objectType is schema.

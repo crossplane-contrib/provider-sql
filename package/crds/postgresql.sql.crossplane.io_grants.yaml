@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: grants.postgresql.sql.crossplane.io
 spec:
   group: postgresql.sql.crossplane.io
@@ -360,9 +360,11 @@ spec:
                     items:
                       properties:
                         args:
-                          description: The arguments of the routine.
+                          description: |-
+                            The arguments of the routine. Each argument is a type name, optionally
+                            schema-qualified (e.g. aws_commons._s3_uri_1) for composite types.
                           items:
-                            pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
+                            pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)?$
                             type: string
                           type: array
                         name:
@@ -620,6 +622,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastHandledReconcileAt:
+                description: |-
+                  LastHandledReconcileAt holds the value of the most recent
+                  reconcile-requested-at annotation token that the controller has
+                  processed. Users can compare this to the annotation to determine
+                  whether a reconcile request has been handled.
+                type: string
               observedGeneration:
                 description: |-
                   ObservedGeneration is the latest metadata.generation
