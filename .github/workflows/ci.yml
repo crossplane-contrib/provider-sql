@@ -9,16 +9,15 @@ on:
   workflow_dispatch:
     inputs:
       postgres_version:
-        description: "PostgreSQL major version to test against (e.g. 16, 17, 18)"
+        description: 'PostgreSQL major version to test against (e.g. 16, 17, 18)'
         required: false
-        default: "18"
+        default: '18'
         type: string
 
 env:
   # Common versions
-  GO_VERSION: "1.26"
-  GOLANGCI_VERSION: "v2.10.1"
-  DOCKER_BUILDX_VERSION: "v0.23.0"
+  GOLANGCI_VERSION: 'v2.10.1'
+  DOCKER_BUILDX_VERSION: 'v0.23.0'
 
   # Common users. We can't run a step 'if secrets.AWS_USR != ""' but we can run
   # a step 'if env.AWS_USR' != ""', so we copy these to succinctly test whether
@@ -42,6 +41,7 @@ jobs:
           do_not_skip: '["workflow_dispatch", "schedule", "push"]'
           concurrent_skipping: false
 
+
   lint:
     runs-on: ubuntu-26.04
     needs: detect-noop
@@ -56,7 +56,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Find the Go Build Cache
         id: go
@@ -100,7 +100,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Find the Go Build Cache
         id: go
@@ -153,7 +153,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Find the Go Build Cache
         id: go
@@ -198,7 +198,7 @@ jobs:
           platforms: all
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
         with:
           version: ${{ env.DOCKER_BUILDX_VERSION }}
 
@@ -213,7 +213,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Find the Go Build Cache
         id: go
@@ -258,7 +258,7 @@ jobs:
           platforms: all
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
         with:
           version: ${{ env.DOCKER_BUILDX_VERSION }}
 
@@ -281,7 +281,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Find the Go Build Cache
         id: go

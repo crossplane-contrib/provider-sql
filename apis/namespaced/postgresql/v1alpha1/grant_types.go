@@ -23,10 +23,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/pkg/errors"
 )
 
@@ -297,9 +295,10 @@ type Routine struct {
 	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Name string `json:"name,omitempty"`
 
-	// The arguments of the routine.
+	// The arguments of the routine. Each argument is a type name, optionally
+	// schema-qualified (e.g. aws_commons._s3_uri_1) for composite types.
 	// +optional
-	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)?$
 	Arguments []string `json:"args,omitempty"`
 }
 
@@ -326,12 +325,12 @@ type GrantParameters struct {
 	// RoleRef references the role object this grant is for.
 	// +immutable
 	// +optional
-	RoleRef *xpv1.NamespacedReference `json:"roleRef,omitempty"`
+	RoleRef *xpv2.NamespacedReference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *xpv1.NamespacedSelector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv2.NamespacedSelector `json:"roleSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -341,12 +340,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// Schema this grant is for.
 	// +optional
@@ -355,12 +354,12 @@ type GrantParameters struct {
 	// SchemaRef references the schema object this grant it for.
 	// +immutable
 	// +optional
-	SchemaRef *xpv1.NamespacedReference `json:"schemaRef,omitempty"`
+	SchemaRef *xpv2.NamespacedReference `json:"schemaRef,omitempty"`
 
 	// SchemaSelector selects a reference to a Schema this grant is for.
 	// +immutable
 	// +optional
-	SchemaSelector *xpv1.NamespacedSelector `json:"schemaSelector,omitempty"`
+	SchemaSelector *xpv2.NamespacedSelector `json:"schemaSelector,omitempty"`
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
@@ -370,12 +369,12 @@ type GrantParameters struct {
 	// MemberOfRef references the Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfRef *xpv1.NamespacedReference `json:"memberOfRef,omitempty"`
+	MemberOfRef *xpv2.NamespacedReference `json:"memberOfRef,omitempty"`
 
 	// MemberOfSelector selects a reference to a Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfSelector *xpv1.NamespacedSelector `json:"memberOfSelector,omitempty"`
+	MemberOfSelector *xpv2.NamespacedSelector `json:"memberOfSelector,omitempty"`
 
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
@@ -422,7 +421,7 @@ type GrantParameters struct {
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

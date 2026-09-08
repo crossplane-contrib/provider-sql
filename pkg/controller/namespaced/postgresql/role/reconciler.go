@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
@@ -40,6 +39,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/password"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -250,7 +250,7 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Role) (ma
 		return managed.ExternalObservation{}, err
 	}
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	// PrivilegesAsClauses is used as role status output
 	mg.Status.AtProvider.PrivilegesAsClauses = privilegesToClauses(observed.Privileges)
@@ -263,7 +263,7 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Role) (ma
 }
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Role) (managed.ExternalCreation, error) {
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
@@ -409,7 +409,7 @@ func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 }
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Role) (managed.ExternalDelete, error) {
-	mg.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv2.Deleting())
 	err := c.db.Exec(ctx, xsql.Query{
 		String: "DROP ROLE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg)),
 	})
