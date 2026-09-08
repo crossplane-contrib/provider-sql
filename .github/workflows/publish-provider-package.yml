@@ -7,6 +7,10 @@ on:
         description: "Version string to use while publishing the package (e.g. v1.0.0-alpha.1)"
         default: ""
         required: false
+      go-version:
+        description: "Go version to use if building needs to be done"
+        default: "1.26.8"
+        required: false
 
 jobs:
   publish-provider-package:
@@ -23,7 +27,7 @@ jobs:
 
   add-extensions:
     needs: publish-provider-package
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
