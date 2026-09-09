@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRemapCredentialKeys(t *testing.T) {
@@ -132,12 +130,13 @@ func TestParseVersion(t *testing.T) {
 		{name: "MSSQL_2019", version: "15.0.4355.3", want: 150000},
 		{name: "MSSQL_NonZeroMinor", version: "16.5.100.1", want: 160500},
 
-		// PostgreSQL-style (for reference, PG uses its own query)
+		// Patch boundary cases
 		{name: "ThreeDigitPatch", version: "14.2.1", want: 140201},
 		{name: "PatchExactly99", version: "14.0.99", want: 140099},
 		{name: "PatchOver99", version: "14.0.100", want: 140000},
 
 		// Errors
+		{name: "MajorOnly", version: "8", wantErr: true},
 		{name: "InvalidFormat", version: "invalid", wantErr: true},
 		{name: "EmptyString", version: "", wantErr: true},
 	}
@@ -145,11 +144,17 @@ func TestParseVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseVersion(tt.version)
 			if tt.wantErr {
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("ParseVersion(...): expected error, got nil")
+				}
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
+			if err != nil {
+				t.Fatalf("ParseVersion(...): unexpected error: %v", err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("ParseVersion(...): -want, +got:\n%s", diff)
+			}
 		})
 	}
 }

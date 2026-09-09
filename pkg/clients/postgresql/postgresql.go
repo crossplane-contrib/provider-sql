@@ -139,7 +139,7 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 }
 
 // GetServerVersion returns the PostgreSQL server version as an integer.
-// For example, PostgreSQL 16.2 would return 160200.
+// For example, PostgreSQL 16.2 returns 160002 (major*10000 + minor).
 func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
 	db, err := sql.Open("postgres", c.dsn)
 	if err != nil {

@@ -23,8 +23,6 @@ require (
 	sigs.k8s.io/controller-tools v0.22.0
 )
 
-require github.com/stretchr/testify v1.12.1
-
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect

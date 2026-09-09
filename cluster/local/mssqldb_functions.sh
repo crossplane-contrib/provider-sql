@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-MSSQL_IMAGE="${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2019-CU32-ubuntu-20.04}"
 scriptdir=$(dirname "$0")
 
 setup_mssql() {
-  echo_step "installing MSSQL Server (image ${MSSQL_IMAGE})"
+  echo_step "installing MSSQL Server (version ${MSSQL_VERSION:-2022-CU24-ubuntu-22.04})"
 
   "${KUBECTL}" create secret generic mssql-creds \
       --from-literal username="sa" \
@@ -16,8 +15,7 @@ setup_mssql() {
   echo_step "Verifying secret creation"
   "${KUBECTL}" get secret mssql-creds -o yaml
 
-  sed "s|image: mcr.microsoft.com/mssql/server:.*|image: ${MSSQL_IMAGE}|" \
-      "${scriptdir}/mssql.server.yaml" | "${KUBECTL}" apply -f -
+  MSSQL_VERSION="${MSSQL_VERSION:-2022-CU24-ubuntu-22.04}" envsubst '${MSSQL_VERSION}' < "${scriptdir}/mssql.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for MSSQL Server to be ready"
   "${KUBECTL}" rollout status statefulset/mssql --timeout=300s
