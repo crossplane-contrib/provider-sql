@@ -110,3 +110,51 @@ func TestRemapCredentialKeys(t *testing.T) {
 		}
 	})
 }
+
+func TestParseVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    int
+		wantErr bool
+	}{
+		// MySQL-style versions
+		{name: "MySQL_Standard", version: "8.0.35", want: 80035},
+		{name: "MySQL_WithSuffix", version: "8.0.35-0ubuntu0.22.04.1", want: 80035},
+		{name: "MySQL_MajorMinorOnly", version: "8.0", want: 80000},
+		{name: "MySQL_9", version: "9.1.0", want: 90100},
+		{name: "MariaDB", version: "10.11.6-MariaDB", want: 101106},
+
+		// MSSQL-style versions (build number > 99, ignored)
+		{name: "MSSQL_2022", version: "16.0.1125.1", want: 160000},
+		{name: "MSSQL_2019", version: "15.0.4355.3", want: 150000},
+		{name: "MSSQL_NonZeroMinor", version: "16.5.100.1", want: 160500},
+
+		// Patch boundary cases
+		{name: "ThreeDigitPatch", version: "14.2.1", want: 140201},
+		{name: "PatchExactly99", version: "14.0.99", want: 140099},
+		{name: "PatchOver99", version: "14.0.100", want: 140000},
+
+		// Errors
+		{name: "MajorOnly", version: "8", wantErr: true},
+		{name: "InvalidFormat", version: "invalid", wantErr: true},
+		{name: "EmptyString", version: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseVersion(tt.version)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParseVersion(...): expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseVersion(...): unexpected error: %v", err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("ParseVersion(...): -want, +got:\n%s", diff)
+			}
+		})
+	}
+}
