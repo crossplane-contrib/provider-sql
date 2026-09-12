@@ -487,6 +487,13 @@ spec:
                 - message: withInherit may only be set on memberOf grants
                   rule: '!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef)
                     || has(self.memberOfSelector)'
+                - message: database, databaseRef and databaseSelector cannot be set
+                    in the same grant as memberOf
+                  rule: '!(has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector))
+                    || (!has(self.database) && !has(self.databaseRef) && !has(self.databaseSelector))'
+                - message: privileges cannot be set in the same grant as memberOf
+                  rule: '!(has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector))
+                    || !has(self.privileges)'
               managementPolicies:
                 default:
                 - '*'

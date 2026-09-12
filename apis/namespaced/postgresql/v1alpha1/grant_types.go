@@ -304,6 +304,8 @@ type Routine struct {
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)",message="withInherit may only be set on memberOf grants"
+// +kubebuilder:validation:XValidation:rule="!(has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)) || (!has(self.database) && !has(self.databaseRef) && !has(self.databaseSelector))",message="database, databaseRef and databaseSelector cannot be set in the same grant as memberOf"
+// +kubebuilder:validation:XValidation:rule="!(has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)) || !has(self.privileges)",message="privileges cannot be set in the same grant as memberOf"
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
