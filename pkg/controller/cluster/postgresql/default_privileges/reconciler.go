@@ -55,8 +55,6 @@ const (
 	errNoObjectType            = "object type not passed"
 	errNoSchema                = "schema is required when objectType is not schema"
 	errSchemaWithSchemaType    = "schema must not be set when objectType is schema"
-
-	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles DefaultPrivileges managed resources.
