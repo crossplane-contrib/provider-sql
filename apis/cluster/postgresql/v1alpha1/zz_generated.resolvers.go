@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 The Crossplane Authors <https://crossplane.io>
+// SPDX-FileCopyrightText: 2026 The Crossplane Authors <https://crossplane.io>
 //
 // SPDX-License-Identifier: Apache-2.0
 
@@ -12,6 +12,33 @@ import (
 	errors "github.com/pkg/errors"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// ResolveReferences of this Database.
+func (mg *Database) ResolveReferences(ctx context.Context, c client.Reader) error {
+	r := reference.NewAPIResolver(c, mg)
+
+	var rsp reference.ResolutionResponse
+	var err error
+
+	rsp, err = r.Resolve(ctx, reference.ResolutionRequest{
+		CurrentValue: reference.FromPtrValue(mg.Spec.ForProvider.Owner),
+		Extract:      reference.ExternalName(),
+		Namespace:    mg.GetNamespace(),
+		Reference:    mg.Spec.ForProvider.OwnerRef,
+		Selector:     mg.Spec.ForProvider.OwnerSelector,
+		To: reference.To{
+			List:    &RoleList{},
+			Managed: &Role{},
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "mg.Spec.ForProvider.Owner")
+	}
+	mg.Spec.ForProvider.Owner = reference.ToPtrValue(rsp.ResolvedValue)
+	mg.Spec.ForProvider.OwnerRef = rsp.ResolvedReference
+
+	return nil
+}
 
 // ResolveReferences of this DefaultPrivileges.
 func (mg *DefaultPrivileges) ResolveReferences(ctx context.Context, c client.Reader) error {

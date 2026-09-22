@@ -25,8 +25,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -45,8 +45,8 @@ type mssqlDB struct {
 
 // New returns a new mssql database client.
 func New(creds map[string][]byte, database string) xsql.DB {
-	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
-	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
+	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
+	port := string(creds[xpv2.CredentialsSecretPortKey])
 
 	host := endpoint
 	if port != "" {
@@ -59,7 +59,7 @@ func New(creds map[string][]byte, database string) xsql.DB {
 	}
 	u := &url.URL{
 		Scheme:   driverName,
-		User:     url.UserPassword(string(creds[xpv1.ResourceCredentialsSecretUserKey]), string(creds[xpv1.ResourceCredentialsSecretPasswordKey])),
+		User:     url.UserPassword(string(creds[xpv2.CredentialsSecretUserKey]), string(creds[xpv2.CredentialsSecretPasswordKey])),
 		Host:     host,
 		RawQuery: query.Encode(),
 	}
@@ -112,10 +112,10 @@ func (c mssqlDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) er
 // GetConnectionDetails returns the connection details for a user of this DB
 func (c mssqlDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
-		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
+		xpv2.CredentialsSecretUserKey:     []byte(username),
+		xpv2.CredentialsSecretPasswordKey: []byte(password),
+		xpv2.CredentialsSecretEndpointKey: []byte(c.endpoint),
+		xpv2.CredentialsSecretPortKey:     []byte(c.port),
 	}
 }
 

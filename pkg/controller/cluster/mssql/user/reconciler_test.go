@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -31,11 +32,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -63,10 +64,10 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 }
 func (m mockDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
-		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+		xpv2.CredentialsSecretUserKey:     []byte(username),
+		xpv2.CredentialsSecretPasswordKey: []byte(password),
+		xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+		xpv2.CredentialsSecretPortKey:     []byte("3306"),
 	}
 }
 func (m mockDB) GetServerVersion(ctx context.Context) (int, error) {
@@ -133,8 +134,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -157,8 +158,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -174,7 +175,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -186,8 +187,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -203,7 +204,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{}
 						case *corev1.Secret:
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
@@ -219,8 +220,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 						ForProvider: v1alpha1.UserParameters{
 							Database: ptr.To("success-database"),
@@ -240,7 +241,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{}
 						case *corev1.Secret:
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
@@ -256,8 +257,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 						ForProvider: v1alpha1.UserParameters{
 							Database:      ptr.To("success-database"),
@@ -378,7 +379,7 @@ func TestObserve(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -388,15 +389,15 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &xpv2.SecretKeySelector{
+								SecretReference: xpv2.SecretReference{
 									Name: "example",
 								},
 								Key: "password",
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -460,6 +461,7 @@ func TestCreate(t *testing.T) {
 			reason: "Any errors encountered while creating the user should be returned",
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
 				},
 			},
@@ -470,10 +472,26 @@ func TestCreate(t *testing.T) {
 				err: errors.Wrapf(errBoom, errCreateLogin, ""),
 			},
 		},
+		"SelectLoginError": {
+			reason: "Errors selecting the existing login should be returned",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+			want: want{
+				err: errors.Wrapf(errBoom, errSelectLogin, ""),
+			},
+		},
 		"Success": {
 			reason: "No error should be returned when we successfully create a user",
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 			},
@@ -490,10 +508,46 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte(""),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("3306"),
+					},
+				},
+			},
+		},
+		"LoginExists": {
+			reason: "When the login already exists we should skip CREATE LOGIN and only run CREATE USER FOR LOGIN",
+			fields: fields{
+				db: &mockDB{
+					// Login already exists: Scan returns no error.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						// Fail if CREATE LOGIN is attempted for an existing login.
+						if strings.HasPrefix(q.String, "CREATE LOGIN") {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{
+					ObjectMeta: v1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+				c: managed.ExternalCreation{
+					ConnectionDetails: managed.ConnectionDetails{
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte(""),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -503,6 +557,7 @@ func TestCreate(t *testing.T) {
 			comparePw: true,
 			fields: fields{
 				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
 					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
 				},
 				kube: &test.MockClient{
@@ -530,8 +585,8 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &xpv2.SecretKeySelector{
+								SecretReference: xpv2.SecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
@@ -544,10 +599,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte("test1234"),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte("test1234"),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -611,15 +666,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &xpv2.SecretKeySelector{
+								SecretReference: xpv2.SecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.SecretReference{
 								Name: "password-secret",
 							},
 						},
@@ -630,7 +685,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -670,15 +725,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.User{
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &xpv2.SecretKeySelector{
+								SecretReference: xpv2.SecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -689,7 +744,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -713,15 +768,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.UserSpec{
 						ForProvider: v1alpha1.UserParameters{
-							PasswordSecretRef: &xpv1.SecretKeySelector{
-								SecretReference: xpv1.SecretReference{
+							PasswordSecretRef: &xpv2.SecretKeySelector{
+								SecretReference: xpv2.SecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
 							},
 						},
-						ResourceSpec: xpv1.ResourceSpec{
-							WriteConnectionSecretToReference: &xpv1.SecretReference{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.SecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -741,7 +796,7 @@ func TestUpdate(t *testing.T) {
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
 							}
-							secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("oldpassword")
+							secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("oldpassword")
 							secret.DeepCopyInto(obj.(*corev1.Secret))
 							return nil
 						default:
@@ -754,10 +809,10 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalUpdate{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte("newpassword"),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte("newpassword"),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("3306"),
 					},
 				},
 			},
@@ -819,8 +874,8 @@ func TestDelete(t *testing.T) {
 			},
 			want: errors.Wrapf(errBoom, errDropUser, ""),
 		},
-		"Success": {
-			reason: "No error should be returned",
+		"SuccessLoginPresent": {
+			reason: "When the login still exists we should drop the user and the login",
 			fields: fields{
 				userDB: &mockDB{
 					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
@@ -831,7 +886,8 @@ func TestDelete(t *testing.T) {
 					},
 				},
 				loginDB: &mockDB{
-
+					// Login present: Scan returns no error.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return nil },
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						return nil
 					},
@@ -840,6 +896,50 @@ func TestDelete(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.User{},
 			},
+		},
+		"SuccessLoginAbsent": {
+			reason: "When the login was already dropped we should drop the user but not attempt to drop the login",
+			fields: fields{
+				userDB: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+				loginDB: &mockDB{
+					// Login absent: Scan returns no rows.
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return sql.ErrNoRows },
+					// Fail if DROP LOGIN is attempted for a missing login.
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+		},
+		"SelectLoginError": {
+			reason: "Errors selecting the existing login should be returned",
+			fields: fields{
+				userDB: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						return nil
+					},
+				},
+				loginDB: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error { return errBoom },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.User{},
+			},
+			want: errors.Wrapf(errBoom, errSelectLogin, ""),
 		},
 	}
 

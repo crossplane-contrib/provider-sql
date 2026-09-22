@@ -25,6 +25,20 @@ spec:
 apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
 kind: Database
 metadata:
+  name: db-owner-ref
+  namespace: default
+spec:
+  forProvider:
+    ownerSelector:
+      matchLabels:
+        role: owner
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
   name: db-observe
   namespace: default
 spec:

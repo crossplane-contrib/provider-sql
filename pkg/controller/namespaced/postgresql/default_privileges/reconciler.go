@@ -27,10 +27,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -50,6 +50,8 @@ const (
 	errNoRole                  = "role not passed or could not be resolved"
 	errNoTargetRole            = "target role not passed or could not be resolved"
 	errNoObjectType            = "object type not passed"
+	errNoSchema                = "schema is required when objectType is not schema"
+	errSchemaWithSchemaType    = "schema must not be set when objectType is schema"
 	errNoDatabase              = "database not passed or could not be resolved"
 	errNoPrivileges            = "privileges not passed"
 	errUnknownGrant            = "cannot identify grant type based on passed params"
@@ -137,16 +139,15 @@ func withOption(option *v1alpha1.GrantOption) string {
 }
 
 func inSchema(params *v1alpha1.DefaultPrivilegesParameters) string {
-	if params.Schema != nil {
+	// PostgreSQL does not allow IN SCHEMA with ON SCHEMAS.
+	if params.Schema != nil && (params.ObjectType == nil || *params.ObjectType != "schema") {
 		return fmt.Sprintf("IN SCHEMA %s", pq.QuoteIdentifier(*params.Schema))
 	}
 	return ""
 }
 
 func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
-
 	roleName := pq.QuoteIdentifier(*gp.Role)
-
 	targetRoleName := pq.QuoteIdentifier(*gp.TargetRole)
 
 	query := strings.TrimSpace(fmt.Sprintf(
@@ -154,7 +155,7 @@ func createDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 		targetRoleName,
 		inSchema(&gp),
 		strings.Join(gp.Privileges.ToStringSlice(), ","),
-		*gp.ObjectType,
+		strings.ToUpper(*gp.ObjectType),
 		roleName,
 		withOption(gp.WithOption),
 	))
@@ -170,7 +171,7 @@ func deleteDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xs
 		"ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %sS FROM %s",
 		targetRoleName,
 		inSchema(&gp),
-		*gp.ObjectType,
+		strings.ToUpper(*gp.ObjectType),
 		roleName,
 	))
 
@@ -212,6 +213,14 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.DefaultPrivileges) 
 		return managed.ExternalObservation{}, errors.New(errNoObjectType)
 	}
 
+	if *mg.Spec.ForProvider.ObjectType != "schema" && mg.Spec.ForProvider.Schema == nil {
+		return managed.ExternalObservation{}, errors.New(errNoSchema)
+	}
+
+	if *mg.Spec.ForProvider.ObjectType == "schema" && mg.Spec.ForProvider.Schema != nil {
+		return managed.ExternalObservation{}, errors.New(errSchemaWithSchemaType)
+	}
+
 	gp := mg.Spec.ForProvider
 	var query xsql.Query
 	selectDefaultPrivilegesQuery(gp, &query)
@@ -246,7 +255,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.DefaultPrivileges) 
 		return managed.ExternalObservation{ResourceExists: false}, nil
 	}
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	resourceMatches := matchingGrants(defaultPrivileges, gp.Privileges.ToStringSlice())
 	return managed.ExternalObservation{
@@ -262,7 +271,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.DefaultPrivileges) 
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalCreation, error) {
 
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	var createQuery xsql.Query
 	createDefaultPrivilegesQuery(mg.Spec.ForProvider, &createQuery)
@@ -287,7 +296,7 @@ func (c *external) Update(
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.ExternalDelete, error) {
 	var query xsql.Query
 
-	mg.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv2.Deleting())
 
 	deleteDefaultPrivilegesQuery(mg.Spec.ForProvider, &query)
 

@@ -19,8 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A GrantSpec defines the desired state of a Grant.
@@ -66,12 +65,12 @@ type GrantParameters struct {
 	// UserRef references the user object this grant is for.
 	// +immutable
 	// +optional
-	UserRef *xpv1.NamespacedReference `json:"userRef,omitempty"`
+	UserRef *xpv2.NamespacedReference `json:"userRef,omitempty"`
 
 	// UserSelector selects a reference to a User this grant is for.
 	// +immutable
 	// +optional
-	UserSelector *xpv1.NamespacedSelector `json:"userSelector,omitempty"`
+	UserSelector *xpv2.NamespacedSelector `json:"userSelector,omitempty"`
 
 	// Tables this grant is for, default *.
 	// +optional
@@ -85,12 +84,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.NamespacedReference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.NamespacedReference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.NamespacedSelector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.NamespacedSelector `json:"databaseSelector,omitempty"`
 
 	// BinLog defines whether the create, delete, update operations of this grant are propagated to replicas. Defaults to true
 	// +optional
@@ -99,8 +98,8 @@ type GrantParameters struct {
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          GrantObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 GrantObservation `json:"atProvider,omitempty"`
 }
 
 // A GrantObservation represents the observed state of a MySQL grant.

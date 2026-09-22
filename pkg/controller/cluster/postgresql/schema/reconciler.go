@@ -28,11 +28,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -142,7 +142,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Schema) (managed.Ex
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectSchema)
 	}
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	return managed.ExternalObservation{
 		ResourceExists:          true,
@@ -154,7 +154,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Schema) (managed.Ex
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Schema) (managed.ExternalCreation, error) { //nolint:gocyclo
 	var queries []xsql.Query
 
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	createSchemaQueries(mg.Spec.ForProvider, &queries, meta.GetExternalName(mg))
 

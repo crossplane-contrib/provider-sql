@@ -29,10 +29,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
@@ -119,7 +119,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 		return managed.ExternalObservation{}, nil
 	}
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	g, r := diffPermissions(mg.Spec.ForProvider.Permissions.ToStringSlice(), permissions)
 	return managed.ExternalObservation{

@@ -23,8 +23,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reference"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/pkg/errors"
 )
 
@@ -36,8 +36,8 @@ const (
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       GrantParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     GrantParameters `json:"forProvider"`
 }
 
 // GrantPrivilege represents a privilege to be granted
@@ -295,13 +295,15 @@ type Routine struct {
 	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Name string `json:"name,omitempty"`
 
-	// The arguments of the routine.
+	// The arguments of the routine. Each argument is a type name, optionally
+	// schema-qualified (e.g. aws_commons._s3_uri_1) for composite types.
 	// +optional
-	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)?$
 	Arguments []string `json:"args,omitempty"`
 }
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
+// +kubebuilder:validation:XValidation:rule="!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)",message="withInherit may only be set on memberOf grants"
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
@@ -323,12 +325,12 @@ type GrantParameters struct {
 	// RoleRef references the role object this grant is for.
 	// +immutable
 	// +optional
-	RoleRef *xpv1.Reference `json:"roleRef,omitempty"`
+	RoleRef *xpv2.Reference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *xpv1.Selector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv2.Selector `json:"roleSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -338,12 +340,12 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.Selector `json:"databaseSelector,omitempty"`
 
 	// Schema this grant is for.
 	// +optional
@@ -352,12 +354,12 @@ type GrantParameters struct {
 	// SchemaRef references the schema object this grant it for.
 	// +immutable
 	// +optional
-	SchemaRef *xpv1.Reference `json:"schemaRef,omitempty"`
+	SchemaRef *xpv2.Reference `json:"schemaRef,omitempty"`
 
 	// SchemaSelector selects a reference to a Schema this grant is for.
 	// +immutable
 	// +optional
-	SchemaSelector *xpv1.Selector `json:"schemaSelector,omitempty"`
+	SchemaSelector *xpv2.Selector `json:"schemaSelector,omitempty"`
 
 	// MemberOf is the Role that this grant makes Role a member of.
 	// +optional
@@ -367,12 +369,12 @@ type GrantParameters struct {
 	// MemberOfRef references the Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfRef *xpv1.Reference `json:"memberOfRef,omitempty"`
+	MemberOfRef *xpv2.Reference `json:"memberOfRef,omitempty"`
 
 	// MemberOfSelector selects a reference to a Role that this grant makes Role a member of.
 	// +immutable
 	// +optional
-	MemberOfSelector *xpv1.Selector `json:"memberOfSelector,omitempty"`
+	MemberOfSelector *xpv2.Selector `json:"memberOfSelector,omitempty"`
 
 	// RevokePublicOnDb apply the statement "REVOKE ALL ON DATABASE %s FROM PUBLIC" to make database unreachable from public
 	// +optional
@@ -406,11 +408,20 @@ type GrantParameters struct {
 	// +optional
 	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	ForeignServers []string `json:"foreignServers,omitempty"`
+
+	// WithInherit controls whether the grantee automatically inherits the privileges
+	// of the granted role. When set to false, emits WITH INHERIT FALSE (PostgreSQL 16+),
+	// granting membership without automatic privilege inheritance. Only valid when
+	// memberOf is set. When omitted, PostgreSQL's default behavior (inherit true) applies.
+	// Note: this field is only evaluated when non-nil. Removing it from the manifest
+	// does NOT revert the database-side setting; set withInherit: true explicitly to revert.
+	// +optional
+	WithInherit *bool `json:"withInherit,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

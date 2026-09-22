@@ -28,11 +28,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
@@ -108,7 +107,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Extension{
 					Spec: v1alpha1.ExtensionSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+							ProviderConfigReference: &xpv2.ProviderConfigReference{Kind: "Invalid"},
 						},
 					},
 				},
@@ -130,7 +129,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.ExtensionSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -152,7 +151,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Extension{
 					Spec: v1alpha1.ExtensionSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ClusterProviderConfigKind,
 								Name: "example",
 							},
@@ -180,7 +179,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.ExtensionSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -197,7 +196,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -213,7 +212,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.ExtensionSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},

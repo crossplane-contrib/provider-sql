@@ -27,16 +27,17 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/password"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -51,13 +52,14 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 
-	errSelectRole              = "cannot select role"
-	errCreateRole              = "cannot create role"
-	errDropRole                = "cannot drop role"
-	errUpdateRole              = "cannot update role"
-	errGetPasswordSecretFailed = "cannot get password secret"
-	errComparePrivileges       = "cannot compare desired and observed privileges"
-	errSetRoleConfigs          = "cannot set role configuration parameters"
+	errSelectRole                = "cannot select role"
+	errCreateRole                = "cannot create role"
+	errDropRole                  = "cannot drop role"
+	errUpdateRole                = "cannot update role"
+	errGetPasswordSecretFailed   = "cannot get password secret"
+	errGetConnectionSecretFailed = "cannot get connection secret"
+	errComparePrivileges         = "cannot compare desired and observed privileges"
+	errSetRoleConfigs            = "cannot set role configuration parameters"
 )
 
 // Setup adds a controller that reconciles Role managed resources.
@@ -242,7 +244,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Role) (managed.Exte
 		return managed.ExternalObservation{}, err
 	}
 
-	mg.SetConditions(xpv1.Available())
+	mg.SetConditions(xpv2.Available())
 
 	// PrivilegesAsClauses is used as role status output
 	mg.Status.AtProvider.PrivilegesAsClauses = privilegesToClauses(observed.Privileges)
@@ -255,7 +257,7 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Role) (managed.Exte
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalCreation, error) {
-	mg.SetConditions(xpv1.Creating())
+	mg.SetConditions(xpv2.Creating())
 
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
@@ -319,11 +321,19 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 	crn := pq.QuoteIdentifier(meta.GetExternalName(mg))
 
 	if pwchanged {
+		if pw == "" {
+			pw, err = password.Generate()
+			if err != nil {
+				return managed.ExternalUpdate{}, err
+			}
+		}
 		if err := c.db.Exec(ctx, xsql.Query{
 			String: fmt.Sprintf("ALTER ROLE %s PASSWORD %s", crn, pq.QuoteLiteral(pw)),
 		}); err != nil {
 			return managed.ExternalUpdate{}, errors.Wrap(err, errUpdateRole)
 		}
+		now := metav1.Now()
+		mg.Status.AtProvider.LastPasswordChange = &now
 	}
 
 	privs := privilegesToClauses(mg.Spec.ForProvider.Privileges)
@@ -393,7 +403,7 @@ func (c *external) Update(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Role) (managed.ExternalDelete, error) {
-	mg.SetConditions(xpv1.Deleting())
+	mg.SetConditions(xpv2.Deleting())
 	err := c.db.Exec(ctx, xsql.Query{
 		String: "DROP ROLE IF EXISTS " + pq.QuoteIdentifier(meta.GetExternalName(mg)),
 	})

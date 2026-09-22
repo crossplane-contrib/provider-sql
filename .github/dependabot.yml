@@ -6,7 +6,7 @@ updates:
   schedule:
     interval: monthly
   commit-message:
-      prefix: "chore: "
+    prefix: "chore: "
   ignore: # Handled via the crossplane-runtime, this should ensure we don't run into compatibility issues
     - dependency-name: "github.com/crossplane/crossplane-tools"
     - dependency-name: "sigs.k8s.io/*"
@@ -20,6 +20,11 @@ updates:
 - package-ecosystem: "github-actions"
   directory: "/"
   schedule:
-      interval: "monthly"
+    interval: "monthly"
   commit-message:
-      prefix: "chore: "
+    prefix: "chore: "
+  open-pull-requests-limit: 10
+  groups:
+    codeql-action:
+      patterns:
+        - "github/codeql-action*"

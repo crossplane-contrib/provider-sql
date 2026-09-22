@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
@@ -33,11 +34,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
@@ -119,7 +120,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+							ProviderConfigReference: &xpv2.ProviderConfigReference{Kind: "Invalid"},
 						},
 					},
 				},
@@ -141,7 +142,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.GrantSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -163,7 +164,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Grant{
 					Spec: v1alpha1.GrantSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ClusterProviderConfigKind,
 								Name: "example",
 							},
@@ -191,7 +192,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.GrantSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -208,7 +209,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -224,7 +225,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.GrantSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -238,7 +239,7 @@ func TestConnect(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
+			e := &connector{kube: tc.fields.kube, log: logging.NewNopLogger(), track: tc.fields.track, newDB: tc.fields.newDB}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -253,7 +254,8 @@ func TestObserve(t *testing.T) {
 	gog := v1alpha1.GrantOptionGrant
 
 	type fields struct {
-		db xsql.DB
+		db            xsql.DB
+		serverVersion int
 	}
 
 	type args struct {
@@ -681,6 +683,140 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessRoleMembershipWithInheritNil": {
+			reason: "WithInherit nil should produce a 3-parameter query (no inherit_option filter)",
+			fields: fields{
+				serverVersion: 160000,
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 3 {
+							return fmt.Errorf("expected 3 query parameters, got %d", len(q.Parameters))
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:     ptr.To("testrole"),
+							MemberOf: ptr.To("parentrole"),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleMembershipWithInheritFalse": {
+			reason: "WithInherit false should produce a 4-parameter query with $4 == false",
+			fields: fields{
+				serverVersion: 160000,
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 4 {
+							return fmt.Errorf("expected 4 query parameters, got %d", len(q.Parameters))
+						}
+						inheritParam, ok := q.Parameters[3].(bool)
+						if !ok || inheritParam != false {
+							return fmt.Errorf("expected $4 to be false, got %v", q.Parameters[3])
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"SuccessRoleMembershipWithInheritTrue": {
+			reason: "WithInherit true should produce a 4-parameter query with $4 == true",
+			fields: fields{
+				serverVersion: 160000,
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if len(q.Parameters) != 4 {
+							return fmt.Errorf("expected 4 query parameters, got %d", len(q.Parameters))
+						}
+						inheritParam, ok := q.Parameters[3].(bool)
+						if !ok || inheritParam != true {
+							return fmt.Errorf("expected $4 to be true, got %v", q.Parameters[3])
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(true),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"ErrRoleMembershipWithInheritOnPG15": {
+			reason: "WithInherit on a server older than PostgreSQL 16 should return an error before any query is run",
+			fields: fields{
+				serverVersion: 150000,
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						return fmt.Errorf("Scan should not be called when server version is below 16")
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Errorf(errInheritRequiresPG16, 150000),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -689,7 +825,7 @@ func TestObserve(t *testing.T) {
 			if db == nil {
 				db = mockDB{}
 			}
-			e := external{db: db}
+			e := external{db: db, serverVersion: tc.fields.serverVersion}
 			got, err := e.Observe(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Observe(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -706,7 +842,8 @@ func TestCreate(t *testing.T) {
 	goa := v1alpha1.GrantOptionAdmin
 
 	type fields struct {
-		db xsql.DB
+		db            xsql.DB
+		serverVersion int
 	}
 
 	type args struct {
@@ -975,6 +1112,127 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"RoleMembershipWithInheritNil": {
+			reason: "WithInherit nil should produce a GRANT with no WITH clause",
+			fields: fields{
+				serverVersion: 160000,
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if strings.Contains(grantSQL, "INHERIT") {
+							return fmt.Errorf("expected no INHERIT clause, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:     ptr.To("testrole"),
+							MemberOf: ptr.To("parentrole"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleMembershipWithInheritFalse": {
+			reason: "WithInherit false should produce a GRANT with WITH INHERIT FALSE",
+			fields: fields{
+				serverVersion: 160000,
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if !strings.Contains(grantSQL, "WITH INHERIT FALSE") {
+							return fmt.Errorf("expected WITH INHERIT FALSE in grant SQL, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"RoleMembershipWithInheritFalseAndAdminOption": {
+			reason: "WithInherit false and WithOption ADMIN should produce WITH ADMIN OPTION, INHERIT FALSE",
+			fields: fields{
+				serverVersion: 160000,
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if len(ql) != 2 {
+							return fmt.Errorf("expected 2 queries, got %d", len(ql))
+						}
+						grantSQL := ql[1].String
+						if !strings.Contains(grantSQL, "WITH ADMIN OPTION, INHERIT FALSE") {
+							return fmt.Errorf("expected WITH ADMIN OPTION, INHERIT FALSE in grant SQL, got: %s", grantSQL)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithOption:  &goa,
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"ErrRoleMembershipWithInheritOnPG15": {
+			reason: "WithInherit on a server older than PostgreSQL 16 should return an error before any query is run",
+			fields: fields{
+				serverVersion: 150000,
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						return fmt.Errorf("ExecTx should not be called when server version is below 16")
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Role:        ptr.To("testrole"),
+							MemberOf:    ptr.To("parentrole"),
+							WithInherit: ptr.To(false),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.Errorf(errInheritRequiresPG16, 150000), errCreateGrant),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -983,7 +1241,7 @@ func TestCreate(t *testing.T) {
 			if db == nil {
 				db = mockDB{}
 			}
-			e := external{db: db}
+			e := external{db: db, serverVersion: tc.fields.serverVersion}
 			got, err := e.Create(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -1291,6 +1549,211 @@ func TestDelete(t *testing.T) {
 			_, err := e.Delete(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestGrantSQL(t *testing.T) {
+	cases := map[string]struct {
+		reason                string
+		gp                    v1alpha1.GrantParameters
+		wantSelectContains    []string
+		wantSelectNotContains []string
+		wantRevoke            string
+		wantGrant             string
+		wantDelete            string
+	}{
+		"RoutineSelectQueryDoesNotCrossJoinArgsWithACL": {
+			// Joining unnest(p.proargtypes) into the outer query crosses one row
+			// per ARGUMENT with aclexplode()'s one row per PRIVILEGE, so
+			// array_agg(acl.privilege_type) collects one entry per argument.
+			// EXECUTE is the only privilege a routine holds, so the HAVING
+			// equality against ARRAY['EXECUTE'] holds only at a single argument.
+			// Verified on PostgreSQL 16: 0- and 1-argument routines are observed,
+			// 2- and 9-argument routines never are. Observe then reports
+			// ResourceExists=false forever while the GRANT itself succeeds.
+			//
+			// This asserts the shape of the query, not its result: only a real
+			// server can execute it. See the multi-argument routine Grant in
+			// examples/namespaced/postgresql/grant.yaml, which fails to become
+			// Ready in e2e if the cross join comes back.
+			reason: "unnest(p.proargtypes) must be a correlated subquery, not joined into the ACL aggregation",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text", "int4"}}},
+			},
+			wantSelectContains: []string{
+				"FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)",
+				// Without the argument rows, proname/proargtypes group only via
+				// pg_proc's primary-key functional dependency. Spell them out.
+				"GROUP BY n.nspname, s.rolname, acl.is_grantable, p.oid, p.proname, p.proargtypes",
+			},
+			wantSelectNotContains: []string{"LEFT JOIN unnest(p.proargtypes)"},
+		},
+		"TableGrantObservesAllGrantableRelkinds": {
+			reason: "GRANT ... ON TABLE accepts views, partitioned tables, matviews and foreign tables, so Observe must read those relkinds back or the Grant Creates successfully and never converges",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"myview"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"ColumnGrantObservesAllGrantableRelkinds": {
+			reason: "Column grants on views fail the same way as table grants when Observe filters to relkind 'r'",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"myview"},
+				Columns:    []string{"mycol"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+			},
+			wantSelectContains:    []string{"c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+			wantSelectNotContains: []string{"c.relkind = 'r'"},
+		},
+		"SequenceGrantStillFiltersToSequenceRelkind": {
+			reason: "The sequence query's relkind = 'S' filter is correct and must not be widened along with the table and column queries",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"myseq"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantSelectContains: []string{"c.relkind = 'S'"},
+		},
+		"RoutineArgumentTypeNamesAreNotQuoted": {
+			reason: "Routine argument type names must NOT be quoted: quoting bypasses PostgreSQL's grammar-level alias resolution, so the parser accepts \"int4\" but never \"integer\" -- while Observe compares against format_type(), which emits \"integer\". Quoted, no spelling satisfies both sides. Injection is bounded by the CRD's identifier-only pattern on args.",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"integer"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(integer) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
+		},
+		"RoutineSchemaAndNameAreStillQuoted": {
+			reason: "Unquoting type names must not unquote the schema or routine name, which are user-supplied identifiers",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("my-schema"),
+				Routines:   []v1alpha1.Routine{{Name: "my-func", Arguments: []string{"text"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "my-schema"."my-func"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
+		},
+		"RoutineArgumentsUppercaseTypeNamesAreLowercased": {
+			reason: "Uppercase type names like TEXT are lowercased to match the canonical spelling pg_catalog.format_type() returns, which is what Observe compares against",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
+		},
+		"RoutineArgumentsAllowSchemaQualifiedCompositeTypes": {
+			reason: "Composite types like AWS RDS's aws_commons._s3_uri_1 are schema-qualified; the CRD pattern must accept exactly one dot-separated identifier pair, and the qualified name is spliced in unquoted like any other type name",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("aws_s3"),
+				Routines:   []v1alpha1.Routine{{Name: "table_import_from_s3", Arguments: []string{"text", "text", "text", "aws_commons._s3_uri_1", "aws_commons._aws_credentials_1"}}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+			wantGrant:  `GRANT EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) TO "myrole" `,
+			wantDelete: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if len(tc.wantSelectContains) > 0 || len(tc.wantSelectNotContains) > 0 {
+				var q xsql.Query
+				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+					t.Fatalf("selectGrantQuery: %v", err)
+				}
+				for _, want := range tc.wantSelectContains {
+					if !strings.Contains(q.String, want) {
+						t.Errorf("%s\nwant query to contain %q\ngot: %s", tc.reason, want, q.String)
+					}
+				}
+				for _, notWant := range tc.wantSelectNotContains {
+					if strings.Contains(q.String, notWant) {
+						t.Errorf("%s\nwant query NOT to contain %q\ngot: %s", tc.reason, notWant, q.String)
+					}
+				}
+			}
+
+			if tc.wantRevoke != "" || tc.wantGrant != "" {
+				var ql []xsql.Query
+				if err := createGrantQueriesWithVersion(tc.gp, &ql, 0); err != nil {
+					t.Fatalf("createGrantQueries: %v", err)
+				}
+				if len(ql) < 2 {
+					t.Fatalf("expected at least 2 queries, got %d", len(ql))
+				}
+				if tc.wantRevoke != "" {
+					if diff := cmp.Diff(tc.wantRevoke, ql[0].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries REVOKE (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+				if tc.wantGrant != "" {
+					if diff := cmp.Diff(tc.wantGrant, ql[1].String); diff != "" {
+						t.Errorf("%s\ncreateGrantQueries GRANT (-want +got):\n%s", tc.reason, diff)
+					}
+				}
+			}
+
+			if tc.wantDelete != "" {
+				var q xsql.Query
+				if err := deleteGrantQuery(tc.gp, &q); err != nil {
+					t.Fatalf("deleteGrantQuery: %v", err)
+				}
+				if diff := cmp.Diff(tc.wantDelete, q.String); diff != "" {
+					t.Errorf("%s\ndeleteGrantQuery (-want +got):\n%s", tc.reason, diff)
+				}
+			}
+		})
+	}
+}
+
+// TestRoutineSignature pins the signature format the Observe query compares
+// against. pg_catalog.format_type() emits comma-separated canonical type names
+// with no spaces, which is what routineSignature must produce for
+// `sub.signature = ANY($6)` to match.
+func TestRoutineSignature(t *testing.T) {
+	cases := map[string]struct {
+		r    v1alpha1.Routine
+		want string
+	}{
+		"NoArguments":       {v1alpha1.Routine{Name: "f"}, "f()"},
+		"OneArgument":       {v1alpha1.Routine{Name: "f", Arguments: []string{"text"}}, "f(text)"},
+		"MultipleArguments": {v1alpha1.Routine{Name: "f", Arguments: []string{"text", "int4"}}, "f(text,int4)"},
+		"UppercaseLowered":  {v1alpha1.Routine{Name: "f", Arguments: []string{"TEXT"}}, "f(text)"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if diff := cmp.Diff(tc.want, routineSignature(tc.r)); diff != "" {
+				t.Errorf("routineSignature() (-want +got):\n%s", diff)
 			}
 		})
 	}
