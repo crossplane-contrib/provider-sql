@@ -937,7 +937,7 @@ func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		// No signature to compare, so the argument formatting subquery goes
 		// too. pg_proc is counted unfiltered because ON ALL ROUTINES IN SCHEMA
 		// covers functions, aggregates, window functions and procedures alike.
-		q.String = "SELECT COUNT(*) = (" +
+		q.String = "SELECT COUNT(*) > 0 AND COUNT(*) = (" +
 			"SELECT COUNT(*) FROM pg_proc ap " +
 			"INNER JOIN pg_namespace an ON ap.pronamespace = an.oid " +
 			"WHERE an.nspname=$1" +
@@ -1065,7 +1065,8 @@ func relationGrantQuery(relkind string, gp v1alpha1.GrantParameters, objects, pr
 		"INNER JOIN pg_namespace an ON ac.relnamespace = an.oid " +
 		"WHERE ac.relkind " + relkind + " AND an.nspname=$1)"
 	filter := ""
-	if !v1alpha1.IsWildcard(objects) {
+	wildcard := v1alpha1.IsWildcard(objects)
+	if !wildcard {
 		expected = "cardinality($5::text[])"
 		filter = "AND c.relname = ANY($5) "
 		params = append(params, pq.Array(objects))
@@ -1073,7 +1074,13 @@ func relationGrantQuery(relkind string, gp v1alpha1.GrantParameters, objects, pr
 
 	// Join grantee. Filter by schema, grantee and, unless the wildcard is in
 	// play, object name.
-	q.String = "SELECT COUNT(*) = " + expected + " AS ct " +
+	// The extra "> 0" guard prevents the vacuous truth 0 = 0 when the schema
+	// has no objects of this kind (e.g. all tables were dropped).
+	cmp := "COUNT(*) = " + expected
+	if wildcard {
+		cmp = "COUNT(*) > 0 AND " + cmp
+	}
+	q.String = "SELECT " + cmp + " AS ct " +
 		"FROM (SELECT 1 FROM pg_class c " +
 		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
 		"aclexplode(c.relacl) as acl " +

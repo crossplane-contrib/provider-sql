@@ -1780,7 +1780,7 @@ func TestGrantSQL(t *testing.T) {
 			wantDelete: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
 			// Counting the schema, not the list, is what re-runs Create when a
 			// table appears later.
-			wantSelectContains: []string{"SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
+			wantSelectContains: []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
 			// Filtering by name would compare against the literal table "*".
 			wantSelectNotContains: []string{"c.relname = ANY("},
 		},
@@ -1796,7 +1796,7 @@ func TestGrantSQL(t *testing.T) {
 			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
 			wantGrant:             `GRANT SELECT ON ALL SEQUENCES IN SCHEMA "myschema" TO "myrole" `,
 			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
-			wantSelectContains:    []string{"SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
+			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
 			wantSelectNotContains: []string{"c.relname = ANY("},
 		},
 		"RoutineWildcardTargetsEveryRoutineInSchema": {
@@ -1812,7 +1812,7 @@ func TestGrantSQL(t *testing.T) {
 			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
 			wantGrant:             `GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "myschema" TO "myrole" `,
 			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
-			wantSelectContains:    []string{"SELECT COUNT(*) FROM pg_proc ap"},
+			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_proc ap"},
 			wantSelectNotContains: []string{"sub.signature = ANY("},
 		},
 		"RoutineWildcardCountsRoutinesWithNoACL": {
