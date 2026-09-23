@@ -20,7 +20,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1554,6 +1556,12 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+const (
+	privSelect  = "SELECT"
+	privExecute = "EXECUTE"
+	objMyTable  = "mytable"
+)
+
 func TestGrantSQL(t *testing.T) {
 	cases := map[string]struct {
 		reason                string
@@ -1583,7 +1591,7 @@ func TestGrantSQL(t *testing.T) {
 				Database:   ptr.To("mydb"),
 				Schema:     ptr.To("myschema"),
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text", "int4"}}},
 			},
 			wantSelectContains: []string{
@@ -1637,7 +1645,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("myschema"),
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"integer"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(integer) TO "myrole" `,
@@ -1650,7 +1658,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("my-schema"),
 				Routines:   []v1alpha1.Routine{{Name: "my-func", Arguments: []string{"text"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "my-schema"."my-func"(text) TO "myrole" `,
@@ -1663,7 +1671,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("myschema"),
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
@@ -1676,11 +1684,81 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("aws_s3"),
 				Routines:   []v1alpha1.Routine{{Name: "table_import_from_s3", Arguments: []string{"text", "text", "text", "aws_commons._s3_uri_1", "aws_commons._aws_credentials_1"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) TO "myrole" `,
 			wantDelete: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+		},
+		"TableWildcardTargetsEveryTableInSchema": {
+			// REVOKE ALL, not REVOKE SELECT: revoking only what is about to be
+			// granted leaves every other privilege in place, so Observe's exact
+			// set comparison never matches and Create re-runs forever.
+			reason: `tables: ["*"] must emit ON ALL TABLES IN SCHEMA, not a quoted "schema"."*" identifier`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:  `GRANT SELECT ON ALL TABLES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
+			// Counting the schema, not the list, is what re-runs Create when a
+			// table appears later.
+			wantSelectContains: []string{"SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
+			// Filtering by name would compare against the literal table "*".
+			wantSelectNotContains: []string{"c.relname = ANY("},
+		},
+		"SequenceWildcardTargetsEverySequenceInSchema": {
+			reason: `sequences: ["*"] must emit ON ALL SEQUENCES IN SCHEMA`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:             `GRANT SELECT ON ALL SEQUENCES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
+			wantSelectContains:    []string{"SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
+			wantSelectNotContains: []string{"c.relname = ANY("},
+		},
+		"RoutineWildcardTargetsEveryRoutineInSchema": {
+			// No signature to compare, rather than formatting "*"().
+			reason: `routines: [{name: "*"}] must emit ON ALL ROUTINES IN SCHEMA`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "*"}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
+			},
+			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:             `GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
+			wantSelectContains:    []string{"SELECT COUNT(*) FROM pg_proc ap"},
+			wantSelectNotContains: []string{"sub.signature = ANY("},
+		},
+		"NamedTablesAreUnaffectedByWildcardSupport": {
+			// The named form keeps revoking only the listed privileges: it
+			// coexists with column grants on the same table.
+			reason: "The wildcard branch must not disturb the explicit object-list form, which stays the default path",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{objMyTable},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke: `REVOKE SELECT ON TABLE "myschema"."mytable" FROM "myrole"`,
+			wantGrant:  `GRANT SELECT ON TABLE "myschema"."mytable" TO "myrole" `,
+			wantDelete: `REVOKE SELECT ON TABLE "myschema"."mytable" FROM "myrole"`,
+			// The placeholder index is incidental.
+			wantSelectContains:    []string{"c.relname = ANY(", "cardinality("},
+			wantSelectNotContains: []string{"ON ALL TABLES IN SCHEMA", "FROM pg_class ac"},
 		},
 	}
 
@@ -1731,6 +1809,99 @@ func TestGrantSQL(t *testing.T) {
 				if diff := cmp.Diff(tc.wantDelete, q.String); diff != "" {
 					t.Errorf("%s\ndeleteGrantQuery (-want +got):\n%s", tc.reason, diff)
 				}
+			}
+		})
+	}
+}
+
+// TestRelationGrantQueryParameters guards the seam that sharing one query
+// string between the named and wildcard forms introduces: placeholders and the
+// parameter slice are positional and independent, so a mismatch survives every
+// string assertion and only fails against a real server.
+func TestRelationGrantQueryParameters(t *testing.T) {
+	placeholder := regexp.MustCompile(`\$(\d+)`)
+
+	cases := map[string]struct {
+		reason     string
+		gp         v1alpha1.GrantParameters
+		wantParams int
+	}{
+		"NamedTablesBindTheObjectList": {
+			reason: "The named form binds schema, role, grantable, privileges and the object list",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{objMyTable},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 5,
+		},
+		"WildcardTablesBindNoObjectList": {
+			reason: "The wildcard form has no object list to bind, so it must not leave a dangling placeholder",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 4,
+		},
+		"WildcardSequencesBindNoObjectList": {
+			reason: "Sequences share the same builder, so they share the same contract",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 4,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var q xsql.Query
+			if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+				t.Fatalf("selectGrantQuery: %v", err)
+			}
+
+			if len(q.Parameters) != tc.wantParams {
+				t.Fatalf("%s\nwant %d parameters, got %d", tc.reason, tc.wantParams, len(q.Parameters))
+			}
+
+			// PostgreSQL rejects both gaps and overruns.
+			seen := map[int]bool{}
+			for _, m := range placeholder.FindAllStringSubmatch(q.String, -1) {
+				n, err := strconv.Atoi(m[1])
+				if err != nil {
+					t.Fatalf("unparsable placeholder %q", m[0])
+				}
+				if n < 1 || n > len(q.Parameters) {
+					t.Errorf("%s\nplaceholder $%d has no parameter (%d bound)\nquery: %s",
+						tc.reason, n, len(q.Parameters), q.String)
+					continue
+				}
+				seen[n] = true
+			}
+			for i := 1; i <= len(q.Parameters); i++ {
+				if !seen[i] {
+					t.Errorf("%s\nparameter $%d is bound but never referenced\nquery: %s",
+						tc.reason, i, q.String)
+				}
+			}
+
+			// Positional contract: $1 schema, $2 role, $3 grantable.
+			if got := *q.Parameters[0].(*string); got != "myschema" {
+				t.Errorf("%s\n$1 should be the schema, got %q", tc.reason, got)
+			}
+			if got := *q.Parameters[1].(*string); got != "myrole" {
+				t.Errorf("%s\n$2 should be the role, got %q", tc.reason, got)
+			}
+			if got, ok := q.Parameters[2].(bool); !ok || got {
+				t.Errorf("%s\n$3 should be the grantable flag (false here), got %#v", tc.reason, q.Parameters[2])
 			}
 		})
 	}

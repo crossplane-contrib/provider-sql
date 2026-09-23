@@ -337,3 +337,77 @@ spec:
   providerConfigRef:
     kind: ProviderConfig
     name: default
+---
+# "*" emits GRANT ... ON ALL TABLES IN SCHEMA, which is what reaches tables that
+# already exist -- DefaultPrivileges only binds objects created after it is set.
+# Pair the two: the wildcard converges on the next reconcile, default privileges
+# are immediate.
+#
+# A wildcard grant is authoritative for its (role, schema, object type): it
+# revokes ALL PRIVILEGES before granting, so any privilege the role holds there
+# that this resource did not ask for is removed. Do not point a second Grant at
+# the same role and schema -- the two will fight.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-all-tables
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - SELECT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    tables:
+      - "*"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-all-sequences
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - SELECT
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    sequences:
+      - "*"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# The wildcard routine takes no args, and covers functions, aggregates, window
+# functions and procedures alike.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-role-1-on-all-routines
+  namespace: default
+spec:
+  forProvider:
+    privileges:
+      - EXECUTE
+    roleRef:
+      name: no-grants-role
+    databaseRef:
+      name: db1
+    schemaRef:
+      name: public
+    routines:
+      - name: "*"
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
