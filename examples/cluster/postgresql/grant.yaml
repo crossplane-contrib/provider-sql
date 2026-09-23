@@ -275,6 +275,7 @@ spec:
       name: db1
     foreignServers:
       - test_foreign_server
+---
 # "*" emits GRANT ... ON ALL TABLES IN SCHEMA, which is what reaches tables that
 # already exist -- DefaultPrivileges only binds objects created after it is set.
 # Pair the two: the wildcard converges on the next reconcile, default privileges
