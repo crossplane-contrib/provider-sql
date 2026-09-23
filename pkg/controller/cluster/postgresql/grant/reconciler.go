@@ -171,7 +171,8 @@ func connectDatabase(gp v1alpha1.GrantParameters, defaultDatabase string) string
 		return defaultDatabase
 	case v1alpha1.RoleSchema, v1alpha1.RoleTable, v1alpha1.RoleColumn,
 		v1alpha1.RoleSequence, v1alpha1.RoleRoutine,
-		v1alpha1.RoleForeignDataWrapper, v1alpha1.RoleForeignServer:
+		v1alpha1.RoleForeignDataWrapper, v1alpha1.RoleForeignServer,
+		v1alpha1.RoleAllInSchema:
 		if db := reference.FromPtrValue(gp.Database); db != "" {
 			return db
 		}
@@ -340,6 +341,8 @@ func createGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.Query
 		return createSequenceGrantQueries(gp, ql, ro)
 	case v1alpha1.RoleTable:
 		return createTableGrantQueriesWithVersion(gp, ql, ro, serverVersion)
+	case v1alpha1.RoleAllInSchema:
+		return createAllInSchemaGrantQueries(gp, ql, ro)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
 }
@@ -491,6 +494,20 @@ func createTableGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.
 	return nil
 }
 
+func createAllInSchemaGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro string) error {
+	if gp.Database == nil || gp.Schema == nil || gp.Role == nil || gp.AllObjectsInSchema == nil || len(gp.Privileges) < 1 {
+		return errors.Errorf(errInvalidParams, v1alpha1.RoleAllInSchema)
+	}
+	sh := pq.QuoteIdentifier(*gp.Schema)
+	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
+	objType := strings.ToUpper(*gp.AllObjectsInSchema) + "S"
+	*ql = append(*ql,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON ALL %s IN SCHEMA %s FROM %s", sp, objType, sh, ro)},
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON ALL %s IN SCHEMA %s TO %s %s", sp, objType, sh, ro, withOption(gp.WithOption))},
+	)
+	return nil
+}
+
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalDelete, error) {
 	if mg == nil {
 		return managed.ExternalDelete{}, errors.New(errNotGrant)
@@ -578,6 +595,14 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
 			strings.Join(gp.Privileges.ToStringSlice(), ","),
 			strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ","),
+			ro,
+		)
+		return nil
+	case v1alpha1.RoleAllInSchema:
+		q.String = fmt.Sprintf("REVOKE %s ON ALL %s IN SCHEMA %s FROM %s",
+			strings.Join(gp.Privileges.ToStringSlice(), ","),
+			strings.ToUpper(*gp.AllObjectsInSchema)+"S",
+			pq.QuoteIdentifier(*gp.Schema),
 			ro,
 		)
 		return nil
@@ -899,8 +924,45 @@ func selectGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, ser
 		return selectSequenceGrantQuery(gp, q)
 	case v1alpha1.RoleTable:
 		return selectTableGrantQueryWithVersion(gp, q, serverVersion)
+	case v1alpha1.RoleAllInSchema:
+		return selectAllInSchemaGrantQuery(gp, q)
 	}
 	return errors.Errorf(errUnsupportedGrant, gt)
+}
+
+func selectAllInSchemaGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
+	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+	sp := gp.Privileges.ToStringSlice()
+
+	aclCheck := "AND NOT EXISTS (" +
+		"SELECT 1 FROM aclexplode(%s) acl " +
+		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+		"WHERE s.rolname = $2 AND acl.is_grantable = $3 " +
+		"HAVING array_agg(acl.privilege_type ORDER BY acl.privilege_type) @> " +
+		"(SELECT array(SELECT unnest($4::text[]) ORDER BY 1))" +
+		")"
+
+	if *gp.AllObjectsInSchema == "routine" {
+		q.String = "SELECT NOT EXISTS (" +
+			"SELECT 1 FROM pg_proc p " +
+			"INNER JOIN pg_namespace n ON p.pronamespace = n.oid " +
+			"WHERE n.nspname = $1 " +
+			fmt.Sprintf(aclCheck, "p.proacl") +
+			") AS ct"
+	} else {
+		relkind := "'S'"
+		if *gp.AllObjectsInSchema == "table" {
+			relkind = "'r', 'p', 'v', 'm', 'f'"
+		}
+		q.String = fmt.Sprintf("SELECT NOT EXISTS ("+
+			"SELECT 1 FROM pg_class c "+
+			"INNER JOIN pg_namespace n ON c.relnamespace = n.oid "+
+			"WHERE c.relkind IN (%s) AND n.nspname = $1 "+
+			"%s"+
+			") AS ct", relkind, fmt.Sprintf(aclCheck, "c.relacl"))
+	}
+	q.Parameters = []interface{}{gp.Schema, gp.Role, yesOrNo(gro), pq.Array(sp)}
+	return nil
 }
 
 func selectMemberGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {

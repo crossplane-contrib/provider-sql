@@ -83,6 +83,16 @@ spec:
                 description: GrantParameters define the desired state of a PostgreSQL
                   grant instance.
                 properties:
+                  allObjectsInSchema:
+                    description: |-
+                      AllObjectsInSchema grants privileges on ALL existing objects of the specified type
+                      in the schema. Valid values: "table", "sequence", "routine".
+                      Cannot be combined with tables, sequences, routines, or columns fields.
+                    enum:
+                    - table
+                    - sequence
+                    - routine
+                    type: string
                   columns:
                     description: The columns upon which to grant the privileges.
                     items:
@@ -487,6 +497,10 @@ spec:
                 - message: withInherit may only be set on memberOf grants
                   rule: '!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef)
                     || has(self.memberOfSelector)'
+                - message: allObjectsInSchema cannot be combined with tables, sequences,
+                    routines, or columns
+                  rule: '!has(self.allObjectsInSchema) || (!has(self.tables) && !has(self.sequences)
+                    && !has(self.routines) && !has(self.columns))'
               managementPolicies:
                 default:
                 - '*'

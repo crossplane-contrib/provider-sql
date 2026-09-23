@@ -63,6 +63,7 @@ const (
 	RoleColumn             GrantType = "ROLE_COLUMN"
 	RoleForeignDataWrapper GrantType = "ROLE_FOREIGN_DATA_WRAPPER"
 	RoleForeignServer      GrantType = "ROLE_FOREIGN_SERVER"
+	RoleAllInSchema        GrantType = "ROLE_ALL_IN_SCHEMA"
 )
 
 type marker struct{}
@@ -108,6 +109,7 @@ func (gp *GrantParameters) filledInFields() *stringSet {
 		"Routines":            len(gp.Routines) > 0,
 		"ForeignServers":      len(gp.ForeignServers) > 0,
 		"ForeignDataWrappers": len(gp.ForeignDataWrappers) > 0,
+		"AllObjectsInSchema":  gp.AllObjectsInSchema != nil,
 	}
 	set := newStringSet()
 
@@ -133,8 +135,16 @@ var grantTypeFields = map[GrantType][]string{
 
 // IdentifyGrantType return the deduced GrantType from the filled in fields.
 func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
-	ff := gp.filledInFields()
 	pc := len(gp.Privileges)
+
+	if gp.AllObjectsInSchema != nil {
+		if pc < 1 {
+			return "", errors.New(errNoPrivileges)
+		}
+		return RoleAllInSchema, nil
+	}
+
+	ff := gp.filledInFields()
 
 	var gt *GrantType
 
@@ -304,6 +314,7 @@ type Routine struct {
 
 // GrantParameters define the desired state of a PostgreSQL grant instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.withInherit) || has(self.memberOf) || has(self.memberOfRef) || has(self.memberOfSelector)",message="withInherit may only be set on memberOf grants"
+// +kubebuilder:validation:XValidation:rule="!has(self.allObjectsInSchema) || (!has(self.tables) && !has(self.sequences) && !has(self.routines) && !has(self.columns))",message="allObjectsInSchema cannot be combined with tables, sequences, routines, or columns"
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://www.postgresql.org/docs/current/sql-grant.html for available privileges.
@@ -408,6 +419,13 @@ type GrantParameters struct {
 	// +optional
 	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	ForeignServers []string `json:"foreignServers,omitempty"`
+
+	// AllObjectsInSchema grants privileges on ALL existing objects of the specified type
+	// in the schema. Valid values: "table", "sequence", "routine".
+	// Cannot be combined with tables, sequences, routines, or columns fields.
+	// +kubebuilder:validation:Enum=table;sequence;routine
+	// +optional
+	AllObjectsInSchema *string `json:"allObjectsInSchema,omitempty"`
 
 	// WithInherit controls whether the grantee automatically inherits the privileges
 	// of the granted role. When set to false, emits WITH INHERIT FALSE (PostgreSQL 16+),

@@ -760,6 +760,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.AllObjectsInSchema != nil {
+		in, out := &in.AllObjectsInSchema, &out.AllObjectsInSchema
+		*out = new(string)
+		**out = **in
+	}
 	if in.WithInherit != nil {
 		in, out := &in.WithInherit, &out.WithInherit
 		*out = new(bool)

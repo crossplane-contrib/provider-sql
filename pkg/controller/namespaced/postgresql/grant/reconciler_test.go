@@ -817,6 +817,65 @@ func TestObserve(t *testing.T) {
 				err: errors.Errorf(errInheritRequiresPG16, 150000),
 			},
 		},
+		"SuccessAllInSchema": {
+			reason: "We should return ResourceExists when all objects in schema have the expected grants",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:           ptr.To("testdb"),
+							Role:               ptr.To("testrole"),
+							Schema:             ptr.To("public"),
+							AllObjectsInSchema: ptr.To("table"),
+							Privileges:         v1alpha1.GrantPrivileges{"SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+			},
+		},
+		"NoGrantAllInSchema": {
+			reason: "We should return ResourceExists: false when not all objects have expected grants",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = false
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:           ptr.To("testdb"),
+							Role:               ptr.To("testrole"),
+							Schema:             ptr.To("public"),
+							AllObjectsInSchema: ptr.To("table"),
+							Privileges:         v1alpha1.GrantPrivileges{"SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{ResourceExists: false},
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -1104,6 +1163,30 @@ func TestCreate(t *testing.T) {
 							Role:           ptr.To("test-example"),
 							ForeignServers: []string{"test-example"},
 							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"AllInSchemaSuccess": {
+			reason: "No error should be returned when we successfully create an all-in-schema grant",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:           ptr.To("test-example"),
+							Role:               ptr.To("test-example"),
+							Schema:             ptr.To("test-example"),
+							AllObjectsInSchema: ptr.To("table"),
+							Privileges:         v1alpha1.GrantPrivileges{"SELECT"},
 						},
 					},
 				},
@@ -1537,6 +1620,28 @@ func TestDelete(t *testing.T) {
 			},
 			want: nil,
 		},
+		"AllInSchemaDeleteSuccess": {
+			reason: "No error should be returned if the all-in-schema grant was revoked",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:           ptr.To("test-example"),
+							Role:               ptr.To("test-example"),
+							Schema:             ptr.To("test-example"),
+							AllObjectsInSchema: ptr.To("table"),
+							Privileges:         v1alpha1.GrantPrivileges{"SELECT"},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
 	}
 
 	for name, tc := range cases {
@@ -1681,6 +1786,48 @@ func TestGrantSQL(t *testing.T) {
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) TO "myrole" `,
 			wantDelete: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+		},
+		"AllTablesInSchemaSQL": {
+			reason: "allObjectsInSchema=table must generate GRANT/REVOKE ON ALL TABLES IN SCHEMA",
+			gp: v1alpha1.GrantParameters{
+				Database:           ptr.To("mydb"),
+				Schema:             ptr.To("public"),
+				Role:               ptr.To("myrole"),
+				AllObjectsInSchema: ptr.To("table"),
+				Privileges:         v1alpha1.GrantPrivileges{"SELECT", "INSERT"},
+			},
+			wantRevoke:         `REVOKE SELECT,INSERT ON ALL TABLES IN SCHEMA "public" FROM "myrole"`,
+			wantGrant:          `GRANT SELECT,INSERT ON ALL TABLES IN SCHEMA "public" TO "myrole" `,
+			wantDelete:         `REVOKE SELECT,INSERT ON ALL TABLES IN SCHEMA "public" FROM "myrole"`,
+			wantSelectContains: []string{"NOT EXISTS", "c.relkind IN ('r', 'p', 'v', 'm', 'f')"},
+		},
+		"AllSequencesInSchemaSQL": {
+			reason: "allObjectsInSchema=sequence must generate GRANT/REVOKE ON ALL SEQUENCES IN SCHEMA",
+			gp: v1alpha1.GrantParameters{
+				Database:           ptr.To("mydb"),
+				Schema:             ptr.To("public"),
+				Role:               ptr.To("myrole"),
+				AllObjectsInSchema: ptr.To("sequence"),
+				Privileges:         v1alpha1.GrantPrivileges{"USAGE"},
+			},
+			wantRevoke:         `REVOKE USAGE ON ALL SEQUENCES IN SCHEMA "public" FROM "myrole"`,
+			wantGrant:          `GRANT USAGE ON ALL SEQUENCES IN SCHEMA "public" TO "myrole" `,
+			wantDelete:         `REVOKE USAGE ON ALL SEQUENCES IN SCHEMA "public" FROM "myrole"`,
+			wantSelectContains: []string{"NOT EXISTS", "relkind"},
+		},
+		"AllRoutinesInSchemaSQL": {
+			reason: "allObjectsInSchema=routine must generate GRANT/REVOKE ON ALL ROUTINES IN SCHEMA",
+			gp: v1alpha1.GrantParameters{
+				Database:           ptr.To("mydb"),
+				Schema:             ptr.To("public"),
+				Role:               ptr.To("myrole"),
+				AllObjectsInSchema: ptr.To("routine"),
+				Privileges:         v1alpha1.GrantPrivileges{"EXECUTE"},
+			},
+			wantRevoke:         `REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA "public" FROM "myrole"`,
+			wantGrant:          `GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "public" TO "myrole" `,
+			wantDelete:         `REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA "public" FROM "myrole"`,
+			wantSelectContains: []string{"NOT EXISTS", "pg_proc"},
 		},
 	}
 
