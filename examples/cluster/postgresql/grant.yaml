@@ -293,7 +293,7 @@ spec:
     privileges:
       - SELECT
     roleRef:
-      name: no-grants-role
+      name: all-objects-role
     databaseRef:
       name: db1
     schemaRef:
@@ -310,7 +310,7 @@ spec:
     privileges:
       - SELECT
     roleRef:
-      name: no-grants-role
+      name: all-objects-role
     databaseRef:
       name: db1
     schemaRef:
@@ -329,7 +329,7 @@ spec:
     privileges:
       - EXECUTE
     roleRef:
-      name: no-grants-role
+      name: all-objects-role
     databaseRef:
       name: db1
     schemaRef:
