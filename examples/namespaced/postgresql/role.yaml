@@ -83,3 +83,6 @@ spec:
   forProvider:
     privileges:
       login: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
