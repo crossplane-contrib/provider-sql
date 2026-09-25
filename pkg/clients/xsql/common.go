@@ -9,6 +9,46 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 )
 
+// AuthenticationMode identifies how a SQL client authenticates to the server.
+type AuthenticationMode string
+
+const (
+	// AuthenticationModePassword uses the username and password from the
+	// connection secret.
+	AuthenticationModePassword AuthenticationMode = "Password"
+	// AuthenticationModeAzureWorkloadIdentity obtains a Microsoft Entra token
+	// from the provider pod's federated workload identity.
+	AuthenticationModeAzureWorkloadIdentity AuthenticationMode = "AzureWorkloadIdentity"
+
+	credentialKeyAuthentication  = "provider-sql.io/authentication"
+	credentialKeyAzureTokenScope = "provider-sql.io/azure-token-scope"
+)
+
+// WithAuthentication returns a copy of credentials carrying internal,
+// provider-controlled authentication metadata. These keys are never read from
+// the user's connection secret.
+func WithAuthentication(credentials map[string][]byte, mode AuthenticationMode, azureTokenScope string) map[string][]byte {
+	configured := make(map[string][]byte, len(credentials)+2)
+	for key, value := range credentials {
+		configured[key] = value
+	}
+	configured[credentialKeyAuthentication] = []byte(mode)
+	if azureTokenScope != "" {
+		configured[credentialKeyAzureTokenScope] = []byte(azureTokenScope)
+	}
+	return configured
+}
+
+// AuthenticationFromCredentials returns provider-controlled authentication
+// metadata attached by the ProviderConfig resolver.
+func AuthenticationFromCredentials(credentials map[string][]byte) (AuthenticationMode, string) {
+	mode := AuthenticationMode(credentials[credentialKeyAuthentication])
+	if mode == "" {
+		mode = AuthenticationModePassword
+	}
+	return mode, string(credentials[credentialKeyAzureTokenScope])
+}
+
 // A Query that may be run against a DB.
 type Query struct {
 	String     string

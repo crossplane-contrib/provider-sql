@@ -1,0 +1,47 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-postgresql-connection
+  namespace: default
+stringData:
+  endpoint: example.postgres.database.azure.com
+  port: "5432"
+  # Exact PostgreSQL role name of the provider pod's Entra administrator.
+  username: provider-sql-admin
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: azure-workload-identity
+  namespace: default
+spec:
+  defaultDatabase: postgres
+  sslMode: verify-full
+  credentials:
+    source: AzureWorkloadIdentity
+    connectionSecretRef:
+      name: azure-postgresql-connection
+    azureWorkloadIdentity:
+      # Override this audience for a sovereign cloud when required.
+      tokenScope: https://ossrdbms-aad.database.windows.net/.default
+---
+# The provider connects to the postgres database as an Entra administrator and
+# calls pgaadauth_create_principal_with_oid for this managed identity.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: application-identity
+  namespace: default
+  annotations:
+    crossplane.io/external-name: application-identity
+spec:
+  providerConfigRef:
+    kind: ProviderConfig
+    name: azure-workload-identity
+  forProvider:
+    azureEntra:
+      # Service-principal object ID for the application's managed identity.
+      # Do not use its client/application ID.
+      objectId: 00112233-4455-6677-8899-aabbccddeeff
+      principalType: ServicePrincipal

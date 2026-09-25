@@ -37,6 +37,8 @@ type UserStatus struct {
 // UserParameters define the desired state of a MSSQL user instance.
 // +kubebuilder:validation:XValidation:rule="!(has(self.contained) && self.contained == true && (has(self.loginDatabase) || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector)))",message="contained users cannot specify loginDatabase, loginDatabaseRef, or loginDatabaseSelector"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.contained) || self.contained == oldSelf.contained",message="contained field is immutable after creation"
+// +kubebuilder:validation:XValidation:rule="!(has(self.azureEntra) && (has(self.passwordSecretRef) || has(self.loginDatabase) || has(self.loginDatabaseRef) || has(self.loginDatabaseSelector) || (has(self.contained) && self.contained == true)))",message="Azure Entra users cannot specify passwordSecretRef, loginDatabase, or contained"
+// +kubebuilder:validation:XValidation:rule="has(self.azureEntra) == has(oldSelf.azureEntra)",message="Azure Entra authentication mode is immutable"
 type UserParameters struct {
 	// Database allows you to specify the name of the Database the USER is created for.
 	// +crossplane:generate:reference:type=Database
@@ -63,7 +65,44 @@ type UserParameters struct {
 	// When false (default), a server-level LOGIN will be created first, then a database user mapped to that login.
 	// +optional
 	Contained *bool `json:"contained,omitempty"`
+
+	// AzureEntra creates a contained Azure SQL database principal mapped to a
+	// specific Microsoft Entra object. Object ID based creation avoids Microsoft
+	// Graph lookups and prevents ambiguous display-name resolution.
+	// +optional
+	AzureEntra *AzureEntraPrincipal `json:"azureEntra,omitempty"`
 }
+
+// AzureEntraPrincipal identifies the Microsoft Entra object represented by an
+// Azure SQL database user.
+// +kubebuilder:validation:XValidation:rule="self.principalType == 'ServicePrincipal' ? has(self.clientId) && !has(self.objectId) : has(self.objectId) && !has(self.clientId)",message="ServicePrincipal requires clientId; User and Group require objectId"
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Azure Entra principal mapping is immutable"
+type AzureEntraPrincipal struct {
+	// ObjectID is the Entra object ID for a User or Group.
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	// +optional
+	ObjectID *string `json:"objectId,omitempty"`
+
+	// ClientID is the application/client ID for a ServicePrincipal, including a
+	// managed identity. Azure SQL uses this value as the external user's SID.
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	// +optional
+	ClientID *string `json:"clientId,omitempty"`
+
+	// PrincipalType selects the Azure SQL external principal type. Managed
+	// identities and applications are ServicePrincipal.
+	// +kubebuilder:validation:Enum=User;ServicePrincipal;Group
+	PrincipalType AzureEntraPrincipalType `json:"principalType"`
+}
+
+// AzureEntraPrincipalType identifies an external Azure SQL principal.
+type AzureEntraPrincipalType string
+
+const (
+	AzureEntraPrincipalTypeUser             AzureEntraPrincipalType = "User"
+	AzureEntraPrincipalTypeServicePrincipal AzureEntraPrincipalType = "ServicePrincipal"
+	AzureEntraPrincipalTypeGroup            AzureEntraPrincipalType = "Group"
+)
 
 // A UserObservation represents the observed state of a MSSQL user.
 type UserObservation struct {

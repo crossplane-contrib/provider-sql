@@ -48,6 +48,9 @@ const (
 	errGrant           = "cannot grant"
 	errRevoke          = "cannot revoke"
 	errCannotGetGrants = "cannot get current grants"
+	errAddRoleMember   = "cannot add database role member"
+	errDropRoleMember  = "cannot drop database role member"
+	errCannotGetRole   = "cannot get current database role membership"
 
 	maxConcurrency = 5
 )
@@ -115,6 +118,19 @@ type external struct{ db xsql.DB }
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Grant] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalObservation, error) {
+	if mg.Spec.ForProvider.Role != nil {
+		exists, err := c.hasRoleMembership(ctx, mg)
+		if err != nil {
+			return managed.ExternalObservation{}, err
+		}
+		if !exists {
+			return managed.ExternalObservation{}, nil
+		}
+
+		mg.SetConditions(xpv2.Available())
+		return managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true}, nil
+	}
+
 	permissions, err := c.getPermissions(ctx, mg)
 	if err != nil {
 		return managed.ExternalObservation{}, err
@@ -134,6 +150,14 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Grant) (m
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalCreation, error) {
 	username := *mg.Spec.ForProvider.User
+	if mg.Spec.ForProvider.Role != nil {
+		query := fmt.Sprintf("ALTER ROLE %s ADD MEMBER %s",
+			mssql.QuoteIdentifier(string(*mg.Spec.ForProvider.Role)),
+			mssql.QuoteIdentifier(username),
+		)
+		return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errAddRoleMember)
+	}
+
 	permissions := strings.Join(mg.Spec.ForProvider.Permissions.ToStringSlice(), ", ")
 
 	query := fmt.Sprintf("GRANT %s %s TO %s", permissions, onSchemaQuery(mg), mssql.QuoteIdentifier(username))
@@ -141,6 +165,10 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Grant) (ma
 }
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalUpdate, error) {
+	if mg.Spec.ForProvider.Role != nil {
+		return managed.ExternalUpdate{}, nil
+	}
+
 	observed, err := c.getPermissions(ctx, mg)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
@@ -173,6 +201,13 @@ func (c *external) Disconnect(ctx context.Context) error {
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Grant) (managed.ExternalDelete, error) {
 	username := *mg.Spec.ForProvider.User
+	if mg.Spec.ForProvider.Role != nil {
+		query := fmt.Sprintf("ALTER ROLE %s DROP MEMBER %s",
+			mssql.QuoteIdentifier(string(*mg.Spec.ForProvider.Role)),
+			mssql.QuoteIdentifier(username),
+		)
+		return managed.ExternalDelete{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: query}), errDropRoleMember)
+	}
 
 	query := fmt.Sprintf("REVOKE %s %s FROM %s",
 		strings.Join(mg.Spec.ForProvider.Permissions.ToStringSlice(), ", "),
@@ -204,6 +239,40 @@ const queryPermissionSchema = `SELECT pe.permission_name
 	      pe.class = 3 /* SCHEMA */
 	  AND s.name = %s
 	  AND pr.name = %s`
+
+const queryRoleMembership = `SELECT role_principal.name
+	FROM sys.database_role_members AS membership
+	JOIN sys.database_principals AS role_principal
+	    ON role_principal.principal_id = membership.role_principal_id
+	JOIN sys.database_principals AS member_principal
+	    ON member_principal.principal_id = membership.member_principal_id
+	WHERE role_principal.name = %s
+	  AND member_principal.name = %s`
+
+func (c *external) hasRoleMembership(ctx context.Context, cr *namespacedv1alpha1.Grant) (bool, error) {
+	query := fmt.Sprintf(queryRoleMembership,
+		mssql.QuoteValue(string(*cr.Spec.ForProvider.Role)),
+		mssql.QuoteValue(*cr.Spec.ForProvider.User),
+	)
+	rows, err := c.db.Query(ctx, xsql.Query{String: query})
+	if err != nil {
+		return false, errors.Wrap(err, errCannotGetRole)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return false, errors.Wrap(err, errCannotGetRole)
+		}
+		return false, nil
+	}
+
+	var role string
+	if err := rows.Scan(&role); err != nil {
+		return false, errors.Wrap(err, errCannotGetRole)
+	}
+	return role == string(*cr.Spec.ForProvider.Role), nil
+}
 
 func (c *external) getPermissions(ctx context.Context, cr *namespacedv1alpha1.Grant) ([]string, error) {
 	var query string

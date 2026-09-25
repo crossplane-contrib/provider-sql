@@ -434,28 +434,28 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 }
 
 func upToDate(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameters) bool {
-	if observed.ConnectionLimit != desired.ConnectionLimit {
+	if !cmp.Equal(observed.ConnectionLimit, desired.ConnectionLimit) {
 		return false
 	}
-	if observed.Privileges.SuperUser != desired.Privileges.SuperUser {
+	if !cmp.Equal(observed.Privileges.SuperUser, desired.Privileges.SuperUser) {
 		return false
 	}
-	if observed.Privileges.Inherit != desired.Privileges.Inherit {
+	if !cmp.Equal(observed.Privileges.Inherit, desired.Privileges.Inherit) {
 		return false
 	}
-	if observed.Privileges.CreateDb != desired.Privileges.CreateDb {
+	if !cmp.Equal(observed.Privileges.CreateDb, desired.Privileges.CreateDb) {
 		return false
 	}
-	if observed.Privileges.CreateRole != desired.Privileges.CreateRole {
+	if !cmp.Equal(observed.Privileges.CreateRole, desired.Privileges.CreateRole) {
 		return false
 	}
-	if observed.Privileges.Login != desired.Privileges.Login {
+	if !cmp.Equal(observed.Privileges.Login, desired.Privileges.Login) {
 		return false
 	}
-	if observed.Privileges.Replication != desired.Privileges.Replication {
+	if !cmp.Equal(observed.Privileges.Replication, desired.Privileges.Replication) {
 		return false
 	}
-	if observed.Privileges.BypassRls != desired.Privileges.BypassRls {
+	if !cmp.Equal(observed.Privileges.BypassRls, desired.Privileges.BypassRls) {
 		return false
 	}
 	if !cmp.Equal(observed.ConfigurationParameters, desired.ConfigurationParameters,

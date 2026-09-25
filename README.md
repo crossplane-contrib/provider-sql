@@ -67,6 +67,37 @@ Check the example:
 [cloudsqlinstance]: https://doc.crds.dev/github.com/crossplane/provider-gcp/database.gcp.crossplane.io/CloudSQLInstance/v1beta1@v0.18.0
 [created automatically]: https://crossplane.io/docs/v1.5/concepts/managed-resources.html#connection-details
 
+## Azure workload identity
+
+The namespaced MSSQL and PostgreSQL APIs can authenticate the provider pod with
+Microsoft Entra workload identity. Set `spec.credentials.source` on the
+`ProviderConfig` or `ClusterProviderConfig` to `AzureWorkloadIdentity`. The
+referenced connection secret then contains connection metadata instead of an
+administrator password:
+
+- MSSQL: `endpoint` and `port`.
+- PostgreSQL: `endpoint`, `port`, and `username`, where `username` is the exact
+  PostgreSQL role name of the provider's Entra administrator.
+
+The provider Deployment must run with the Azure workload identity pod label and
+a Kubernetes service account federated to the administrator managed identity.
+For Azure SQL, that identity must be an Entra administrator or have delegated
+`ALTER ANY USER` permission in the target database. For Azure Database for
+PostgreSQL Flexible Server it must be an Entra administrator, and Entra
+authentication must already be enabled on the server.
+
+Azure SQL and PostgreSQL use different identifiers for service principals:
+
+- MSSQL `User.spec.forProvider.azureEntra.clientId` is the managed identity's
+  application/client ID.
+- PostgreSQL `Role.spec.forProvider.azureEntra.objectId` is the Entra object ID
+  of the managed identity's service principal.
+
+Both resources verify the stored identifier and principal type during observe.
+They refuse to adopt a same-named database principal with a different mapping.
+See the complete [MSSQL](examples/namespaced/mssql/azure-entra.yaml) and
+[PostgreSQL](examples/namespaced/postgresql/azure-entra.yaml) examples.
+
 ## Contributing
 
 1. Fork the project and clone locally.

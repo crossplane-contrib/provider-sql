@@ -48,12 +48,35 @@ func (gp *GrantPermissions) ToStringSlice() []string {
 	return out
 }
 
+// DatabaseRole represents a database role membership to be managed.
+type DatabaseRole string
+
+const (
+	// DatabaseRoleDataReader is the fixed db_datareader database role.
+	DatabaseRoleDataReader DatabaseRole = "db_datareader"
+	// DatabaseRoleDataWriter is the fixed db_datawriter database role.
+	DatabaseRoleDataWriter DatabaseRole = "db_datawriter"
+	// DatabaseRoleOwner is the fixed db_owner database role.
+	DatabaseRoleOwner DatabaseRole = "db_owner"
+)
+
 // GrantParameters define the desired state of a MSSQL grant instance.
+// Exactly one of Permissions or Role must be specified.
+// +kubebuilder:validation:XValidation:rule="has(self.permissions) != has(self.role)",message="exactly one of permissions or role must be specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.role) || !has(self.schema)",message="schema cannot be specified with role"
+// +kubebuilder:validation:XValidation:rule="has(self.role) == has(oldSelf.role) && (!has(self.role) || self.role == oldSelf.role)",message="grant mode and role are immutable"
 type GrantParameters struct {
 	// Permissions to be granted.
 	// See https://docs.microsoft.com/en-us/sql/t-sql/statements/grant-database-permissions-transact-sql?view=sql-server-ver15#remarks
 	// for available privileges.
-	Permissions GrantPermissions `json:"permissions"`
+	// +optional
+	Permissions GrantPermissions `json:"permissions,omitempty"`
+
+	// Role is a fixed database role the user should be a member of.
+	// +kubebuilder:validation:Enum=db_datareader;db_datawriter;db_owner
+	// +immutable
+	// +optional
+	Role *DatabaseRole `json:"role,omitempty"`
 
 	// Schema for the permissions to be granted for.
 	// +immutable
@@ -103,7 +126,8 @@ type GrantStatus struct {
 // +kubebuilder:printcolumn:name="READY",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="SYNCED",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status"
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
+// +kubebuilder:printcolumn:name="USER",type="string",JSONPath=".spec.forProvider.user"
+// +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.role"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
 // +kubebuilder:printcolumn:name="SCHEMA",type="string",JSONPath=".spec.forProvider.schema"
 // +kubebuilder:printcolumn:name="PERMISSIONS",type="string",JSONPath=".spec.forProvider.permissions"

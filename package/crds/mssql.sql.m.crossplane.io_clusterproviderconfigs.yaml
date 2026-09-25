@@ -58,8 +58,9 @@ spec:
                   connectionSecretRef:
                     description: |-
                       A CredentialsSecretRef is a reference to a MSSQL connection secret
-                      that contains the credentials that must be used to connect to the
-                      provider.
+                      that contains the connection metadata used to connect to the provider.
+                      Password authentication requires username and password. Azure workload
+                      identity authentication requires only endpoint and port.
                     properties:
                       name:
                         description: Name of the secret.
@@ -98,6 +99,7 @@ spec:
                     description: Source of the provider credentials.
                     enum:
                     - MSSQLConnectionSecret
+                    - AzureWorkloadIdentity
                     type: string
                 required:
                 - source
