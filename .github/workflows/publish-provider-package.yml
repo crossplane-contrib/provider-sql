@@ -7,18 +7,28 @@ on:
         description: "Version string to use while publishing the package (e.g. v1.0.0-alpha.1)"
         default: ""
         required: false
-      go-version:
-        description: "Go version to use if building needs to be done"
-        default: "1.26.8"
-        required: false
 
 jobs:
+  get-go-version:
+    runs-on: ubuntu-latest
+    outputs:
+      go-version: ${{ steps.extract-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Extract Go version from go.mod
+        id: extract-version
+        run: |
+          GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
+          echo "version=${GO_VERSION}" | tee -a $GITHUB_OUTPUT
+
   publish-provider-package:
+    needs: get-go-version
     uses: crossplane-contrib/provider-workflows/.github/workflows/publish-provider-non-family.yml@d736839d853a03083eb1aac9af4825f11321c88c
     with:
       repository: provider-sql
       version: ${{ github.event.inputs.version }}
-      go-version: ${{ github.event.inputs.go-version }}
+      go-version: ${{ needs.get-go-version.outputs.go-version }}
       cleanup-disk: true
     secrets:
       GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -27,7 +37,7 @@ jobs:
 
   add-extensions:
     needs: publish-provider-package
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
