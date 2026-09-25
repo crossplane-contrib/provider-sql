@@ -153,20 +153,21 @@ var (
 )
 
 func selectDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
-	sqlString := `
-	select distinct(default_acl.privilege_type)
-	from pg_roles r
-	join (SELECT defaclnamespace, (aclexplode(defaclacl)).* FROM pg_default_acl
-	WHERE defaclobjtype = $1) default_acl
-	on r.oid = default_acl.grantee
-	where r.rolname = $2;
-	`
-	q.String = sqlString
+	q.String = "SELECT DISTINCT(acl.privilege_type) " +
+		"FROM pg_default_acl d " +
+		"CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl " +
+		"INNER JOIN pg_roles grantor ON grantor.oid = d.defaclrole " +
+		"INNER JOIN pg_roles grantee ON grantee.oid = acl.grantee " +
+		"WHERE d.defaclobjtype = $1 " +
+		"AND grantor.rolname = $2 " +
+		"AND grantee.rolname = $3 " +
+		"AND d.defaclnamespace = COALESCE((SELECT oid FROM pg_namespace WHERE nspname = $4), 0)"
 	q.Parameters = []interface{}{
 		objectTypes[*gp.ObjectType],
+		*gp.TargetRole,
 		*gp.Role,
+		gp.Schema,
 	}
-
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
