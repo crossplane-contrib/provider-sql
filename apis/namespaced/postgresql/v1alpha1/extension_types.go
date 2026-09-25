@@ -32,7 +32,9 @@ type ExtensionParameters struct {
 	// +optional
 	Version *string `json:"version,omitempty"`
 
-	// Schema for extension install.
+	// Schema to install the extension into. It must already exist.
+	// Changing it moves the extension with ALTER EXTENSION ... SET SCHEMA,
+	// which non-relocatable extensions (e.g. postgis) reject.
 	// +optional
 	Schema *string `json:"schema,omitempty"`
 
