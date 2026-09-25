@@ -1006,3 +1006,65 @@ func TestDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectDefaultPrivilegesQuery(t *testing.T) {
+	type args struct {
+		gp v1alpha1.DefaultPrivilegesParameters
+	}
+
+	tests := map[string]struct {
+		reason string
+		args   args
+		want   func(t *testing.T, q xsql.Query)
+	}{
+		"FiltersByTargetRoleAndSchema": {
+			reason: "The SELECT query must filter by target role and schema so unrelated default privileges are not matched",
+			args: args{gp: v1alpha1.DefaultPrivilegesParameters{
+				Role:       ptr.To("grantee-role"),
+				TargetRole: ptr.To("target-role"),
+				ObjectType: ptr.To("table"),
+				Schema:     ptr.To("myschema"),
+			}},
+			want: func(t *testing.T, q xsql.Query) {
+				for _, want := range []string{
+					"target_role.rolname = $3",
+					"default_acl.defaclnamespace = (select oid from pg_namespace where nspname = $4)",
+				} {
+					if !strings.Contains(q.String, want) {
+						t.Errorf("query should contain %q, got:\n%s", want, q.String)
+					}
+				}
+				if diff := cmp.Diff([]interface{}{"r", "grantee-role", "target-role", "myschema"}, q.Parameters); diff != "" {
+					t.Errorf("unexpected parameters (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"SchemaObjectTypeUsesDatabaseWideNamespace": {
+			reason: "For objectType schema there is no IN SCHEMA, so the query must filter the database-wide namespace (oid 0)",
+			args: args{gp: v1alpha1.DefaultPrivilegesParameters{
+				Role:       ptr.To("grantee-role"),
+				TargetRole: ptr.To("target-role"),
+				ObjectType: ptr.To("schema"),
+			}},
+			want: func(t *testing.T, q xsql.Query) {
+				if !strings.Contains(q.String, "default_acl.defaclnamespace = 0") {
+					t.Errorf("query should filter the database-wide namespace, got:\n%s", q.String)
+				}
+				if strings.Contains(q.String, "pg_namespace") {
+					t.Errorf("query should not filter by schema when objectType is schema, got:\n%s", q.String)
+				}
+				if diff := cmp.Diff([]interface{}{"n", "grantee-role", "target-role"}, q.Parameters); diff != "" {
+					t.Errorf("unexpected parameters (-want +got):\n%s", diff)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var q xsql.Query
+			selectDefaultPrivilegesQuery(tc.args.gp, &q)
+			tc.want(t, q)
+		})
+	}
+}
