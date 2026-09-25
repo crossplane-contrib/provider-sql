@@ -68,3 +68,21 @@ spec:
   providerConfigRef:
     kind: ProviderConfig
     name: default
+---
+# The wildcard grants below are authoritative for their role and schema: they
+# revoke ALL PRIVILEGES before granting. They therefore need a role of their
+# own, or they would strip the grants the other examples make.
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Role
+metadata:
+  name: all-objects-role
+  namespace: default
+spec:
+  writeConnectionSecretToRef:
+    name: all-objects-role-secret
+  forProvider:
+    privileges:
+      login: true
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default

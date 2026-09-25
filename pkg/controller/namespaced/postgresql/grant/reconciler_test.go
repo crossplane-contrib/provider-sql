@@ -20,7 +20,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -283,7 +285,7 @@ func TestObserve(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Tables:     []string{"test-example"},
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -310,7 +312,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -355,7 +357,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -410,7 +412,7 @@ func TestObserve(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -472,7 +474,7 @@ func TestObserve(t *testing.T) {
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
 							Schema:     ptr.To("testschema"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -505,7 +507,7 @@ func TestObserve(t *testing.T) {
 							Role:       ptr.To("testrole"),
 							Schema:     ptr.To("testschema"),
 							Tables:     []string{"testtable"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -516,6 +518,75 @@ func TestObserve(t *testing.T) {
 					ResourceExists:   true,
 					ResourceUpToDate: true,
 				},
+				err: nil,
+			},
+		},
+		"SuccessWildcardTables": {
+			// The wildcard path builds a different query with a different
+			// parameter layout, so it needs its own trip through Observe.
+			reason: "We should return no error if every table in the schema carries the grant",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if !strings.Contains(q.String, "FROM pg_class ac") {
+							return errors.New("expected the wildcard observe query")
+						}
+						if len(q.Parameters) != 4 {
+							return errors.Errorf("expected 4 parameters, got %d", len(q.Parameters))
+						}
+						bv := dest[0].(*bool)
+						*bv = true
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Tables:     []string{"*"},
+							Privileges: v1alpha1.GrantPrivileges{privSelect},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+				err: nil,
+			},
+		},
+		"WildcardTablesNotYetGranted": {
+			reason: "A table in the schema without the grant must report ResourceExists false so Create re-runs",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						bv := dest[0].(*bool)
+						*bv = false
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("testrole"),
+							Schema:     ptr.To("testschema"),
+							Tables:     []string{"*"},
+							Privileges: v1alpha1.GrantPrivileges{privSelect},
+						},
+					},
+				},
+			},
+			want: want{
+				o:   managed.ExternalObservation{ResourceExists: false},
 				err: nil,
 			},
 		},
@@ -539,7 +610,7 @@ func TestObserve(t *testing.T) {
 							Schema:     ptr.To("testschema"),
 							Tables:     []string{"testtable"},
 							Columns:    []string{"testcolumn"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -572,7 +643,7 @@ func TestObserve(t *testing.T) {
 							Role:       ptr.To("testrole"),
 							Schema:     ptr.To("testschema"),
 							Sequences:  []string{"testsequence"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -605,7 +676,7 @@ func TestObserve(t *testing.T) {
 							Role:       ptr.To("testrole"),
 							Schema:     ptr.To("testschema"),
 							Routines:   []v1alpha1.Routine{{Name: "testroutine", Arguments: []string{"text"}}},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 							WithOption: &gog,
 						},
 					},
@@ -637,7 +708,7 @@ func TestObserve(t *testing.T) {
 							Database:            ptr.To("testdb"),
 							Role:                ptr.To("testrole"),
 							ForeignDataWrappers: []string{"testforeigndatawrapper"},
-							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:          v1alpha1.GrantPrivileges{privAll},
 							WithOption:          &gog,
 						},
 					},
@@ -669,7 +740,7 @@ func TestObserve(t *testing.T) {
 							Database:       ptr.To("testdb"),
 							Role:           ptr.To("testrole"),
 							ForeignServers: []string{"testforeignserver"},
-							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:     v1alpha1.GrantPrivileges{privAll},
 							WithOption:     &gog,
 						},
 					},
@@ -871,7 +942,7 @@ func TestCreate(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Tables:     []string{"test-example"},
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -893,7 +964,7 @@ func TestCreate(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -937,7 +1008,7 @@ func TestCreate(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -960,7 +1031,7 @@ func TestCreate(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -984,7 +1055,7 @@ func TestCreate(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Tables:     []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1009,7 +1080,7 @@ func TestCreate(t *testing.T) {
 							Schema:     ptr.To("test-example"),
 							Tables:     []string{"test-example"},
 							Columns:    []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1033,7 +1104,7 @@ func TestCreate(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Sequences:  []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1057,7 +1128,7 @@ func TestCreate(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Routines:   []v1alpha1.Routine{{Name: "test-example", Arguments: []string{"test-example"}}},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1080,7 +1151,7 @@ func TestCreate(t *testing.T) {
 							Database:            ptr.To("test-example"),
 							Role:                ptr.To("test-example"),
 							ForeignDataWrappers: []string{"test-example"},
-							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:          v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1103,7 +1174,7 @@ func TestCreate(t *testing.T) {
 							Database:       ptr.To("test-example"),
 							Role:           ptr.To("test-example"),
 							ForeignServers: []string{"test-example"},
-							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:     v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1282,7 +1353,7 @@ func TestUpdate(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1336,7 +1407,7 @@ func TestDelete(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Tables:     []string{"test-example"},
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1358,7 +1429,7 @@ func TestDelete(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1373,7 +1444,7 @@ func TestDelete(t *testing.T) {
 						ForProvider: v1alpha1.GrantParameters{
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1394,7 +1465,7 @@ func TestDelete(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1421,7 +1492,7 @@ func TestDelete(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Tables:     []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1444,7 +1515,7 @@ func TestDelete(t *testing.T) {
 							Schema:     ptr.To("test-example"),
 							Tables:     []string{"test-example"},
 							Columns:    []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1466,7 +1537,7 @@ func TestDelete(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Sequences:  []string{"test-example"},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1488,7 +1559,7 @@ func TestDelete(t *testing.T) {
 							Role:       ptr.To("test-example"),
 							Schema:     ptr.To("test-example"),
 							Routines:   []v1alpha1.Routine{{Name: "test-example", Arguments: []string{"test-example"}}},
-							Privileges: v1alpha1.GrantPrivileges{"ALL"},
+							Privileges: v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1509,7 +1580,7 @@ func TestDelete(t *testing.T) {
 							Database:            ptr.To("test-example"),
 							Role:                ptr.To("test-example"),
 							ForeignDataWrappers: []string{"test-example"},
-							Privileges:          v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:          v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1530,7 +1601,7 @@ func TestDelete(t *testing.T) {
 							Database:       ptr.To("test-example"),
 							Role:           ptr.To("test-example"),
 							ForeignServers: []string{"test-example"},
-							Privileges:     v1alpha1.GrantPrivileges{"ALL"},
+							Privileges:     v1alpha1.GrantPrivileges{privAll},
 						},
 					},
 				},
@@ -1554,14 +1625,24 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+const (
+	privSelect  = "SELECT"
+	privExecute = "EXECUTE"
+	privAll     = "ALL"
+	objMyTable  = "mytable"
+)
+
 func TestGrantSQL(t *testing.T) {
 	cases := map[string]struct {
 		reason                string
 		gp                    v1alpha1.GrantParameters
+		serverVersion         int
 		wantSelectContains    []string
 		wantSelectNotContains []string
 		wantRevoke            string
 		wantGrant             string
+		wantGrantContains     []string
+		wantGrantNotContains  []string
 		wantDelete            string
 	}{
 		"RoutineSelectQueryDoesNotCrossJoinArgsWithACL": {
@@ -1583,7 +1664,7 @@ func TestGrantSQL(t *testing.T) {
 				Database:   ptr.To("mydb"),
 				Schema:     ptr.To("myschema"),
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"text", "int4"}}},
 			},
 			wantSelectContains: []string{
@@ -1637,7 +1718,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("myschema"),
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"integer"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(integer) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(integer) TO "myrole" `,
@@ -1650,7 +1731,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("my-schema"),
 				Routines:   []v1alpha1.Routine{{Name: "my-func", Arguments: []string{"text"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "my-schema"."my-func"(text) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "my-schema"."my-func"(text) TO "myrole" `,
@@ -1663,7 +1744,7 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("myschema"),
 				Routines:   []v1alpha1.Routine{{Name: "myfunc", Arguments: []string{"TEXT"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "myschema"."myfunc"(text) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "myschema"."myfunc"(text) TO "myrole" `,
@@ -1676,11 +1757,139 @@ func TestGrantSQL(t *testing.T) {
 				Schema:     ptr.To("aws_s3"),
 				Routines:   []v1alpha1.Routine{{Name: "table_import_from_s3", Arguments: []string{"text", "text", "text", "aws_commons._s3_uri_1", "aws_commons._aws_credentials_1"}}},
 				Role:       ptr.To("myrole"),
-				Privileges: v1alpha1.GrantPrivileges{"EXECUTE"},
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
 			},
 			wantRevoke: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
 			wantGrant:  `GRANT EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) TO "myrole" `,
 			wantDelete: `REVOKE EXECUTE ON ROUTINE "aws_s3"."table_import_from_s3"(text,text,text,aws_commons._s3_uri_1,aws_commons._aws_credentials_1) FROM "myrole"`,
+		},
+		"TableWildcardTargetsEveryTableInSchema": {
+			// REVOKE ALL, not REVOKE SELECT: revoking only what is about to be
+			// granted leaves every other privilege in place, so Observe's exact
+			// set comparison never matches and Create re-runs forever.
+			reason: `tables: ["*"] must emit ON ALL TABLES IN SCHEMA, not a quoted "schema"."*" identifier`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:  `GRANT SELECT ON ALL TABLES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
+			// Counting the schema, not the list, is what re-runs Create when a
+			// table appears later.
+			wantSelectContains: []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
+			// Filtering by name would compare against the literal table "*".
+			wantSelectNotContains: []string{"c.relname = ANY("},
+		},
+		"SequenceWildcardTargetsEverySequenceInSchema": {
+			reason: `sequences: ["*"] must emit ON ALL SEQUENCES IN SCHEMA`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:             `GRANT SELECT ON ALL SEQUENCES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
+			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
+			wantSelectNotContains: []string{"c.relname = ANY("},
+		},
+		"RoutineWildcardTargetsEveryRoutineInSchema": {
+			// No signature to compare, rather than formatting "*"().
+			reason: `routines: [{name: "*"}] must emit ON ALL ROUTINES IN SCHEMA`,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "*"}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
+			},
+			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
+			wantGrant:             `GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "myschema" TO "myrole" `,
+			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
+			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_proc ap"},
+			wantSelectNotContains: []string{"sub.signature = ANY("},
+		},
+		"RoutineWildcardCountsRoutinesWithNoACL": {
+			// A routine that has never been granted on has proacl NULL, so
+			// aclexplode yields no rows for it. It must still be counted on the
+			// expected side: that is the mismatch that reports
+			// ResourceExists=false and re-runs the GRANT for routines created
+			// after it. Filtering the expected count to proacl IS NOT NULL
+			// makes such routines invisible to Observe, so the resource reports
+			// Ready while they hold no grant. Verified on PostgreSQL 18.6.
+			reason: "the expected count must not be filtered by proacl, or routines created after the GRANT never receive it",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Routines:   []v1alpha1.Routine{{Name: "*"}},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privExecute},
+			},
+			wantSelectNotContains: []string{"proacl IS NOT NULL"},
+		},
+		"WildcardCarriesWithGrantOption": {
+			reason: "withOption must reach both the emitted GRANT and the is_grantable filter Observe compares on",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+				WithOption: func() *v1alpha1.GrantOption { o := v1alpha1.GrantOptionGrant; return &o }(),
+			},
+			wantGrant: `GRANT SELECT ON ALL TABLES IN SCHEMA "myschema" TO "myrole" WITH GRANT OPTION`,
+		},
+		"WildcardAllPrivilegesExcludesMaintainBeforePG17": {
+			// Asserted as substrings, not an exact string: ExpandPrivileges
+			// iterates a map, so the privilege order varies between calls.
+			reason:        "MAINTAIN arrived in PG17, so expanding ALL on an older server must not emit it on the wildcard path either",
+			serverVersion: 150000,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privAll},
+			},
+			wantGrantContains:     []string{"SELECT", "TRUNCATE", `ON ALL TABLES IN SCHEMA "myschema"`},
+			wantGrantNotContains:  []string{"MAINTAIN"},
+			wantSelectNotContains: []string{"MAINTAIN"},
+		},
+		"WildcardAllPrivilegesIncludesMaintainOnPG17": {
+			reason:        "The counterpart: the gate must not swallow MAINTAIN on a server that has it",
+			serverVersion: 170000,
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privAll},
+			},
+			wantGrantContains: []string{"MAINTAIN"},
+		},
+		"NamedTablesAreUnaffectedByWildcardSupport": {
+			// The named form keeps revoking only the listed privileges: it
+			// coexists with column grants on the same table.
+			reason: "The wildcard branch must not disturb the explicit object-list form, which stays the default path",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{objMyTable},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantRevoke: `REVOKE SELECT ON TABLE "myschema"."mytable" FROM "myrole"`,
+			wantGrant:  `GRANT SELECT ON TABLE "myschema"."mytable" TO "myrole" `,
+			wantDelete: `REVOKE SELECT ON TABLE "myschema"."mytable" FROM "myrole"`,
+			// The placeholder index is incidental.
+			wantSelectContains:    []string{"c.relname = ANY(", "cardinality("},
+			wantSelectNotContains: []string{"ON ALL TABLES IN SCHEMA", "FROM pg_class ac"},
 		},
 	}
 
@@ -1688,7 +1897,7 @@ func TestGrantSQL(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if len(tc.wantSelectContains) > 0 || len(tc.wantSelectNotContains) > 0 {
 				var q xsql.Query
-				if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+				if err := selectGrantQueryWithVersion(tc.gp, &q, tc.serverVersion); err != nil {
 					t.Fatalf("selectGrantQuery: %v", err)
 				}
 				for _, want := range tc.wantSelectContains {
@@ -1703,9 +1912,9 @@ func TestGrantSQL(t *testing.T) {
 				}
 			}
 
-			if tc.wantRevoke != "" || tc.wantGrant != "" {
+			if tc.wantRevoke != "" || tc.wantGrant != "" || len(tc.wantGrantContains) > 0 || len(tc.wantGrantNotContains) > 0 {
 				var ql []xsql.Query
-				if err := createGrantQueriesWithVersion(tc.gp, &ql, 0); err != nil {
+				if err := createGrantQueriesWithVersion(tc.gp, &ql, tc.serverVersion); err != nil {
 					t.Fatalf("createGrantQueries: %v", err)
 				}
 				if len(ql) < 2 {
@@ -1721,6 +1930,16 @@ func TestGrantSQL(t *testing.T) {
 						t.Errorf("%s\ncreateGrantQueries GRANT (-want +got):\n%s", tc.reason, diff)
 					}
 				}
+				for _, want := range tc.wantGrantContains {
+					if !strings.Contains(ql[1].String, want) {
+						t.Errorf("%s\nwant GRANT to contain %q\ngot: %s", tc.reason, want, ql[1].String)
+					}
+				}
+				for _, notWant := range tc.wantGrantNotContains {
+					if strings.Contains(ql[1].String, notWant) {
+						t.Errorf("%s\nwant GRANT NOT to contain %q\ngot: %s", tc.reason, notWant, ql[1].String)
+					}
+				}
 			}
 
 			if tc.wantDelete != "" {
@@ -1731,6 +1950,113 @@ func TestGrantSQL(t *testing.T) {
 				if diff := cmp.Diff(tc.wantDelete, q.String); diff != "" {
 					t.Errorf("%s\ndeleteGrantQuery (-want +got):\n%s", tc.reason, diff)
 				}
+			}
+		})
+	}
+}
+
+// TestRelationGrantQueryParameters guards the seam that sharing one query
+// string between the named and wildcard forms introduces: placeholders and the
+// parameter slice are positional and independent, so a mismatch survives every
+// string assertion and only fails against a real server.
+func TestRelationGrantQueryParameters(t *testing.T) {
+	placeholder := regexp.MustCompile(`\$(\d+)`)
+
+	cases := map[string]struct {
+		reason        string
+		gp            v1alpha1.GrantParameters
+		wantParams    int
+		wantGrantable bool
+	}{
+		"NamedTablesBindTheObjectList": {
+			reason: "The named form binds schema, role, grantable, privileges and the object list",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{objMyTable},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 5,
+		},
+		"WildcardTablesBindNoObjectList": {
+			reason: "The wildcard form has no object list to bind, so it must not leave a dangling placeholder",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 4,
+		},
+		"WildcardSequencesBindNoObjectList": {
+			reason: "Sequences share the same builder, so they share the same contract",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Sequences:  []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+			wantParams: 4,
+		},
+		"WildcardWithGrantOptionBindsGrantableTrue": {
+			reason: "withOption: GRANT must reach $3, or Observe compares against the wrong half of the ACL",
+			gp: v1alpha1.GrantParameters{
+				Database:   ptr.To("mydb"),
+				Schema:     ptr.To("myschema"),
+				Tables:     []string{"*"},
+				Role:       ptr.To("myrole"),
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+				WithOption: func() *v1alpha1.GrantOption { o := v1alpha1.GrantOptionGrant; return &o }(),
+			},
+			wantParams:    4,
+			wantGrantable: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var q xsql.Query
+			if err := selectGrantQueryWithVersion(tc.gp, &q, 0); err != nil {
+				t.Fatalf("selectGrantQuery: %v", err)
+			}
+
+			if len(q.Parameters) != tc.wantParams {
+				t.Fatalf("%s\nwant %d parameters, got %d", tc.reason, tc.wantParams, len(q.Parameters))
+			}
+
+			// PostgreSQL rejects both gaps and overruns.
+			seen := map[int]bool{}
+			for _, m := range placeholder.FindAllStringSubmatch(q.String, -1) {
+				n, err := strconv.Atoi(m[1])
+				if err != nil {
+					t.Fatalf("unparsable placeholder %q", m[0])
+				}
+				if n < 1 || n > len(q.Parameters) {
+					t.Errorf("%s\nplaceholder $%d has no parameter (%d bound)\nquery: %s",
+						tc.reason, n, len(q.Parameters), q.String)
+					continue
+				}
+				seen[n] = true
+			}
+			for i := 1; i <= len(q.Parameters); i++ {
+				if !seen[i] {
+					t.Errorf("%s\nparameter $%d is bound but never referenced\nquery: %s",
+						tc.reason, i, q.String)
+				}
+			}
+
+			// Positional contract: $1 schema, $2 role, $3 grantable.
+			if got := *q.Parameters[0].(*string); got != "myschema" {
+				t.Errorf("%s\n$1 should be the schema, got %q", tc.reason, got)
+			}
+			if got := *q.Parameters[1].(*string); got != "myrole" {
+				t.Errorf("%s\n$2 should be the role, got %q", tc.reason, got)
+			}
+			if got, ok := q.Parameters[2].(bool); !ok || got != tc.wantGrantable {
+				t.Errorf("%s\n$3 should be the grantable flag %v, got %#v", tc.reason, tc.wantGrantable, q.Parameters[2])
 			}
 		})
 	}

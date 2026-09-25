@@ -372,6 +372,38 @@ check_observe_only_database(){
   echo_step_completed
 }
 
+check_wildcard_privileges(){
+  # The wildcard grants SELECT on every table in the schema, so the check is
+  # that no table is left without it: a table the GRANT missed is the failure
+  # mode the feature exists to prevent.
+  target_db="db1"
+  schema="public"
+  role='all-objects-role'
+
+  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+    "select count(*) from pg_class c join pg_namespace n on c.relnamespace = n.oid
+     where c.relkind in ('r','p','v','m','f') and n.nspname = '$schema'
+     and not has_table_privilege('$role', c.oid, 'SELECT');" | xargs)
+
+  if [ "${missing}" = "0" ]; then
+    echo_info "every table in $schema is readable by $role"
+  else
+    echo_error "ERROR: ${missing} table(s) in $schema are not readable by $role"
+  fi
+
+  # Same for routines, which take EXECUTE rather than SELECT.
+  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+    "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+     where n.nspname = '$schema'
+     and not has_function_privilege('$role', p.oid, 'EXECUTE');" | xargs)
+
+  if [ "${missing}" = "0" ]; then
+    echo_info "every routine in $schema is executable by $role"
+  else
+    echo_error "ERROR: ${missing} routine(s) in $schema are not executable by $role"
+  fi
+}
+
 check_custom_object_privileges(){
   echo_step "check if custom_object_privileges privileges are set properly"
 
@@ -382,6 +414,7 @@ check_custom_object_privileges(){
   check_foreign_data_wrapper_privileges
   check_foreign_server_privileges
   check_all_privileges_table_grant
+  check_wildcard_privileges
 
   echo_step_completed
 }
