@@ -112,6 +112,14 @@ func main() {
 		GlobalRateLimiter:       ratelimiter.NewGlobal(*maxReconcileRate),
 		Features:                &feature.Flags{},
 		MetricOptions:           &mo,
+		Groups: []string{
+			"mssql.sql.crossplane.io",
+			"mssql.sql.m.crossplane.io",
+			"mysql.sql.crossplane.io",
+			"mysql.sql.m.crossplane.io",
+			"postgresql.sql.crossplane.io",
+			"postgresql.sql.m.crossplane.io",
+		},
 	}
 	if *enableManagementPolicies {
 		o.Features.Enable(feature.EnableBetaManagementPolicies)
