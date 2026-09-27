@@ -32,12 +32,10 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
-
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
@@ -118,7 +116,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.DefaultPrivileges{
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+							ProviderConfigReference: &xpv2.ProviderConfigReference{Kind: "Invalid"},
 						},
 					},
 				},
@@ -140,7 +138,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -168,7 +166,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -185,7 +183,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -201,7 +199,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -247,7 +245,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -269,7 +267,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -291,7 +289,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
 							o.Spec.DefaultDatabase = "default-db"
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "secret"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "secret"}
 						case *corev1.Secret:
 							// Return empty secret data
 						}
@@ -348,7 +346,6 @@ func TestObserve(t *testing.T) {
 						return mockRowsToSQLRows(sqlmock.NewRows([]string{})), nil
 					},
 					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						// Default value is empty, so we don't need to do anything here
 						return nil
 					},
 				},
@@ -360,7 +357,8 @@ func TestObserve(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
-							ObjectType: ptr.To("TABLE"),
+							ObjectType: ptr.To("table"),
+							Schema:     ptr.To("public"),
 							Privileges: v1alpha1.GrantPrivileges{"ALL"},
 						},
 					},
@@ -392,7 +390,8 @@ func TestObserve(t *testing.T) {
 							Database:   ptr.To("test-example"),
 							Role:       ptr.To("test-example"),
 							TargetRole: ptr.To("target-role"),
-							ObjectType: ptr.To("TABLE"),
+							ObjectType: ptr.To("table"),
+							Schema:     ptr.To("public"),
 							Privileges: v1alpha1.GrantPrivileges{"CONNECT", "TEMPORARY"},
 							WithOption: &gog,
 						},
@@ -422,7 +421,8 @@ func TestObserve(t *testing.T) {
 							Database:   ptr.To("testdb"),
 							Role:       ptr.To("testrole"),
 							TargetRole: ptr.To("target-role"),
-							ObjectType: ptr.To("TABLE"),
+							ObjectType: ptr.To("table"),
+							Schema:     ptr.To("public"),
 							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
 							WithOption: &gog,
 						},
@@ -497,6 +497,79 @@ func TestObserve(t *testing.T) {
 				err: errors.New(errNoObjectType),
 			},
 		},
+		"ErrNoSchema": {
+			reason: "An error should be returned when schema is nil and objectType is not schema",
+			fields: fields{
+				db: mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Role:       ptr.To("testrole"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("table"),
+							Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.New(errNoSchema),
+			},
+		},
+		"ErrSchemaWithSchemaObjectType": {
+			reason: "An error should be returned when schema is set and objectType is schema",
+			fields: fields{
+				db: mockDB{},
+			},
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Role:       ptr.To("testrole"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("schema"),
+							Schema:     ptr.To("public"),
+							Privileges: v1alpha1.GrantPrivileges{"USAGE"},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.New(errSchemaWithSchemaType),
+			},
+		},
+		"SuccessSchemaObjectType": {
+			reason: "Schema should not be required when objectType is schema",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						r := sqlmock.NewRows([]string{"PRIVILEGE"}).
+							AddRow("CREATE")
+						return mockRowsToSQLRows(r), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Role:       ptr.To("testrole"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("schema"),
+							Privileges: v1alpha1.GrantPrivileges{"CREATE"},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:   true,
+					ResourceUpToDate: true,
+				},
+			},
+		},
 		"PrivilegesMismatchTriggersRecreate": {
 			reason: "When DB has different privileges than spec, ResourceExists should be false to trigger re-create",
 			fields: fields{
@@ -516,6 +589,7 @@ func TestObserve(t *testing.T) {
 							Role:       ptr.To("testrole"),
 							TargetRole: ptr.To("target-role"),
 							ObjectType: ptr.To("table"),
+							Schema:     ptr.To("public"),
 							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
 						},
 					},
@@ -621,6 +695,38 @@ func TestCreate(t *testing.T) {
 							TargetRole: ptr.To("target-role"),
 							Privileges: v1alpha1.GrantPrivileges{"SELECT", "UPDATE"},
 							ObjectType: ptr.To("TABLE"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: nil,
+			},
+		},
+		"SuccessSchemaObjectType": {
+			reason: "Create with objectType schema should not include IN SCHEMA in the generated SQL",
+			fields: fields{
+				db: &mockDB{
+					MockExecTx: func(ctx context.Context, ql []xsql.Query) error {
+						if strings.Contains(ql[1].String, "IN SCHEMA") {
+							t.Errorf("GRANT for objectType schema should not contain IN SCHEMA, got: %s", ql[1].String)
+						}
+						if !strings.Contains(ql[1].String, "ON SCHEMAS") {
+							t.Errorf("GRANT should target SCHEMAS, got: %s", ql[1].String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("grantee-role"),
+							TargetRole: ptr.To("target-role"),
+							ObjectType: ptr.To("schema"),
+							Privileges: v1alpha1.GrantPrivileges{"CREATE"},
 						},
 					},
 				},
@@ -823,6 +929,35 @@ func TestDelete(t *testing.T) {
 			},
 			want: nil,
 		},
+		"SuccessSchemaObjectType": {
+			reason: "Delete with objectType schema should not include IN SCHEMA and should target SCHEMAS",
+			args: args{
+				mg: &v1alpha1.DefaultPrivileges{
+					Spec: v1alpha1.DefaultPrivilegesSpec{
+						ForProvider: v1alpha1.DefaultPrivilegesParameters{
+							Database:   ptr.To("testdb"),
+							Role:       ptr.To("grantee-role"),
+							ObjectType: ptr.To("schema"),
+							TargetRole: ptr.To("target-role"),
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if strings.Contains(q.String, "IN SCHEMA") {
+							t.Errorf("REVOKE for objectType schema should not contain IN SCHEMA, got: %s", q.String)
+						}
+						if !strings.Contains(q.String, "ON SCHEMAS") {
+							t.Errorf("REVOKE should target SCHEMAS, got: %s", q.String)
+						}
+						return nil
+					},
+				},
+			},
+			want: nil,
+		},
 		"SuccessVerifySQL": {
 			reason: "Delete should generate correct REVOKE SQL with proper role placement",
 			args: args{
@@ -850,7 +985,7 @@ func TestDelete(t *testing.T) {
 						if !strings.Contains(q.String, `IN SCHEMA "myschema"`) {
 							t.Errorf("REVOKE should include IN SCHEMA, got: %s", q.String)
 						}
-						if !strings.Contains(q.String, "REVOKE ALL ON tableS") {
+						if !strings.Contains(q.String, "REVOKE ALL ON TABLES") {
 							t.Errorf("REVOKE should target correct object type, got: %s", q.String)
 						}
 						return nil

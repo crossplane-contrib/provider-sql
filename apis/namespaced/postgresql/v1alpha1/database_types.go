@@ -19,8 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // DatabaseStrategy sets the method that is used to create a database.
@@ -40,7 +39,17 @@ type DatabaseParameters struct {
 	// use the default (namely, the user executing the command). To create a
 	// database owned by another role, you must be a direct or indirect member
 	// of that role, or be a superuser.
+	// +optional
+	// +crossplane:generate:reference:type=Role
 	Owner *string `json:"owner,omitempty"`
+
+	// OwnerRef references the role object that will own this database.
+	// +optional
+	OwnerRef *xpv2.NamespacedReference `json:"ownerRef,omitempty"`
+
+	// OwnerSelector selects a reference to a Role that will own this database.
+	// +optional
+	OwnerSelector *xpv2.NamespacedSelector `json:"ownerSelector,omitempty"`
 
 	// The name of the template from which to create the new database, or
 	// DEFAULT to use the default template (template1).
@@ -102,7 +111,7 @@ type DatabaseSpec struct {
 
 // A DatabaseStatus represents the observed state of a Database.
 type DatabaseStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

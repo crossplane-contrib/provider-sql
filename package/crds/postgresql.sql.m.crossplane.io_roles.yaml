@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: roles.postgresql.sql.m.crossplane.io
 spec:
   group: postgresql.sql.m.crossplane.io
@@ -80,6 +80,12 @@ spec:
                     description: ConnectionLimit to be applied to the role.
                     format: int32
                     type: integer
+                  passwordRotationTrigger:
+                    description: |-
+                      PasswordRotationTrigger triggers rotation of the auto-generated password when set to
+                      a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
+                    format: date-time
+                    type: string
                   passwordSecretRef:
                     description: |-
                       PasswordSecretRef references the secret that contains the password used
@@ -205,6 +211,11 @@ spec:
                           type: string
                       type: object
                     type: array
+                  lastPasswordChange:
+                    description: LastPasswordChange records when the provider last
+                      set the role's password.
+                    format: date-time
+                    type: string
                   privilegesAsClauses:
                     description: |-
                       PrivilegesAsClauses represents the applied privileges state, taking into account
@@ -259,6 +270,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastHandledReconcileAt:
+                description: |-
+                  LastHandledReconcileAt holds the value of the most recent
+                  reconcile-requested-at annotation token that the controller has
+                  processed. Users can compare this to the annotation to determine
+                  whether a reconcile request has been handled.
+                type: string
               observedGeneration:
                 description: |-
                   ObservedGeneration is the latest metadata.generation
