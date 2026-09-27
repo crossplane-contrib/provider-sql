@@ -64,6 +64,12 @@ const (
 	errWithInheritOnlyForMemberOf       = "withInherit is only valid for memberOf grants"
 	errInheritRequiresPG16              = "withInherit requires PostgreSQL 16 or later (server version %d)"
 
+	// Every relkind GRANT ... ON TABLE stores an ACL on. Filtering to 'r'
+	// alone made grants on the rest Create and then never observe.
+	relkindTable = "IN ('r', 'p', 'v', 'm', 'f')"
+	// Deliberately narrower; must not be widened with relkindTable.
+	relkindSequence = "= 'S'"
+
 	maxConcurrency = 5
 
 	// versionUnknown is the serverVersion sentinel used when the backend cannot
@@ -386,19 +392,20 @@ func createRoutineGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, ro
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleRoutine)
 	}
 
-	rt := strings.Join(quotedSignatures(*gp.Schema, gp.Routines), ",")
+	rt := grantTarget("ROUTINE", "ROUTINES", *gp.Schema,
+		quotedSignatures(*gp.Schema, gp.Routines), v1alpha1.IsWildcardRoutines(gp.Routines))
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
-			sp,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(sp, v1alpha1.IsWildcardRoutines(gp.Routines)),
 			rt,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s ON ROUTINE %s TO %s %s",
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON %s TO %s %s",
 			sp,
 			rt,
 			ro,
@@ -440,19 +447,20 @@ func createSequenceGrantQueries(gp v1alpha1.GrantParameters, ql *[]xsql.Query, r
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleSequence)
 	}
 
-	sq := strings.Join(prefixAndQuote(*gp.Schema, gp.Sequences), ",")
+	sq := grantTarget("SEQUENCE", "SEQUENCES", *gp.Schema,
+		prefixAndQuote(*gp.Schema, gp.Sequences), v1alpha1.IsWildcard(gp.Sequences))
 	sp := strings.Join(gp.Privileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s ON SEQUENCE %s FROM %s",
-			sp,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(sp, v1alpha1.IsWildcard(gp.Sequences)),
 			sq,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s ON SEQUENCE %s TO %s %s",
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON %s TO %s %s",
 			sp,
 			sq,
 			ro,
@@ -467,21 +475,22 @@ func createTableGrantQueriesWithVersion(gp v1alpha1.GrantParameters, ql *[]xsql.
 		return errors.Errorf(errInvalidParams, v1alpha1.RoleTable)
 	}
 
-	tb := strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ",")
+	tb := grantTarget("TABLE", "TABLES", *gp.Schema,
+		prefixAndQuote(*gp.Schema, gp.Tables), v1alpha1.IsWildcard(gp.Tables))
 	// Use version-aware privilege expansion
 	expandedPrivileges := gp.ExpandPrivilegesWithVersion(serverVersion)
 	sp := strings.Join(expandedPrivileges.ToStringSlice(), ",")
 
 	*ql = append(*ql,
 		// REVOKE ANY MATCHING EXISTING PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
-			sp,
+		xsql.Query{String: fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(sp, v1alpha1.IsWildcard(gp.Tables)),
 			tb,
 			ro,
 		)},
 
 		// GRANT REQUESTED PERMISSIONS
-		xsql.Query{String: fmt.Sprintf("GRANT %s ON TABLE %s TO %s %s",
+		xsql.Query{String: fmt.Sprintf("GRANT %s ON %s TO %s %s",
 			sp,
 			tb,
 			ro,
@@ -554,9 +563,10 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 		)
 		return nil
 	case v1alpha1.RoleRoutine:
-		q.String = fmt.Sprintf("REVOKE %s ON ROUTINE %s FROM %s",
-			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(quotedSignatures(*gp.Schema, gp.Routines), ","),
+		q.String = fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(strings.Join(gp.Privileges.ToStringSlice(), ","), v1alpha1.IsWildcardRoutines(gp.Routines)),
+			grantTarget("ROUTINE", "ROUTINES", *gp.Schema,
+				quotedSignatures(*gp.Schema, gp.Routines), v1alpha1.IsWildcardRoutines(gp.Routines)),
 			ro,
 		)
 		return nil
@@ -568,16 +578,18 @@ func deleteGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error { // nol
 		)
 		return nil
 	case v1alpha1.RoleSequence:
-		q.String = fmt.Sprintf("REVOKE %s ON SEQUENCE %s FROM %s",
-			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(prefixAndQuote(*gp.Schema, gp.Sequences), ","),
+		q.String = fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(strings.Join(gp.Privileges.ToStringSlice(), ","), v1alpha1.IsWildcard(gp.Sequences)),
+			grantTarget("SEQUENCE", "SEQUENCES", *gp.Schema,
+				prefixAndQuote(*gp.Schema, gp.Sequences), v1alpha1.IsWildcard(gp.Sequences)),
 			ro,
 		)
 		return nil
 	case v1alpha1.RoleTable:
-		q.String = fmt.Sprintf("REVOKE %s ON TABLE %s FROM %s",
-			strings.Join(gp.Privileges.ToStringSlice(), ","),
-			strings.Join(prefixAndQuote(*gp.Schema, gp.Tables), ","),
+		q.String = fmt.Sprintf("REVOKE %s ON %s FROM %s",
+			revokedPrivileges(strings.Join(gp.Privileges.ToStringSlice(), ","), v1alpha1.IsWildcard(gp.Tables)),
+			grantTarget("TABLE", "TABLES", *gp.Schema,
+				prefixAndQuote(*gp.Schema, gp.Tables), v1alpha1.IsWildcard(gp.Tables)),
 			ro,
 		)
 		return nil
@@ -622,6 +634,32 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 		ResourceUpToDate:        true,
 		ResourceLateInitialized: false,
 	}, nil
+}
+
+// grantTarget returns the object phrase of a GRANT/REVOKE statement: the
+// ON ALL <plural> IN SCHEMA form for the wildcard, an object list otherwise.
+func grantTarget(singular, plural, schema string, quoted []string, wildcard bool) string {
+	if wildcard {
+		return fmt.Sprintf("ALL %s IN SCHEMA %s", plural, pq.QuoteIdentifier(schema))
+	}
+	return fmt.Sprintf("%s %s", singular, strings.Join(quoted, ","))
+}
+
+// revokedPrivileges returns what a REVOKE should strip before the GRANT.
+//
+// Revoking only the privileges about to be granted leaves any other privilege
+// in place, so shrinking the set never takes effect and Observe's exact
+// comparison never matches again -- Create then re-runs every poll, writing
+// catalog forever. A wildcard grant already claims the whole schema for the
+// role, so it can revoke everything and rebuild from scratch.
+//
+// The named form deliberately does not: it coexists with column-level grants on
+// the same table, which ALL PRIVILEGES would take with it.
+func revokedPrivileges(granted string, wildcard bool) string {
+	if wildcard {
+		return "ALL PRIVILEGES"
+	}
+	return granted
 }
 
 // prefixAndQuote returns objects in a quoted grantable format, prefixed with the schema
@@ -940,6 +978,36 @@ func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 	ep := gp.ExpandPrivileges()
 	sp := ep.ToStringSlice()
 
+	if v1alpha1.IsWildcardRoutines(gp.Routines) {
+		// No signature to compare, so the argument formatting subquery goes
+		// too. pg_proc is counted unfiltered because ON ALL ROUTINES IN SCHEMA
+		// covers functions, aggregates, window functions and procedures alike.
+		q.String = "SELECT COUNT(*) > 0 AND COUNT(*) = (" +
+			"SELECT COUNT(*) FROM pg_proc ap " +
+			"INNER JOIN pg_namespace an ON ap.pronamespace = an.oid " +
+			"WHERE an.nspname=$1" +
+			") AS ct " +
+			"FROM (SELECT 1 FROM pg_proc p " +
+			"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
+			"aclexplode(p.proacl) as acl " +
+			"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
+			"WHERE n.nspname=$1 " +
+			"AND s.rolname=$2 " +
+			"AND acl.is_grantable=$3 " +
+			"GROUP BY p.oid " +
+			"HAVING array_agg(acl.privilege_type) @> $4::text[] " +
+			"AND array_agg(acl.privilege_type) <@ $4::text[]" +
+			") sub"
+		q.Parameters = []interface{}{
+			gp.Schema,
+			gp.Role,
+			gro,
+			pq.Array(sp),
+		}
+
+		return nil
+	}
+
 	routinesSignatures := make([]string, len(gp.Routines))
 	for i, routine := range gp.Routines {
 		routinesSignatures[i] = routineSignature(routine)
@@ -1021,81 +1089,65 @@ func selectSchemaGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 }
 
 func selectSequenceGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
-	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
-
 	ep := gp.ExpandPrivileges()
-	sp := ep.ToStringSlice()
-	// Join grantee. Filter by sequence name, schema name and grantee name.
-	// Finally, perform a permission comparison against expected
-	// permissions.
-	q.String = "SELECT COUNT(*) = $1 AS ct " +
-		"FROM (SELECT 1 FROM pg_class c " +
-		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
-		"aclexplode(c.relacl) as acl " +
-		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-		"WHERE c.relkind = 'S' " +
-		// Filter by sequence, schema, role and grantable setting
-		"AND n.nspname=$2 " +
-		"AND s.rolname=$3 " +
-		"AND c.relname = ANY($4) " +
-		"AND acl.is_grantable=$5 " +
-		"GROUP BY c.relname, n.nspname, s.rolname, acl.is_grantable " +
-		// Check privileges match. Convoluted right-hand-side is necessary to
-		// ensure identical sort order of the input permissions.
-		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-		"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
-		") sub"
-	q.Parameters = []interface{}{
-		len(gp.Sequences),
-		gp.Schema,
-		gp.Role,
-		pq.Array(gp.Sequences),
-		gro,
-		pq.Array(sp),
-	}
-
+	relationGrantQuery(relkindSequence, gp, gp.Sequences, ep.ToStringSlice(), q)
 	return nil
 }
 
-func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error {
+// relationGrantQuery builds the Observe query for the pg_class-backed grant
+// types, which differ only in the relkind they cover.
+//
+// Parameters are fixed at $1 schema, $2 role, $3 grantable, $4 privileges, and
+// $5 the object names when they are listed explicitly.
+func relationGrantQuery(relkind string, gp v1alpha1.GrantParameters, objects, privileges []string, q *xsql.Query) {
 	gro := gp.WithOption != nil && *gp.WithOption == v1alpha1.GrantOptionGrant
+	params := []interface{}{gp.Schema, gp.Role, gro, pq.Array(privileges)}
 
-	ep := gp.ExpandPrivilegesWithVersion(serverVersion)
-	sp := ep.ToStringSlice()
+	// Counting the schema rather than the request is what converges ON ALL ...
+	// IN SCHEMA, a point-in-time statement in PostgreSQL: an object created
+	// later drops the count below the total, so Create re-runs the GRANT.
+	expected := "(SELECT COUNT(*) FROM pg_class ac " +
+		"INNER JOIN pg_namespace an ON ac.relnamespace = an.oid " +
+		"WHERE ac.relkind " + relkind + " AND an.nspname=$1)"
+	filter := ""
+	wildcard := v1alpha1.IsWildcard(objects)
+	if !wildcard {
+		expected = "cardinality($5::text[])"
+		filter = "AND c.relname = ANY($5) "
+		params = append(params, pq.Array(objects))
+	}
 
-	// Join grantee. Filter by schema name, table name and grantee name.
-	// Finally, perform a permission comparison against expected
-	// permissions.
-	q.String = "SELECT COUNT(*) = $1 AS ct " +
+	// Join grantee. Filter by schema, grantee and, unless the wildcard is in
+	// play, object name.
+	// The extra "> 0" guard prevents the vacuous truth 0 = 0 when the schema
+	// has no objects of this kind (e.g. all tables were dropped).
+	cmp := "COUNT(*) = " + expected
+	if wildcard {
+		cmp = "COUNT(*) > 0 AND " + cmp
+	}
+	q.String = "SELECT " + cmp + " AS ct " +
 		"FROM (SELECT 1 FROM pg_class c " +
 		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
 		"aclexplode(c.relacl) as acl " +
 		"INNER JOIN pg_roles s ON acl.grantee = s.oid " +
-		// GRANT ... ON TABLE accepts every relkind below, storing the ACL on
-		// that pg_class row, so Observe must read them all back. Filtering to
-		// 'r' alone made grants on views, partitioned tables, materialized
-		// views and foreign tables Create successfully and then never observe.
-		"WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') " +
-		// Filter by table, schema, role and grantable setting
-		"AND n.nspname=$2 " +
-		"AND s.rolname=$3 " +
-		"AND c.relname = ANY($4) " +
-		"AND acl.is_grantable=$5 " +
-		"GROUP BY c.relname, n.nspname, s.rolname, acl.is_grantable " +
-		// Check privileges match. Convoluted right-hand-side is necessary to
-		// ensure identical sort order of the input permissions.
-		"HAVING array_agg(acl.privilege_type ORDER BY privilege_type ASC) " +
-		"= (SELECT array(SELECT unnest($6::text[]) as perms ORDER BY perms ASC))" +
+		"WHERE c.relkind " + relkind + " " +
+		"AND n.nspname=$1 " +
+		"AND s.rolname=$2 " +
+		filter +
+		"AND acl.is_grantable=$3 " +
+		// Containment both ways is set equality, so neither side needs sorting.
+		// nspname, rolname and is_grantable are pinned by the WHERE, and
+		// pg_class is unique on (relname, relnamespace), so relname groups.
+		"GROUP BY c.relname " +
+		"HAVING array_agg(acl.privilege_type) @> $4::text[] " +
+		"AND array_agg(acl.privilege_type) <@ $4::text[]" +
 		") sub"
-	q.Parameters = []interface{}{
-		len(gp.Tables),
-		gp.Schema,
-		gp.Role,
-		pq.Array(gp.Tables),
-		gro,
-		pq.Array(sp),
-	}
+	q.Parameters = params
+}
 
+func selectTableGrantQueryWithVersion(gp v1alpha1.GrantParameters, q *xsql.Query, serverVersion int) error {
+	ep := gp.ExpandPrivilegesWithVersion(serverVersion)
+	relationGrantQuery(relkindTable, gp, gp.Tables, ep.ToStringSlice(), q)
 	return nil
 }
 
