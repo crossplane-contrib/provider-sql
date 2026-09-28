@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
@@ -32,6 +33,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -189,6 +191,33 @@ func TestConnect(t *testing.T) {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
 		})
+	}
+}
+
+var deletedNow = metav1.NewTime(time.Now())
+
+// wildcardCounts mocks the two-column result the wildcard Observe query
+// returns: how many objects carry the privileges, and how many exist.
+func wildcardCounts(matching, total int) func(context.Context, xsql.Query, ...interface{}) error {
+	return func(_ context.Context, _ xsql.Query, dest ...interface{}) error {
+		*dest[0].(*int) = matching
+		*dest[1].(*int) = total
+		return nil
+	}
+}
+
+func wildcardGrant(deleted *metav1.Time) *v1alpha1.Grant {
+	return &v1alpha1.Grant{
+		ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: deleted},
+		Spec: v1alpha1.GrantSpec{
+			ForProvider: v1alpha1.GrantParameters{
+				Database:   ptr.To("testdb"),
+				Role:       ptr.To("testrole"),
+				Schema:     ptr.To("testschema"),
+				Tables:     []string{"*"},
+				Privileges: v1alpha1.GrantPrivileges{privSelect},
+			},
+		},
 	}
 }
 
@@ -472,73 +501,44 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
-		"SuccessWildcardTables": {
-			// The wildcard path builds a different query with a different
-			// parameter layout, so it needs its own trip through Observe.
-			reason: "We should return no error if every table in the schema carries the grant",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						if !strings.Contains(q.String, "FROM pg_class ac") {
-							return errors.New("expected the wildcard observe query")
-						}
-						if len(q.Parameters) != 4 {
-							return errors.Errorf("expected 4 parameters, got %d", len(q.Parameters))
-						}
-						bv := dest[0].(*bool)
-						*bv = true
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("testdb"),
-							Role:       ptr.To("testrole"),
-							Schema:     ptr.To("testschema"),
-							Tables:     []string{"*"},
-							Privileges: v1alpha1.GrantPrivileges{privSelect},
-						},
-					},
-				},
-			},
+		"WildcardAllObjectsCarryThePrivileges": {
+			reason: "matching == total means every object is covered",
+			fields: fields{db: mockDB{MockScan: wildcardCounts(2, 2)}},
+			args:   args{mg: wildcardGrant(nil)},
 			want: want{
-				o: managed.ExternalObservation{
-					ResourceExists:   true,
-					ResourceUpToDate: true,
-				},
-				err: nil,
+				o: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
 			},
 		},
-		"WildcardTablesNotYetGranted": {
-			reason: "A table in the schema without the grant must report ResourceExists false so Create re-runs",
-			fields: fields{
-				db: mockDB{
-					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-						bv := dest[0].(*bool)
-						*bv = false
-						return nil
-					},
-				},
-			},
-			args: args{
-				mg: &v1alpha1.Grant{
-					Spec: v1alpha1.GrantSpec{
-						ForProvider: v1alpha1.GrantParameters{
-							Database:   ptr.To("testdb"),
-							Role:       ptr.To("testrole"),
-							Schema:     ptr.To("testschema"),
-							Tables:     []string{"*"},
-							Privileges: v1alpha1.GrantPrivileges{privSelect},
-						},
-					},
-				},
-			},
+		"WildcardSomeObjectLacksThePrivileges": {
+			reason: "an object without the grant must report not exists so Create re-runs",
+			fields: fields{db: mockDB{MockScan: wildcardCounts(1, 2)}},
+			args:   args{mg: wildcardGrant(nil)},
+			want:   want{o: managed.ExternalObservation{ResourceExists: false}},
+		},
+		"WildcardEmptySchemaIsSatisfiedWhileLive": {
+			reason: "an empty schema satisfies the grant over nothing",
+			fields: fields{db: mockDB{MockScan: wildcardCounts(0, 0)}},
+			args:   args{mg: wildcardGrant(nil)},
 			want: want{
-				o:   managed.ExternalObservation{ResourceExists: false},
-				err: nil,
+				o: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+			},
+		},
+		"WildcardEmptySchemaIsGoneWhileDeleting": {
+			// Teardown drops the schema's objects before deleting the Grant, so
+			// the same counts mean the opposite: there is nothing left to
+			// revoke. Reading them as "applied" would pin the finalizer, since
+			// REVOKE cannot falsify a comparison that holds over nothing.
+			reason: "an emptied schema means the grant is gone, or deletion never finalizes",
+			fields: fields{db: mockDB{MockScan: wildcardCounts(0, 0)}},
+			args:   args{mg: wildcardGrant(&deletedNow)},
+			want:   want{o: managed.ExternalObservation{ResourceExists: false}},
+		},
+		"WildcardStillGrantedWhileDeleting": {
+			reason: "objects still carrying the privileges keep the resource present so Delete runs",
+			fields: fields{db: mockDB{MockScan: wildcardCounts(2, 2)}},
+			args:   args{mg: wildcardGrant(&deletedNow)},
+			want: want{
+				o: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
 			},
 		},
 		"SuccessRoleColumn": {
@@ -1807,7 +1807,7 @@ func TestGrantSQL(t *testing.T) {
 			wantDelete: `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA "myschema" FROM "myrole"`,
 			// Counting the schema, not the list, is what re-runs Create when a
 			// table appears later.
-			wantSelectContains: []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
+			wantSelectContains: []string{"SELECT COUNT(*) AS matching,", "SELECT COUNT(*) FROM pg_class ac", "AND an.nspname=$1"},
 			// Filtering by name would compare against the literal table "*".
 			wantSelectNotContains: []string{"c.relname = ANY("},
 		},
@@ -1823,7 +1823,7 @@ func TestGrantSQL(t *testing.T) {
 			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
 			wantGrant:             `GRANT SELECT ON ALL SEQUENCES IN SCHEMA "myschema" TO "myrole" `,
 			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA "myschema" FROM "myrole"`,
-			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
+			wantSelectContains:    []string{"SELECT COUNT(*) AS matching,", "SELECT COUNT(*) FROM pg_class ac", "ac.relkind = 'S'"},
 			wantSelectNotContains: []string{"c.relname = ANY("},
 		},
 		"RoutineWildcardTargetsEveryRoutineInSchema": {
@@ -1839,7 +1839,7 @@ func TestGrantSQL(t *testing.T) {
 			wantRevoke:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
 			wantGrant:             `GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "myschema" TO "myrole" `,
 			wantDelete:            `REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA "myschema" FROM "myrole"`,
-			wantSelectContains:    []string{"SELECT COUNT(*) > 0 AND COUNT(*) =", "SELECT COUNT(*) FROM pg_proc ap"},
+			wantSelectContains:    []string{"SELECT COUNT(*) AS matching,", "SELECT COUNT(*) FROM pg_proc ap"},
 			wantSelectNotContains: []string{"sub.signature = ANY("},
 		},
 		"RoutineWildcardCountsRoutinesWithNoACL": {
