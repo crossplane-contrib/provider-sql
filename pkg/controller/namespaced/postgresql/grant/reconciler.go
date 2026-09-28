@@ -573,7 +573,16 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 
 	exists := false
 
-	if err := c.db.Scan(ctx, query, &exists); err != nil {
+	if isWildcardGrant(gp) {
+		var matching, total int
+		if err := c.db.Scan(ctx, query, &matching, &total); err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
+		}
+		exists = matching == total
+		if mg.GetDeletionTimestamp() != nil {
+			exists = matching > 0
+		}
+	} else if err := c.db.Scan(ctx, query, &exists); err != nil {
 		return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
 	}
 
@@ -589,6 +598,15 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 		ResourceUpToDate:        true,
 		ResourceLateInitialized: false,
 	}, nil
+}
+
+// isWildcardGrant reports whether the grant targets every object of its kind
+// in the schema, which is the only shape whose Observe query returns counts
+// rather than a verdict.
+func isWildcardGrant(gp v1alpha1.GrantParameters) bool {
+	return v1alpha1.IsWildcard(gp.Tables) ||
+		v1alpha1.IsWildcard(gp.Sequences) ||
+		v1alpha1.IsWildcardRoutines(gp.Routines)
 }
 
 // grantTarget returns the object phrase of a GRANT/REVOKE statement: the
@@ -937,11 +955,11 @@ func selectRoutineGrantQuery(gp v1alpha1.GrantParameters, q *xsql.Query) error {
 		// No signature to compare, so the argument formatting subquery goes
 		// too. pg_proc is counted unfiltered because ON ALL ROUTINES IN SCHEMA
 		// covers functions, aggregates, window functions and procedures alike.
-		q.String = "SELECT COUNT(*) = (" +
+		q.String = "SELECT COUNT(*) AS matching, (" +
 			"SELECT COUNT(*) FROM pg_proc ap " +
 			"INNER JOIN pg_namespace an ON ap.pronamespace = an.oid " +
 			"WHERE an.nspname=$1" +
-			") AS ct " +
+			") AS total " +
 			"FROM (SELECT 1 FROM pg_proc p " +
 			"INNER JOIN pg_namespace n ON p.pronamespace = n.oid, " +
 			"aclexplode(p.proacl) as acl " +
@@ -1073,7 +1091,11 @@ func relationGrantQuery(relkind string, gp v1alpha1.GrantParameters, objects, pr
 
 	// Join grantee. Filter by schema, grantee and, unless the wildcard is in
 	// play, object name.
-	q.String = "SELECT COUNT(*) = " + expected + " AS ct " +
+	cmp := "COUNT(*) = " + expected + " AS ct"
+	if v1alpha1.IsWildcard(objects) {
+		cmp = "COUNT(*) AS matching, " + expected + " AS total"
+	}
+	q.String = "SELECT " + cmp + " " +
 		"FROM (SELECT 1 FROM pg_class c " +
 		"INNER JOIN pg_namespace n ON c.relnamespace = n.oid, " +
 		"aclexplode(c.relacl) as acl " +
