@@ -27,7 +27,9 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -46,6 +48,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql/provider"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/secretwatch"
 )
 
 const (
@@ -78,6 +81,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
 	}
+	h, err := secretwatch.PasswordSecretRef(mgr, o.Logger, &namespacedv1alpha1.Role{}, &namespacedv1alpha1.RoleList{}, passwordSecretRef)
+	if err != nil {
+		return err
+	}
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(namespacedv1alpha1.RoleGroupVersionKind),
 		reconcilerOptions...,
@@ -91,6 +98,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&namespacedv1alpha1.Role{}).
+		Watches(&corev1.Secret{}, h).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrency,
 		}).
@@ -489,4 +497,15 @@ func lateInit(observed *namespacedv1alpha1.RoleParameters, desired *namespacedv1
 
 func (c *external) Disconnect(ctx context.Context) error {
 	return nil
+}
+
+// passwordSecretRef returns the Secret referenced by the passwordSecretRef of
+// a Role, and false if it references none.
+func passwordSecretRef(o client.Object) (types.NamespacedName, bool) {
+	cr, ok := o.(*namespacedv1alpha1.Role)
+	if !ok || cr.Spec.ForProvider.PasswordSecretRef == nil {
+		return types.NamespacedName{}, false
+	}
+	ref := cr.Spec.ForProvider.PasswordSecretRef
+	return types.NamespacedName{Namespace: o.GetNamespace(), Name: ref.Name}, true
 }
