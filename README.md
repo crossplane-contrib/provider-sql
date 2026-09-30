@@ -76,6 +76,37 @@ Check the example:
 5. Run `make reviewable` to run code generation, linters, and tests.
 6. Commit, push, and PR.
 
+## Integration tests
+
+Integration tests run against a local [kind](https://kind.sigs.k8s.io) cluster
+with Crossplane, the provider, and the database servers deployed in it.
+
+```console
+make build
+make e2e   # or: make test-integration
+```
+
+Options (pass as `make` variables, e.g. `make e2e DB=postgresql`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `DB` | `all` | Database suite to run: `all`, `mysql`, `postgresql` or `mssql`. |
+| `skipcleanup` | `false` | `true` keeps the kind cluster and the provider after the run. The next run reuses the cluster (skips cluster and Crossplane setup) and redeploys the provider. |
+| `QUICK_TEST` | unset | `true` stops after the provider is healthy, without running database tests. |
+| `POSTGRES_VERSION` | `18` | PostgreSQL server image version. |
+| `MSSQL_IMAGE` | `mcr.microsoft.com/mssql/server:2019-CU32-ubuntu-20.04` | MSSQL server image. |
+| `KIND_NODE_IMAGE_TAG` | see `Makefile` | kind node image tag (Kubernetes version). |
+| `K8S_CLUSTER` | `<BUILD_REGISTRY>-inttests` | kind cluster name. |
+| `CROSSPLANE_HELM_CHANNEL` | `stable` | Crossplane Helm chart channel. |
+| `CROSSPLANE_HELM_CHART_VERSION` | latest in channel | Crossplane Helm chart version. |
+
+A preserved cluster can hold leftover database resources from a failed run.
+If the next run fails on them, delete the cluster:
+
+```console
+kind delete cluster --name <K8S_CLUSTER>
+```
+
 ## Developing locally
 
 **Pre-requisite:** A Kubernetes cluster with Crossplane installed
