@@ -32,7 +32,99 @@ const (
 	errNoPrivileges           = "privileges not passed"
 	errUnknownGrant           = "cannot identify grant type based on passed params"
 	errMemberOfWithPrivileges = "cannot set privileges in the same grant as memberOf"
+
+	errWildcardNotAlone    = "%q must be the only element of %s"
+	errWildcardUnsupported = "%q is not supported for %s: PostgreSQL has no GRANT ... ON ALL form for it"
+	errWildcardRoutineArgs = "a %q routine must not declare args: ON ALL ROUTINES IN SCHEMA takes no signature"
 )
+
+// Wildcard, as the sole element of an object list, maps to PostgreSQL's
+// ON ALL <objects> IN SCHEMA form.
+const Wildcard = "*"
+
+// IsWildcard reports whether objs is exactly the wildcard sentinel.
+func IsWildcard(objs []string) bool {
+	return len(objs) == 1 && objs[0] == Wildcard
+}
+
+// IsWildcardRoutines reports whether rs is exactly the wildcard sentinel. Args
+// are not inspected here; validateWildcards rejects them separately.
+func IsWildcardRoutines(rs []Routine) bool {
+	return len(rs) == 1 && rs[0].Name == Wildcard
+}
+
+// objectList pairs an object list with its field name, for error messages.
+type objectList struct {
+	name string
+	objs []string
+}
+
+// validateWildcards rejects the sentinel wherever PostgreSQL offers no ON ALL
+// form, and any list that mixes it with explicit names.
+func (gp *GrantParameters) validateWildcards() error {
+	if err := gp.rejectUnsupportedWildcards(); err != nil {
+		return err
+	}
+	if err := gp.rejectMixedWildcards(); err != nil {
+		return err
+	}
+	return gp.validateWildcardRoutines()
+}
+
+// rejectUnsupportedWildcards covers the lists with no ON ALL form in the GRANT
+// grammar: there is no GRANT SELECT (col) ON ALL TABLES IN SCHEMA, and foreign
+// servers and foreign data wrappers are only ever granted by name.
+func (gp *GrantParameters) rejectUnsupportedWildcards() error {
+	for _, l := range []objectList{
+		{"columns", gp.Columns},
+		{"foreignDataWrappers", gp.ForeignDataWrappers},
+		{"foreignServers", gp.ForeignServers},
+	} {
+		if slices.Contains(l.objs, Wildcard) {
+			return errors.Errorf(errWildcardUnsupported, Wildcard, l.name)
+		}
+	}
+
+	// A column grant names its tables, so a wildcard there hits the same gap
+	// even though `tables` supports it on its own.
+	if len(gp.Columns) > 0 && slices.Contains(gp.Tables, Wildcard) {
+		return errors.Errorf(errWildcardUnsupported, Wildcard, "the tables of a column grant")
+	}
+
+	return nil
+}
+
+// rejectMixedWildcards enforces that the sentinel stands alone.
+func (gp *GrantParameters) rejectMixedWildcards() error {
+	for _, l := range []objectList{
+		{"tables", gp.Tables},
+		{"sequences", gp.Sequences},
+	} {
+		if slices.Contains(l.objs, Wildcard) && !IsWildcard(l.objs) {
+			return errors.Errorf(errWildcardNotAlone, Wildcard, l.name)
+		}
+	}
+
+	return nil
+}
+
+// validateWildcardRoutines applies the same rule to routines, and rejects args:
+// ON ALL ROUTINES IN SCHEMA has no signature to match.
+func (gp *GrantParameters) validateWildcardRoutines() error {
+	for _, r := range gp.Routines {
+		if r.Name != Wildcard {
+			continue
+		}
+		if len(r.Arguments) > 0 {
+			return errors.Errorf(errWildcardRoutineArgs, Wildcard)
+		}
+		if len(gp.Routines) > 1 {
+			return errors.Errorf(errWildcardNotAlone, Wildcard, "routines")
+		}
+	}
+
+	return nil
+}
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
@@ -133,6 +225,12 @@ var grantTypeFields = map[GrantType][]string{
 
 // IdentifyGrantType return the deduced GrantType from the filled in fields.
 func (gp *GrantParameters) IdentifyGrantType() (GrantType, error) {
+	// Here rather than at the call sites: Create, Observe and Delete all
+	// resolve the grant type first.
+	if err := gp.validateWildcards(); err != nil {
+		return "", err
+	}
+
 	ff := gp.filledInFields()
 	pc := len(gp.Privileges)
 
@@ -291,8 +389,10 @@ const (
 )
 
 type Routine struct {
-	// The name of the routine.
-	// +kubebuilder:validation:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// The name of the routine. The single entry {name: "*"} targets every
+	// routine in the schema; it takes no args, stands alone, and is
+	// authoritative like the tables wildcard.
+	// +kubebuilder:validation:Pattern:=^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
 	Name string `json:"name,omitempty"`
 
 	// The arguments of the routine. Each argument is a type name, optionally
@@ -385,14 +485,19 @@ type GrantParameters struct {
 	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
 	Columns []string `json:"columns,omitempty"`
 
-	// The tables upon which to grant the privileges.
+	// The tables upon which to grant the privileges. The single element "*"
+	// targets every table in the schema and cannot be combined with names. A
+	// wildcard grant is authoritative: it revokes ALL PRIVILEGES on the schema
+	// from the role before granting.
 	// +optional
-	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// +kubebuilder:validation:items:Pattern:=^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
 	Tables []string `json:"tables,omitempty"`
 
-	// The sequences upon which to grant the privileges.
+	// The sequences upon which to grant the privileges. The single element "*"
+	// targets every sequence in the schema and cannot be combined with names,
+	// and is authoritative like the tables wildcard.
 	// +optional
-	// +kubebuilder:validation:items:Pattern:=^[a-zA-Z_][a-zA-Z0-9_$]*$
+	// +kubebuilder:validation:items:Pattern:=^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
 	Sequences []string `json:"sequences,omitempty"`
 
 	// The routines upon which to grant the privileges.
