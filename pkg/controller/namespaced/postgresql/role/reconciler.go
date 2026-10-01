@@ -417,28 +417,18 @@ func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Role) (man
 }
 
 func upToDate(observed *namespacedv1alpha1.RoleParameters, desired *namespacedv1alpha1.RoleParameters) bool {
-	if observed.ConnectionLimit != desired.ConnectionLimit {
+	// NOTE: ConnectionLimit and the Privileges fields are pointers. Comparing
+	// them with != compares ADDRESSES, not values: Observe() builds `observed`
+	// with fresh allocations, so for any Role whose spec declares these fields
+	// explicitly the comparison was always "different" and the resource
+	// reconciled an (empty) Update on every cycle, forever. It only appeared
+	// to work when the spec left them nil, because lateInit() aliases the
+	// observed pointers into the spec. cmp.Equal compares the pointed-to
+	// values (and still treats nil vs non-nil as different).
+	if !cmp.Equal(observed.ConnectionLimit, desired.ConnectionLimit) {
 		return false
 	}
-	if observed.Privileges.SuperUser != desired.Privileges.SuperUser {
-		return false
-	}
-	if observed.Privileges.Inherit != desired.Privileges.Inherit {
-		return false
-	}
-	if observed.Privileges.CreateDb != desired.Privileges.CreateDb {
-		return false
-	}
-	if observed.Privileges.CreateRole != desired.Privileges.CreateRole {
-		return false
-	}
-	if observed.Privileges.Login != desired.Privileges.Login {
-		return false
-	}
-	if observed.Privileges.Replication != desired.Privileges.Replication {
-		return false
-	}
-	if observed.Privileges.BypassRls != desired.Privileges.BypassRls {
+	if !cmp.Equal(observed.Privileges, desired.Privileges) {
 		return false
 	}
 	if !cmp.Equal(observed.ConfigurationParameters, desired.ConfigurationParameters,
