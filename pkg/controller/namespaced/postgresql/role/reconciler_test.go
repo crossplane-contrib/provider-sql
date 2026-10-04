@@ -1473,3 +1473,67 @@ func TestDelete(t *testing.T) {
 		})
 	}
 }
+
+// TestUpToDate is a regression test for the pointer-comparison bug: a Role
+// whose spec declares privileges/connectionLimit explicitly (so lateInit does
+// NOT alias the observed pointers into the spec) must compare EQUAL when the
+// values are equal, even though observed and desired live in distinct
+// allocations.
+func TestUpToDate(t *testing.T) {
+	b := func(v bool) *bool { return &v }
+	i := func(v int32) *int32 { return &v }
+	privs := func() v1alpha1.RolePrivilege {
+		return v1alpha1.RolePrivilege{
+			SuperUser:   b(false),
+			Inherit:     b(true),
+			CreateDb:    b(false),
+			CreateRole:  b(false),
+			Login:       b(true),
+			Replication: b(false),
+			BypassRls:   b(false),
+		}
+	}
+
+	cases := map[string]struct {
+		observed *v1alpha1.RoleParameters
+		desired  *v1alpha1.RoleParameters
+		want     bool
+	}{
+		"EqualValuesDistinctAllocations": {
+			observed: &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: privs()},
+			desired:  &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: privs()},
+			want:     true,
+		},
+		"DifferentPrivilege": {
+			observed: &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: privs()},
+			desired: func() *v1alpha1.RoleParameters {
+				p := privs()
+				p.Login = b(false)
+				return &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: p}
+			}(),
+			want: false,
+		},
+		"DifferentConnectionLimit": {
+			observed: &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: privs()},
+			desired:  &v1alpha1.RoleParameters{ConnectionLimit: i(5), Privileges: privs()},
+			want:     false,
+		},
+		"NilVsSetPrivilege": {
+			observed: &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: privs()},
+			desired: func() *v1alpha1.RoleParameters {
+				p := privs()
+				p.Login = nil
+				return &v1alpha1.RoleParameters{ConnectionLimit: i(-1), Privileges: p}
+			}(),
+			want: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := upToDate(tc.observed, tc.desired); got != tc.want {
+				t.Errorf("upToDate(...): got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
