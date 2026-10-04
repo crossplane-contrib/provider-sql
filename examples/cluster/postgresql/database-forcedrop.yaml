@@ -1,0 +1,12 @@
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: force-drop-db
+spec:
+  forProvider:
+    # Optional, only affects deletion, and supported on PostgreSQL 13+.
+    # When true, DROP DATABASE is issued with WITH (FORCE), which terminates
+    # every existing connection before dropping the database. Useful when an
+    # application keeps a long-lived connection pool open against the database,
+    # which would otherwise make the drop fail with SQLSTATE 55006 (object_in_use).
+    forceDrop: true

@@ -575,11 +575,16 @@ func TestDelete(t *testing.T) {
 		mg  *v1alpha1.Database
 	}
 
+	type want struct {
+		err   error
+		query string
+	}
+
 	cases := map[string]struct {
 		reason string
 		fields fields
 		args   args
-		want   error
+		want   want
 	}{
 		"ErrDropDB": {
 			reason: "Errors dropping a database should be returned",
@@ -593,16 +598,94 @@ func TestDelete(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Database{},
 			},
-			want: errors.Wrap(errBoom, errDropDB),
+			want: want{
+				err: errors.Wrap(errBoom, errDropDB),
+			},
+		},
+		"Success": {
+			reason: "A bare DROP DATABASE statement should be issued by default",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{},
+			},
+			want: want{
+				query: `DROP DATABASE IF EXISTS ""`,
+			},
+		},
+		"SuccessWithForce": {
+			reason: "The DROP statement should include WITH (FORCE) when requested",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[0].(*int)) = minDatabaseForceDropServerVersion
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							ForceDrop: ptr(true),
+						},
+					},
+				},
+			},
+			want: want{
+				query: `DROP DATABASE IF EXISTS "" WITH (FORCE)`,
+			},
+		},
+		"ErrUnsupportedForceVersion": {
+			reason: "An error should be returned when forceDrop is requested on PostgreSQL versions older than 13",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return nil },
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[0].(*int)) = 120000
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ForProvider: v1alpha1.DatabaseParameters{
+							ForceDrop: ptr(true),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errors.Errorf("forceDrop requires PostgreSQL 13+; found server_version_num=%d", 120000), errDropDB),
+			},
 		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			var lastQuery string
+			if tc.want.query != "" {
+				origDB := tc.fields.db.(*mockDB)
+				origExec := origDB.MockExec
+				origDB.MockExec = func(ctx context.Context, q xsql.Query) error {
+					lastQuery = q.String
+					return origExec(ctx, q)
+				}
+			}
 			e := external{db: tc.fields.db}
 			_, err := e.Delete(tc.args.ctx, tc.args.mg)
-			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.query != "" {
+				if diff := cmp.Diff(tc.want.query, lastQuery); diff != "" {
+					t.Errorf("\n%s\ne.Delete(...): -want query, +got query:\n%s\n", tc.reason, diff)
+				}
 			}
 		})
 	}
