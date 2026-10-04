@@ -247,6 +247,7 @@ func TestObserve(t *testing.T) {
 					Spec: v1alpha1.ExtensionSpec{
 						ForProvider: v1alpha1.ExtensionParameters{
 							Version: new(string),
+							Schema:  new(string),
 						},
 					},
 				},
@@ -283,6 +284,33 @@ func TestObserve(t *testing.T) {
 					ResourceExists:          true,
 					ResourceUpToDate:        true,
 					ResourceLateInitialized: true,
+				},
+			},
+		},
+		"SchemaMismatch": {
+			reason: "Installed in another schema than desired: not up to date",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*dest[0].(*string) = "1.8"
+						*dest[1].(*string) = "public"
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Extension{
+					Spec: v1alpha1.ExtensionSpec{
+						ForProvider: v1alpha1.ExtensionParameters{
+							Version: new("1.8"),
+							Schema:  new("gis"),
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists: true,
 				},
 			},
 		},
@@ -359,6 +387,30 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"WithSchema": {
+			reason: "Schema is appended, quoted, after the version",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if q.String != `CREATE EXTENSION IF NOT EXISTS "postgis" WITH VERSION "3.6.0" SCHEMA "Mixed Case"` {
+							return errors.New(q.String)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Extension{
+					Spec: v1alpha1.ExtensionSpec{
+						ForProvider: v1alpha1.ExtensionParameters{
+							Extension: "postgis",
+							Version:   new("3.6.0"),
+							Schema:    new("Mixed Case"),
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -376,6 +428,8 @@ func TestCreate(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
+	errBoom := errors.New("boom")
+
 	type fields struct {
 		db xsql.DB
 	}
@@ -414,6 +468,58 @@ func TestUpdate(t *testing.T) {
 			},
 			want: want{
 				err: nil,
+			},
+		},
+		"SchemaUnchanged": {
+			reason: "No statement when the extension already is in the desired schema",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*dest[1].(*string) = "gis"
+						return nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errors.New(q.String) },
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Extension{
+					Spec: v1alpha1.ExtensionSpec{
+						ForProvider: v1alpha1.ExtensionParameters{
+							Extension: "hstore",
+							Schema:    new("gis"),
+						},
+					},
+				},
+			},
+		},
+		"SchemaMoved": {
+			reason: "A differing schema is fixed with ALTER EXTENSION ... SET SCHEMA; its error is wrapped",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*dest[1].(*string) = "public"
+						return nil
+					},
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if q.String != `ALTER EXTENSION "hstore" SET SCHEMA "gis"` {
+							return errors.New(q.String)
+						}
+						return errBoom
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Extension{
+					Spec: v1alpha1.ExtensionSpec{
+						ForProvider: v1alpha1.ExtensionParameters{
+							Extension: "hstore",
+							Schema:    new("gis"),
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Wrap(errBoom, errAlterExtension),
 			},
 		},
 	}

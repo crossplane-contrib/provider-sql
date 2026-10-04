@@ -23,6 +23,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -46,6 +47,7 @@ const (
 
 	errSelectExtension = "cannot select extension"
 	errCreateExtension = "cannot create extension"
+	errAlterExtension  = "cannot alter extension"
 	errDropExtension   = "cannot drop extension"
 
 	maxConcurrency = 5
@@ -118,23 +120,32 @@ type external struct{ db xsql.DB }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Extension] = &external{}
 
-func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Extension) (managed.ExternalObservation, error) {
+// observe reads the installed version and schema of an extension.
+func (c *external) observe(ctx context.Context, name string) (namespacedv1alpha1.ExtensionParameters, error) {
 	// If the Extension exists, it will have all of these properties.
 	observed := namespacedv1alpha1.ExtensionParameters{
 		Version: new(string),
+		Schema:  new(string),
 	}
 
 	query := "SELECT " +
-		"extversion " +
-		"FROM pg_extension " +
-		"WHERE extname = $1"
+		"e.extversion, n.nspname " +
+		"FROM pg_extension e " +
+		"JOIN pg_namespace n ON n.oid = e.extnamespace " +
+		"WHERE e.extname = $1"
 
 	err := c.db.Scan(ctx, xsql.Query{
 		String:     query,
-		Parameters: []interface{}{mg.Spec.ForProvider.Extension},
+		Parameters: []interface{}{name},
 	},
 		observed.Version,
+		observed.Schema,
 	)
+	return observed, err
+}
+
+func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Extension) (managed.ExternalObservation, error) {
+	observed, err := c.observe(ctx, mg.Spec.ForProvider.Extension)
 
 	// If the database we try to connect on does not exist then
 	// there cannot be an extension on that database either.
@@ -147,9 +158,12 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.Extension
 
 	mg.SetConditions(xpv2.Available())
 
+	// lateInit first: upToDate compares against the filled-in spec.
+	li := lateInit(observed, &mg.Spec.ForProvider)
+
 	return managed.ExternalObservation{
 		ResourceExists:          true,
-		ResourceLateInitialized: lateInit(observed, &mg.Spec.ForProvider),
+		ResourceLateInitialized: li,
 		ResourceUpToDate:        upToDate(observed, mg.Spec.ForProvider),
 	}, nil
 }
@@ -164,11 +178,36 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.Extension)
 		b.WriteString(pq.QuoteIdentifier(*mg.Spec.ForProvider.Version))
 	}
 
+	if mg.Spec.ForProvider.Schema != nil {
+		b.WriteString(" SCHEMA ")
+		b.WriteString(pq.QuoteIdentifier(*mg.Spec.ForProvider.Schema))
+	}
+
 	return managed.ExternalCreation{}, errors.Wrap(c.db.Exec(ctx, xsql.Query{String: b.String()}), errCreateExtension)
 }
 
-func (c *external) Update(_ context.Context, mg *namespacedv1alpha1.Extension) (managed.ExternalUpdate, error) { //nolint:gocyclo
-	return managed.ExternalUpdate{}, nil
+func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.Extension) (managed.ExternalUpdate, error) {
+	desired := mg.Spec.ForProvider
+	if desired.Schema == nil {
+		return managed.ExternalUpdate{}, nil
+	}
+
+	// Update gets no observation; re-read so a version-only
+	// mismatch issues no statement.
+	observed, err := c.observe(ctx, desired.Extension)
+	if err != nil {
+		return managed.ExternalUpdate{}, errors.Wrap(err, errSelectExtension)
+	}
+	if *observed.Schema == *desired.Schema {
+		return managed.ExternalUpdate{}, nil
+	}
+
+	// Non-relocatable extensions (e.g. postgis) reject this; the
+	// engine's error is surfaced as-is.
+	query := "ALTER EXTENSION " + pq.QuoteIdentifier(desired.Extension) +
+		" SET SCHEMA " + pq.QuoteIdentifier(*desired.Schema)
+	err = c.db.Exec(ctx, xsql.Query{String: query})
+	return managed.ExternalUpdate{}, errors.Wrap(err, errAlterExtension)
 }
 
 func (c *external) Disconnect(ctx context.Context) error {
@@ -180,11 +219,9 @@ func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.Extension)
 	return managed.ExternalDelete{}, errors.Wrap(err, errDropExtension)
 }
 
+// upToDate runs after lateInit, so desired is set wherever observed is.
 func upToDate(observed, desired namespacedv1alpha1.ExtensionParameters) bool {
-	if desired.Version == nil || (observed.Version != nil && *desired.Version == *observed.Version) {
-		return true
-	}
-	return false
+	return ptr.Equal(observed.Version, desired.Version) && ptr.Equal(observed.Schema, desired.Schema)
 }
 
 func lateInit(observed namespacedv1alpha1.ExtensionParameters, desired *namespacedv1alpha1.ExtensionParameters) bool {
@@ -192,6 +229,11 @@ func lateInit(observed namespacedv1alpha1.ExtensionParameters, desired *namespac
 
 	if desired.Version == nil && observed.Version != nil {
 		desired.Version = observed.Version
+		li = true
+	}
+
+	if desired.Schema == nil && observed.Schema != nil {
+		desired.Schema = observed.Schema
 		li = true
 	}
 
