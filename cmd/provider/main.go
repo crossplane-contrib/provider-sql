@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-logr/logr"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/microsoft/go-mssqldb"
@@ -28,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/go-logr/logr"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -64,14 +64,17 @@ func main() {
 
 	zl := zap.New(zap.UseDevMode(*debug))
 	log := logging.NewLogrLogger(zl.WithName("provider-sql"))
-	controllerRuntimeLog := logr.Discard()
+
+	// controller-runtime leaves its root logger unset by default and emits a
+	// "log.SetLogger(...) was never called" warning (with a stack trace) on
+	// every reconcile when it is never set. It is also very verbose even at
+	// info level, so in non-debug mode we point it at a discard logger to keep
+	// the previous quiet behaviour while still satisfying controller-runtime.
 	if *debug {
-		// The controller-runtime runs with a no-op logger by default. It is
-		// *very* verbose even at info level, so we only provide it a real
-		// logger when we're running in debug mode.
-		controllerRuntimeLog = zl
+		ctrl.SetLogger(zl)
+	} else {
+		ctrl.SetLogger(logr.Discard())
 	}
-	ctrl.SetLogger(controllerRuntimeLog)
 
 	log.Debug("Starting", "sync-period", syncPeriod.String())
 

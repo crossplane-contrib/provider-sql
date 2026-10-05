@@ -368,8 +368,11 @@ spec:
                             type: string
                           type: array
                         name:
-                          description: The name of the routine.
-                          pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
+                          description: |-
+                            The name of the routine. The single entry {name: "*"} targets every
+                            routine in the schema; it takes no args, stands alone, and is
+                            authoritative like the tables wildcard.
+                          pattern: ^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
                           type: string
                       type: object
                     type: array
@@ -453,15 +456,22 @@ spec:
                         type: object
                     type: object
                   sequences:
-                    description: The sequences upon which to grant the privileges.
+                    description: |-
+                      The sequences upon which to grant the privileges. The single element "*"
+                      targets every sequence in the schema and cannot be combined with names,
+                      and is authoritative like the tables wildcard.
                     items:
-                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
+                      pattern: ^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
                       type: string
                     type: array
                   tables:
-                    description: The tables upon which to grant the privileges.
+                    description: |-
+                      The tables upon which to grant the privileges. The single element "*"
+                      targets every table in the schema and cannot be combined with names. A
+                      wildcard grant is authoritative: it revokes ALL PRIVILEGES on the schema
+                      from the role before granting.
                     items:
-                      pattern: ^[a-zA-Z_][a-zA-Z0-9_$]*$
+                      pattern: ^(\*|[a-zA-Z_][a-zA-Z0-9_$]*)$
                       type: string
                     type: array
                   withInherit:
