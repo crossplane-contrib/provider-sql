@@ -60,6 +60,34 @@ spec:
                 description: RoleParameters define the desired state of a PostgreSQL
                   role instance.
                 properties:
+                  azureEntra:
+                    description: |-
+                      AzureEntra creates an Azure Database for PostgreSQL role mapped to a
+                      specific Microsoft Entra object by using pgaadauth_create_principal_with_oid.
+                    properties:
+                      objectId:
+                        description: |-
+                          ObjectID is the object ID of the Entra user, group, service principal, or
+                          managed identity. For an application, use the enterprise application's
+                          service-principal object ID, not the application/client ID.
+                        pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                        type: string
+                      principalType:
+                        description: |-
+                          PrincipalType identifies the Entra object type. Managed identities and
+                          applications are ServicePrincipal.
+                        enum:
+                        - User
+                        - ServicePrincipal
+                        - Group
+                        type: string
+                    required:
+                    - objectId
+                    - principalType
+                    type: object
+                    x-kubernetes-validations:
+                    - message: Azure Entra principal mapping is immutable
+                      rule: self == oldSelf
                   configurationParameters:
                     description: |-
                       ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
@@ -133,6 +161,12 @@ spec:
                         type: boolean
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: Azure Entra roles cannot specify passwordSecretRef or passwordRotationTrigger
+                  rule: '!(has(self.azureEntra) && (has(self.passwordSecretRef) ||
+                    has(self.passwordRotationTrigger)))'
+                - message: Azure Entra authentication mode is immutable
+                  rule: has(self.azureEntra) == has(oldSelf.azureEntra)
               managementPolicies:
                 default:
                 - '*'

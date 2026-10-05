@@ -335,6 +335,42 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"ErrAzureEntraPrincipalIsAdmin": {
+			reason: "We should refuse to adopt an Entra administrator as an application role",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(_ context.Context, q xsql.Query, dest ...interface{}) error {
+						if q.String == "SELECT principaltype, objectid, isadmin FROM pg_catalog.pgaadauth_list_principals(false) WHERE rolname = $1" {
+							*dest[0].(*string) = "service"
+							*dest[1].(*string) = "00000000-0000-0000-0000-000000000001"
+							*dest[2].(*bool) = true
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "application",
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "application",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							AzureEntra: &v1alpha1.AzureEntraPrincipal{
+								ObjectID:      "00000000-0000-0000-0000-000000000001",
+								PrincipalType: v1alpha1.AzureEntraPrincipalTypeServicePrincipal,
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				err: errors.Errorf(errEntraPrincipalAdmin, "application"),
+			},
+		},
 		"PasswordChanged": {
 			reason: "We should return ResourceUpToDate=false if the password changed",
 			fields: fields{
@@ -1471,5 +1507,78 @@ func TestDelete(t *testing.T) {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
 		})
+	}
+}
+
+func TestUpToDate(t *testing.T) {
+	observed := &v1alpha1.RoleParameters{
+		ConnectionLimit: ptr.To(int32(-1)),
+		Privileges: v1alpha1.RolePrivilege{
+			SuperUser:   ptr.To(false),
+			Inherit:     ptr.To(true),
+			CreateDb:    ptr.To(false),
+			CreateRole:  ptr.To(false),
+			Login:       ptr.To(true),
+			Replication: ptr.To(false),
+			BypassRls:   ptr.To(false),
+		},
+	}
+	desired := &v1alpha1.RoleParameters{
+		ConnectionLimit: ptr.To(int32(-1)),
+		Privileges: v1alpha1.RolePrivilege{
+			SuperUser:   ptr.To(false),
+			Inherit:     ptr.To(true),
+			CreateDb:    ptr.To(false),
+			CreateRole:  ptr.To(false),
+			Login:       ptr.To(true),
+			Replication: ptr.To(false),
+			BypassRls:   ptr.To(false),
+		},
+	}
+
+	if !upToDate(observed, desired) {
+		t.Error("equal values at different pointer addresses should be up to date")
+	}
+
+	desired.Privileges.Login = ptr.To(false)
+	if upToDate(observed, desired) {
+		t.Error("different privilege values should not be up to date")
+	}
+}
+
+func TestCreateAzureEntraRole(t *testing.T) {
+	mg := &v1alpha1.Role{
+		Spec: v1alpha1.RoleSpec{
+			ForProvider: v1alpha1.RoleParameters{
+				AzureEntra: &v1alpha1.AzureEntraPrincipal{
+					ObjectID:      "00112233-4455-6677-8899-aabbccddeeff",
+					PrincipalType: v1alpha1.AzureEntraPrincipalTypeServicePrincipal,
+				},
+			},
+		},
+	}
+	meta.SetExternalName(mg, "application-identity")
+
+	var executed []xsql.Query
+	e := &external{db: mockDB{
+		MockExec: func(_ context.Context, q xsql.Query) error {
+			executed = append(executed, q)
+			return nil
+		},
+	}}
+
+	if _, err := e.Create(context.Background(), mg); err != nil {
+		t.Fatalf("Create returned an unexpected error: %v", err)
+	}
+	if len(executed) != 1 {
+		t.Fatalf("executed %d queries, want 1", len(executed))
+	}
+	const wantQuery = "SELECT pg_catalog.pgaadauth_create_principal_with_oid($1, $2, $3, false, false)"
+	if executed[0].String != wantQuery {
+		t.Fatalf("executed query = %q, want %q", executed[0].String, wantQuery)
+	}
+	wantParameters := []interface{}{"application-identity", "00112233-4455-6677-8899-aabbccddeeff", "service"}
+	if diff := cmp.Diff(wantParameters, executed[0].Parameters); diff != "" {
+		t.Fatalf("query parameters: -want, +got:\n%s", diff)
 	}
 }

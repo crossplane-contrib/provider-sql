@@ -110,3 +110,23 @@ func TestRemapCredentialKeys(t *testing.T) {
 		}
 	})
 }
+
+func TestWithAuthentication(t *testing.T) {
+	original := map[string][]byte{
+		"endpoint":                   []byte("database.example"),
+		credentialKeyAuthentication:  []byte("untrusted"),
+		credentialKeyAzureTokenScope: []byte("untrusted"),
+	}
+	configured := WithAuthentication(original, AuthenticationModeAzureWorkloadIdentity, "https://database.example/.default")
+
+	mode, scope := AuthenticationFromCredentials(configured)
+	if mode != AuthenticationModeAzureWorkloadIdentity {
+		t.Fatalf("authentication mode = %q, want %q", mode, AuthenticationModeAzureWorkloadIdentity)
+	}
+	if scope != "https://database.example/.default" {
+		t.Fatalf("token scope = %q", scope)
+	}
+	if string(original[credentialKeyAuthentication]) != "untrusted" {
+		t.Fatal("WithAuthentication mutated the original credentials")
+	}
+}

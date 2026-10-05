@@ -1025,3 +1025,60 @@ func TestDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateAzureEntraUser(t *testing.T) {
+	mg := &v1alpha1.User{
+		Spec: v1alpha1.UserSpec{
+			ForProvider: v1alpha1.UserParameters{
+				AzureEntra: &v1alpha1.AzureEntraPrincipal{
+					ClientID:      ptr.To("00112233-4455-6677-8899-aabbccddeeff"),
+					PrincipalType: v1alpha1.AzureEntraPrincipalTypeServicePrincipal,
+				},
+			},
+		},
+	}
+	meta.SetExternalName(mg, "application]identity")
+
+	var executed xsql.Query
+	e := &external{userDB: mockDB{
+		MockExec: func(_ context.Context, q xsql.Query) error {
+			executed = q
+			return nil
+		},
+	}}
+
+	if _, err := e.Create(context.Background(), mg); err != nil {
+		t.Fatalf("Create returned an unexpected error: %v", err)
+	}
+	const want = "CREATE USER [application]]identity] WITH SID = 0x33221100554477668899aabbccddeeff, TYPE = E"
+	if executed.String != want {
+		t.Fatalf("executed query = %q, want %q", executed.String, want)
+	}
+}
+
+func TestObserveRejectsMismatchedAzureEntraUser(t *testing.T) {
+	mg := &v1alpha1.User{
+		Spec: v1alpha1.UserSpec{
+			ForProvider: v1alpha1.UserParameters{
+				AzureEntra: &v1alpha1.AzureEntraPrincipal{
+					ClientID:      ptr.To("00112233-4455-6677-8899-aabbccddeeff"),
+					PrincipalType: v1alpha1.AzureEntraPrincipalTypeServicePrincipal,
+				},
+			},
+		},
+	}
+	meta.SetExternalName(mg, "application-identity")
+
+	e := &external{userDB: mockDB{
+		MockScan: func(_ context.Context, _ xsql.Query, dest ...interface{}) error {
+			*dest[0].(*string) = "application-identity"
+			*dest[1].(*string) = "E"
+			*dest[2].(*string) = "11111111-2222-3333-4444-555555555555"
+			return nil
+		},
+	}}
+
+	if _, err := e.Observe(context.Background(), mg); err == nil || !strings.Contains(err.Error(), "is not mapped to Entra identifier") {
+		t.Fatalf("Observe error = %v, want an Entra principal mismatch", err)
+	}
+}

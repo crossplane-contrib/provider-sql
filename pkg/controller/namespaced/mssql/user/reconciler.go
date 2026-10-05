@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/pkg/errors"
@@ -46,6 +47,7 @@ const (
 	errTrackPCUsage = "cannot track ProviderConfig usage"
 
 	errSelectUser             = "cannot select user"
+	errEntraPrincipalMismatch = "database user %s exists but is not mapped to Entra identifier %s with type %s"
 	errSelectLogin            = "cannot select login %s"
 	errCreateUser             = "cannot create user %s"
 	errCreateLogin            = "cannot create login %s"
@@ -137,6 +139,29 @@ var _ managed.TypedExternalClient[*namespacedv1alpha1.User] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalObservation, error) {
 	var name string
+	if mg.Spec.ForProvider.AzureEntra != nil {
+		identifier := azureEntraSQLIdentifier(mg.Spec.ForProvider.AzureEntra)
+		var principalType string
+		var objectID string
+		err := c.userDB.Scan(ctx, xsql.Query{
+			String:     "SELECT name, type, LOWER(CONVERT(varchar(36), CONVERT(uniqueidentifier, sid))) FROM sys.database_principals WHERE name = @p1",
+			Parameters: []interface{}{meta.GetExternalName(mg)},
+		}, &name, &principalType, &objectID)
+		if xsql.IsNoRows(err) {
+			return managed.ExternalObservation{ResourceExists: false}, nil
+		}
+		if err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errSelectUser)
+		}
+
+		expectedType := azureEntraSQLPrincipalType(mg.Spec.ForProvider.AzureEntra.PrincipalType)
+		if principalType != expectedType || !strings.EqualFold(objectID, identifier) {
+			return managed.ExternalObservation{}, errors.Errorf(errEntraPrincipalMismatch, meta.GetExternalName(mg), identifier, expectedType)
+		}
+
+		mg.SetConditions(xpv2.Available())
+		return managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true}, nil
+	}
 
 	query := "SELECT name FROM sys.database_principals WHERE type = 'S' AND name = @p1"
 	err := c.userDB.Scan(ctx, xsql.Query{
@@ -165,6 +190,32 @@ func (c *external) Observe(ctx context.Context, mg *namespacedv1alpha1.User) (ma
 }
 
 func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
+	if mg.Spec.ForProvider.AzureEntra != nil {
+		return c.createAzureEntraUser(ctx, mg)
+	}
+	return c.createSQLUser(ctx, mg)
+}
+
+func (c *external) createAzureEntraUser(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
+	sid, err := mssql.AzureEntraSID(azureEntraSQLIdentifier(mg.Spec.ForProvider.AzureEntra))
+	if err != nil {
+		return managed.ExternalCreation{}, errors.Wrap(err, "invalid Entra object ID")
+	}
+	query := fmt.Sprintf(
+		"CREATE USER %s WITH SID = %s, TYPE = %s",
+		mssql.QuoteIdentifier(meta.GetExternalName(mg)),
+		sid,
+		azureEntraSQLPrincipalType(mg.Spec.ForProvider.AzureEntra.PrincipalType),
+	)
+	if err := c.userDB.Exec(ctx, xsql.Query{String: query}); err != nil {
+		return managed.ExternalCreation{}, errors.Wrapf(err, errCreateUser, meta.GetExternalName(mg))
+	}
+	return managed.ExternalCreation{
+		ConnectionDetails: c.userDB.GetConnectionDetails(meta.GetExternalName(mg), ""),
+	}, nil
+}
+
+func (c *external) createSQLUser(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalCreation, error) {
 	pw, _, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -198,6 +249,10 @@ func (c *external) Create(ctx context.Context, mg *namespacedv1alpha1.User) (man
 }
 
 func (c *external) Update(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalUpdate, error) {
+	if mg.Spec.ForProvider.AzureEntra != nil {
+		return managed.ExternalUpdate{}, nil
+	}
+
 	pw, changed, err := c.getPassword(ctx, mg)
 	if err != nil {
 		return managed.ExternalUpdate{}, err
@@ -299,7 +354,7 @@ func (c *external) killLoginSessions(ctx context.Context, loginName string) erro
 }
 
 func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.User) (managed.ExternalDelete, error) {
-	isContained := mg.Spec.ForProvider.Contained != nil && *mg.Spec.ForProvider.Contained
+	isContained := mg.Spec.ForProvider.AzureEntra != nil || mg.Spec.ForProvider.Contained != nil && *mg.Spec.ForProvider.Contained
 
 	// Only kill sessions for traditional users with logins, not contained users
 	if !isContained {
@@ -332,4 +387,21 @@ func (c *external) Delete(ctx context.Context, mg *namespacedv1alpha1.User) (man
 	}
 
 	return managed.ExternalDelete{}, nil
+}
+
+func azureEntraSQLPrincipalType(principalType namespacedv1alpha1.AzureEntraPrincipalType) string {
+	if principalType == namespacedv1alpha1.AzureEntraPrincipalTypeGroup {
+		return "X"
+	}
+	return "E"
+}
+
+func azureEntraSQLIdentifier(principal *namespacedv1alpha1.AzureEntraPrincipal) string {
+	if principal.PrincipalType == namespacedv1alpha1.AzureEntraPrincipalTypeServicePrincipal && principal.ClientID != nil {
+		return *principal.ClientID
+	}
+	if principal.ObjectID != nil {
+		return *principal.ObjectID
+	}
+	return ""
 }

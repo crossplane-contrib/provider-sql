@@ -35,17 +35,22 @@ const (
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a MSSQL server.
 	CredentialsSourceMSSQLConnectionSecret MSSQLConnectionSource = "MSSQLConnectionSecret"
+	// CredentialsSourceAzureWorkloadIdentity indicates that the provider should
+	// authenticate to Azure SQL with the workload identity assigned to the
+	// provider pod. The referenced secret supplies connection metadata only.
+	CredentialsSourceAzureWorkloadIdentity MSSQLConnectionSource = "AzureWorkloadIdentity"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=MSSQLConnectionSecret
+	// +kubebuilder:validation:Enum=MSSQLConnectionSecret;AzureWorkloadIdentity
 	Source MSSQLConnectionSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MSSQL connection secret
-	// that contains the credentials that must be used to connect to the
-	// provider.
+	// that contains the connection metadata used to connect to the provider.
+	// Password authentication requires username and password. Azure workload
+	// identity authentication requires only endpoint and port.
 	// +optional
 	ConnectionSecretRef xpv2.LocalSecretReference `json:"connectionSecretRef,omitempty"`
 

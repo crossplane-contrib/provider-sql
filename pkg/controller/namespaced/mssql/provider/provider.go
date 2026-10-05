@@ -24,6 +24,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 	var (
 		secretKey  *client.ObjectKey
 		keyMapping map[string]string
+		authMode   = xsql.AuthenticationModePassword
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -44,6 +45,9 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 			Namespace: mg.GetNamespace(),
 		}
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		if providerConfig.Spec.Credentials.Source == v1alpha1.CredentialsSourceAzureWorkloadIdentity {
+			authMode = xsql.AuthenticationModeAzureWorkloadIdentity
+		}
 
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
@@ -61,6 +65,9 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 			Namespace: clusterProviderConfig.Spec.Credentials.ConnectionSecretRef.Namespace,
 		}
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		if clusterProviderConfig.Spec.Credentials.Source == v1alpha1.CredentialsSourceAzureWorkloadIdentity {
+			authMode = xsql.AuthenticationModeAzureWorkloadIdentity
+		}
 
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
@@ -78,6 +85,6 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 	return ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
-		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
+		SecretData:         xsql.WithAuthentication(xsql.RemapCredentialKeys(s.Data, keyMapping), authMode, ""),
 	}, nil
 }

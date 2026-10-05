@@ -283,6 +283,53 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
+		"SuccessNoRoleMembership": {
+			reason: "We should return ResourceExists: false when the user is not a role member",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{"role"})), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-user"),
+							Role:     ptr.To(v1alpha1.DatabaseRoleDataReader),
+						},
+					},
+				},
+			},
+			want: want{o: managed.ExternalObservation{ResourceExists: false}},
+		},
+		"SuccessRoleMembership": {
+			reason: "We should return ready when the user is already a role member",
+			fields: fields{
+				db: mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						if !strings.Contains(q.String, "sys.database_role_members") {
+							return nil, errBoom
+						}
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{"role"}).AddRow("db_datareader")), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-user"),
+							Role:     ptr.To(v1alpha1.DatabaseRoleDataReader),
+						},
+					},
+				},
+			},
+			want: want{o: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true}},
+		},
 		"ErrSelectGrant": {
 			reason: "We should return any errors encountered while trying to show the grants",
 			fields: fields{
@@ -526,6 +573,31 @@ func TestCreate(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SuccessRoleMembership": {
+			reason: "The requested database role membership should be created",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if q.String != "ALTER ROLE [db_datawriter] ADD MEMBER [test-user]" {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-user"),
+							Role:     ptr.To(v1alpha1.DatabaseRoleDataWriter),
+						},
+					},
+				},
+			},
+			want: want{},
+		},
 		"SuccessSchema": {
 			reason: "No error should be returned when we successfully create a grant",
 			fields: fields{
@@ -760,6 +832,31 @@ func TestDelete(t *testing.T) {
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
 						if strings.Contains(q.String, "ON SCHEMA::") {
+							return errBoom
+						}
+						return nil
+					},
+				},
+			},
+			want: nil,
+		},
+		"SuccessRoleMembership": {
+			reason: "The requested database role membership should be removed",
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database: ptr.To("test-example"),
+							User:     ptr.To("test-user"),
+							Role:     ptr.To(v1alpha1.DatabaseRoleOwner),
+						},
+					},
+				},
+			},
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if q.String != "ALTER ROLE [db_owner] DROP MEMBER [test-user]" {
 							return errBoom
 						}
 						return nil
