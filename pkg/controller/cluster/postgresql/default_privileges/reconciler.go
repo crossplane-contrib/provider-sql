@@ -153,20 +153,37 @@ var (
 )
 
 func selectDefaultPrivilegesQuery(gp v1alpha1.DefaultPrivilegesParameters, q *xsql.Query) {
+	// Filter by object type, grantee (TO role), target role (FOR ROLE), and
+	// schema (IN SCHEMA). Without the target-role and schema filters, default
+	// privileges for a different target role or schema that happen to grant the
+	// same privileges to the same grantee are mistaken for this resource's
+	// grants, so Observe reports the resource as up-to-date and Create is never
+	// called.
 	sqlString := `
 	select distinct(default_acl.privilege_type)
-	from pg_roles r
-	join (SELECT defaclnamespace, (aclexplode(defaclacl)).* FROM pg_default_acl
+	from pg_roles grantee
+	join (SELECT defaclrole, defaclnamespace, (aclexplode(defaclacl)).* FROM pg_default_acl
 	WHERE defaclobjtype = $1) default_acl
-	on r.oid = default_acl.grantee
-	where r.rolname = $2;
+	on grantee.oid = default_acl.grantee
+	join pg_roles target_role
+	on target_role.oid = default_acl.defaclrole
+	where grantee.rolname = $2
+	and target_role.rolname = $3
 	`
-	q.String = sqlString
-	q.Parameters = []interface{}{
+	params := []interface{}{
 		objectTypes[*gp.ObjectType],
 		*gp.Role,
+		*gp.TargetRole,
 	}
-
+	if gp.Schema != nil {
+		sqlString += ` and default_acl.defaclnamespace = (select oid from pg_namespace where nspname = $4)`
+		params = append(params, *gp.Schema)
+	} else {
+		sqlString += ` and default_acl.defaclnamespace = 0`
+	}
+	sqlString += `;`
+	q.String = sqlString
+	q.Parameters = params
 }
 
 func withOption(option *v1alpha1.GrantOption) string {
