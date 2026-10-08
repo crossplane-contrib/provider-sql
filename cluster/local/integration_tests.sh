@@ -129,38 +129,37 @@ cleanup_provider() {
 }
 
 setup_tls_certs() {
+  certdir="$(mktemp -d)"
   echo_step "generating CA key and certificate"
-  openssl genrsa -out ca-key.pem 2048
-  openssl req -new -x509 -key ca-key.pem -out ca-cert.pem -days 365 -subj "/CN=CA"
+  openssl genrsa -out "${certdir}/ca-key.pem" 2048
+  openssl req -new -x509 -key "${certdir}/ca-key.pem" -out "${certdir}/ca-cert.pem" -days 365 -subj "/CN=CA"
 
   echo_step "generating server key and certificate"
-  openssl genrsa -out server-key.pem 2048
-  openssl req -new -key server-key.pem -out server-req.pem -subj "/CN=mariadb.default.svc.cluster.local"
-  openssl x509 -req -in server-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -days 365
+  openssl genrsa -out "${certdir}/server-key.pem" 2048
+  openssl req -new -key "${certdir}/server-key.pem" -out "${certdir}/server-req.pem" -subj "/CN=mariadb.default.svc.cluster.local"
+  openssl x509 -req -in "${certdir}/server-req.pem" -CA "${certdir}/ca-cert.pem" -CAkey "${certdir}/ca-key.pem" -CAcreateserial -out "${certdir}/server-cert.pem" -days 365
 
   echo_step "generating client key and certificate"
-  openssl genrsa -out client-key.pem 2048
-  openssl req -new -key client-key.pem -out client-req.pem -subj "/CN=client"
-  openssl x509 -req -in client-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out client-cert.pem -days 365
+  openssl genrsa -out "${certdir}/client-key.pem" 2048
+  openssl req -new -key "${certdir}/client-key.pem" -out "${certdir}/client-req.pem" -subj "/CN=client"
+  openssl x509 -req -in "${certdir}/client-req.pem" -CA "${certdir}/ca-cert.pem" -CAkey "${certdir}/ca-key.pem" -CAcreateserial -out "${certdir}/client-cert.pem" -days 365
 
   echo_step "creating secret for the TLS certificates and keys"
   "${KUBECTL}" create secret generic mariadb-server-tls \
-      --from-file=ca-cert.pem \
-      --from-file=server-cert.pem \
-      --from-file=server-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/server-cert.pem" \
+      --from-file="${certdir}/server-key.pem"
 
   echo_step "creating secret for the client TLS certificates and keys"
   "${KUBECTL}" create secret generic mariadb-client-tls \
-      --from-file=ca-cert.pem \
-      --from-file=client-cert.pem \
-      --from-file=client-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/client-cert.pem" \
+      --from-file="${certdir}/client-key.pem"
 }
 
 cleanup_tls_certs() {
   echo_step "cleaning up TLS certificate files and secrets"
-  for file in *.pem *.srl; do
-      rm -f "$file"
-  done
+  rm -rf "${certdir}"
   "${KUBECTL}" delete secret mariadb-server-tls
   "${KUBECTL}" delete secret mariadb-client-tls
 }
@@ -201,9 +200,9 @@ setup_mariadb_tls() {
       --from-literal password="${MARIADB_TEST_PW}" \
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306" \
-      --from-file=ca-cert.pem \
-      --from-file=client-cert.pem \
-      --from-file=client-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/client-cert.pem" \
+      --from-file="${certdir}/client-key.pem"
 
   # Create init script ConfigMap
   "${KUBECTL}" create configmap mariadb-init-script --from-literal=init.sql="
