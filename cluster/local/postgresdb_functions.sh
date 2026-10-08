@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-set -e
+# Sourced by integration_tests.sh, which defines KUBECTL, scriptdir, EXAMPLES, APIGROUP_SUFFIX and the echo_* helpers.
+# shellcheck disable=SC2154
+
+# Runs SQL as postgres inside the PostgreSQL pod (local socket, trust auth): pg_query <database> <sql>
+pg_query() {
+  "${KUBECTL}" exec postgresdb-postgresql-0 -- psql -U postgres -d "$1" -wtAc "$2"
+}
 
 setup_postgresdb_no_tls() {
   echo_step "Installing PostgresDB into default namespace"
@@ -11,16 +17,13 @@ setup_postgresdb_no_tls() {
       --from-literal endpoint="postgresdb-postgresql.default.svc.cluster.local" \
       --from-literal port="5432"
 
-  scriptdir=$(dirname "$0")
+  # shellcheck disable=SC2016
   POSTGRES_VERSION="${POSTGRES_VERSION:-18}" envsubst '${POSTGRES_VERSION}' < "${scriptdir}/postgres.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for PostgreSQL to be ready"
   "${KUBECTL}" rollout status statefulset/postgresdb-postgresql --timeout=120s
 
-  "${KUBECTL}" port-forward --namespace default svc/postgresdb-postgresql 5432:5432 > >(grep -v "Handling connection for") 2>&1 &
-  PORT_FORWARD_PID=$!
-
-  while ! PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT 1;"; do
+  until pg_query postgres "SELECT 1;" > /dev/null 2>&1; do
       echo "Waiting for PostgresDB to be ready..."
       sleep 2
   done
@@ -57,12 +60,8 @@ create_grantable_objects() {
   CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   CREATE SERVER test_foreign_server FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   "
-  create_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
-  if [ $? -eq 0 ]; then
-    echo_info "PostgresDB objects created in schema public"
-  else
-    echo_error "ERROR: could not create grantable objects: $create_objects"
-  fi
+  pg_query "$TARGET_DB" "$request" > /dev/null
+  echo_info "PostgresDB objects created in schema public"
 }
 
 delete_grantable_objects() {
@@ -80,38 +79,34 @@ delete_grantable_objects() {
   DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2;
   DROP TABLE \"$TARGET_SCHEMA\".test_table;
   "
-  drop_objects=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$TARGET_DB" -wtAc "$request")
-  if [ $? -eq 0 ]; then
-    echo_info "PostgresDB objects dropped from schema public"
-  else
-    echo_error "ERROR: could not delete grantable objects: $drop_objects"
-  fi
+  pg_query "$TARGET_DB" "$request" > /dev/null
+  echo_info "PostgresDB objects dropped from schema public"
 }
 
 setup_postgresdb_tests(){
   # install provider resources
   echo_step "creating PostgresDB Database resource"
   # create DB
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/postgresql/database.yaml"
 
   echo_step "creating PostgresDB Role resource"
   # create grant
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/postgresql/role.yaml"
 
   echo_step "creating PostgresDB Schema resources"
   # create grant
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/postgresql/schema.yaml"
 
   echo_step "check if Role is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/role.yaml > /dev/null
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/postgresql/role.yaml" > /dev/null
   echo_step_completed
 
   echo_step "check if database is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml > /dev/null
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/postgresql/database.yaml" > /dev/null
   echo_step_completed
 
   echo_step "check if schema is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/postgresql/schema.yaml"
   echo_step_completed
 
   echo_step "create grantable objects"
@@ -120,10 +115,10 @@ setup_postgresdb_tests(){
 
   echo_step "creating PostgresDB Grant resource"
   # create grant
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/postgresql/grant.yaml"
 
   echo_step "check if grant is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/postgresql/grant.yaml"
   echo_step_completed
 }
 
@@ -131,7 +126,7 @@ check_database_owner_ref() {
   echo_step "check if database created with ownerSelector has correct owner"
 
   local owner
-  owner=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d postgres -wtAc \
+  owner=$(pg_query postgres \
     "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = 'db-owner-ref';")
   owner=$(echo "${owner}" | xargs)
 
@@ -148,21 +143,8 @@ check_all_roles_privileges() {
   # check if granting mechanism is working properly
   echo_step "check if grant mechanism is working"
 
-  TARGET_DB='db1'
-  OWNER_ROLE='ownerrole'
-  USER_ROLE='example-role'
-
-  # Define roles and their expected privileges
-  roles="$OWNER_ROLE $USER_ROLE"
-  privileges="CONNECT|CREATE|TEMP ||"
-
-  # Iterate over roles and expected privileges
-  role_index=1
-  for role in $roles; do
-      expected_privileges=$(echo "$privileges" | cut -d ' ' -f $role_index)
-      check_role_privileges "$role" "$expected_privileges" "${postgres_root_pw}" "$TARGET_DB"
-      role_index=$((role_index + 1))
-  done
+  check_role_privileges ownerrole 'CONNECT|CREATE|TEMP' db1
+  check_role_privileges example-role '||' db1
 
   echo_step_completed
 }
@@ -170,11 +152,11 @@ check_all_roles_privileges() {
 check_role_privileges() {
     local role=$1
     local expected_privileges=$2
-    local target_db=$4
+    local target_db=$3
 
     echo -n "Privileges for role: $role (expected: $expected_privileges)"
 
-    result=$(PGPASSWORD="$3" psql -h localhost -p 5432 -U postgres -d postgres -wtAc" SELECT CASE WHEN has_database_privilege('$role', '$target_db', 'CONNECT') THEN 'CONNECT' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'CREATE') THEN 'CREATE' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'TEMP') THEN 'TEMP' ELSE NULL END " | tr '\n' ',' | sed 's/,$//')
+    result=$(pg_query postgres "SELECT CASE WHEN has_database_privilege('$role', '$target_db', 'CONNECT') THEN 'CONNECT' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'CREATE') THEN 'CREATE' ELSE NULL END, CASE WHEN has_database_privilege('$role', '$target_db', 'TEMP') THEN 'TEMP' ELSE NULL END " | tr '\n' ',' | sed 's/,$//')
 
     if [ "$result" = "$expected_privileges" ]; then
         echo " condition met"
@@ -189,24 +171,8 @@ check_all_schema_privileges() {
   # check if schema privileges are set properly
   echo_step "check if schema privileges are set properly"
 
-  OWNER_ROLE='ownerrole'
-  USER_ROLE='no-grants-role'
-
-  # Define roles and their expected privileges
-  roles="$OWNER_ROLE $USER_ROLE"
-  dbs="db1 example"
-  schemas="public my-schema"
-  privileges="USAGE|f,CREATE|f USAGE|t,CREATE|t"
-
-  # Iterate over roles and expected privileges
-  role_index=1
-  for role in $roles; do
-    expected_privileges=$(echo "$privileges" | cut -d ' ' -f $role_index)
-    target_db=$(echo "$dbs" | cut -d ' ' -f $role_index)
-    target_schema=$(echo "$schemas" | cut -d ' ' -f $role_index)
-    check_schema_privileges "$role" "$expected_privileges" "${postgres_root_pw}" "$target_db" "$target_schema"
-    role_index=$((role_index + 1))
-  done
+  check_schema_privileges ownerrole 'USAGE|f,CREATE|f' db1 public
+  check_schema_privileges no-grants-role 'USAGE|t,CREATE|t' example my-schema
 
   echo_step_completed
 }
@@ -219,7 +185,7 @@ check_privileges(){
   local request=$5
   echo -n "Privileges on $object for role: $role (expected: $expected)"
 
-  response=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc "$request")
+  response=$(pg_query "$target_db" "$request")
   response=$(echo "$response" | xargs | tr ' ' ',')
 
   if [[ "$response" == "$expected" ]]; then
@@ -234,12 +200,12 @@ check_privileges(){
 check_schema_privileges(){
   local role=$1
   local expected_privileges=$2
-  local target_db=$4
-  local target_schema=$5
+  local target_db=$3
+  local target_schema=$4
 
   request="select acl.privilege_type, acl.is_grantable from pg_namespace n, aclexplode(n.nspacl) acl INNER JOIN pg_roles s ON acl.grantee = s.oid where n.nspname = '$target_schema' and s.rolname='$role'"
 
-  check_privileges $target_db "schema $target_db.$target_schema" $role $expected_privileges "$request"
+  check_privileges "$target_db" "schema $target_db.$target_schema" "$role" "$expected_privileges" "$request"
 }
 
 check_table_privileges(){
@@ -251,7 +217,7 @@ check_table_privileges(){
 
   request="select privilege_type, is_grantable from information_schema.role_table_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' order by privilege_type asc"
 
-  check_privileges $target_db "table $schema.$table" $role $expected_privileges "$request"
+  check_privileges "$target_db" "table $schema.$table" "$role" "$expected_privileges" "$request"
 }
 
 check_sequence_privileges(){
@@ -260,13 +226,10 @@ check_sequence_privileges(){
   role='no-grants-role'
   expected_privileges='SELECT|f,UPDATE|f,USAGE|f'
 
-  sequence="test_sequence_1"
-  request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
-  check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
-
-  sequence="test_sequence_2"
-  request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
-  check_privileges $target_db "sequence $schema.$sequence" $role $expected_privileges "$request"
+  for sequence in test_sequence_1 test_sequence_2; do
+    request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'S' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$sequence'"
+    check_privileges "$target_db" "sequence $schema.$sequence" "$role" "$expected_privileges" "$request"
+  done
 }
 
 check_routine_privileges(){
@@ -278,7 +241,7 @@ check_routine_privileges(){
 
   request="select privilege_type, is_grantable from information_schema.role_routine_grants where grantee = '$role' and routine_schema = '$schema' and routine_name='$routine' order by privilege_type asc"
 
-  check_privileges $target_db "routine $schema.$routine" $role $expected_privileges "$request"
+  check_privileges "$target_db" "routine $schema.$routine" "$role" "$expected_privileges" "$request"
 }
 
 check_column_privileges(){
@@ -291,7 +254,7 @@ check_column_privileges(){
 
   request="select privilege_type, is_grantable from information_schema.role_column_grants where grantee = '$role' and table_schema = '$schema' and table_name='$table' and column_name='$column' order by privilege_type asc"
 
-  check_privileges $target_db "column $column on table $schema.$table" $role $expected_privileges "$request"
+  check_privileges "$target_db" "column $column on table $schema.$table" "$role" "$expected_privileges" "$request"
 }
 
 check_foreign_data_wrapper_privileges(){
@@ -302,7 +265,7 @@ check_foreign_data_wrapper_privileges(){
 
   request="select privilege_type, is_grantable from information_schema.role_usage_grants where grantee = '$role' and object_type = 'FOREIGN DATA WRAPPER' and object_name='$foreign_data_wrapper' order by privilege_type asc"
 
-  check_privileges $target_db "foreign data wrapper $foreign_data_wrapper" $role $expected_privileges "$request"
+  check_privileges "$target_db" "foreign data wrapper $foreign_data_wrapper" "$role" "$expected_privileges" "$request"
 }
 
 check_foreign_server_privileges(){
@@ -313,7 +276,7 @@ check_foreign_server_privileges(){
 
   request="select privilege_type, is_grantable from information_schema.role_usage_grants where grantee = '$role' and object_type = 'FOREIGN SERVER' and object_name='$foreign_server' order by privilege_type asc"
 
-  check_privileges $target_db "foreign server $foreign_server" $role $expected_privileges "$request"
+  check_privileges "$target_db" "foreign server $foreign_server" "$role" "$expected_privileges" "$request"
 }
 
 check_all_privileges_table_grant(){
@@ -326,7 +289,7 @@ check_all_privileges_table_grant(){
   table="test_table"
   role='example-role'
 
-  pg_major=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc \
+  pg_major=$(pg_query postgres \
     "SELECT current_setting('server_version_num')::int / 10000;" | xargs)
 
   if [ "${pg_major}" -ge 17 ]; then
@@ -337,14 +300,13 @@ check_all_privileges_table_grant(){
 
   request="select acl.privilege_type, acl.is_grantable from pg_class c inner join pg_namespace n on c.relnamespace = n.oid, aclexplode(c.relacl) as acl inner join pg_roles s on acl.grantee = s.oid where c.relkind = 'r' and n.nspname = '$schema' and s.rolname='$role' and c.relname = '$table' order by acl.privilege_type asc"
 
-  check_privileges $target_db "ALL PRIVILEGES on table $schema.$table" $role $expected_privileges "$request"
+  check_privileges "$target_db" "ALL PRIVILEGES on table $schema.$table" "$role" "$expected_privileges" "$request"
 }
 
 setup_observe_only_database(){
   echo_step "create pre-existing database for observe only"
 
-  local datname
-  datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "CREATE DATABASE \"db-observe\";")"
+  pg_query postgres "CREATE DATABASE \"db-observe\";" > /dev/null
 
   echo_step_completed
 }
@@ -353,10 +315,10 @@ check_observe_only_database(){
   echo_step "check if observe only database is preserved after deletion"
 
   # Delete the database kubernetes object, it should not delete the database
-  "${KUBECTL}" delete database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io db-observe
+  "${KUBECTL}" delete "database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io" db-observe
 
   local datname
-  datname="$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
+  datname="$(pg_query postgres "SELECT datname FROM pg_database WHERE datname = 'db-observe';")"
 
   if [[ "$datname" == "db-observe" ]]; then
       echo "Database db-observe is still present"
@@ -367,7 +329,7 @@ check_observe_only_database(){
   fi
 
   # Clean up
-  PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -wtAc "DROP DATABASE \"db-observe\";"
+  pg_query postgres "DROP DATABASE \"db-observe\";"
 
   echo_step_completed
 }
@@ -380,7 +342,7 @@ check_wildcard_privileges(){
   schema="public"
   role='all-objects-role'
 
-  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+  missing=$(pg_query "$target_db" \
     "select count(*) from pg_class c join pg_namespace n on c.relnamespace = n.oid
      where c.relkind in ('r','p','v','m','f') and n.nspname = '$schema'
      and not has_table_privilege('$role', c.oid, 'SELECT');" | xargs)
@@ -392,7 +354,7 @@ check_wildcard_privileges(){
   fi
 
   # Same for routines, which take EXECUTE rather than SELECT.
-  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+  missing=$(pg_query "$target_db" \
     "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid
      where n.nspname = '$schema'
      and not has_function_privilege('$role', p.oid, 'EXECUTE');" | xargs)
@@ -425,16 +387,13 @@ delete_postgresdb_resources(){
 
   # uninstall
   echo_step "uninstalling ${PROJECT_NAME}"
-  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
-  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
-  "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
-  echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
+  "${KUBECTL}" delete -f "${EXAMPLES}/postgresql/grant.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${EXAMPLES}/postgresql/database.yaml"
+  "${KUBECTL}" delete -f "${EXAMPLES}/postgresql/role.yaml"
+  "${KUBECTL}" delete -f "${EXAMPLES}/postgresql/schema.yaml"
+  "${KUBECTL}" delete -f "${scriptdir}/postgres.providerconfig.${API_TYPE}.yaml"
 
   # ----------- cleaning postgres related resources
-
-  echo_step "kill port-forwarding"
-  kill $PORT_FORWARD_PID
 
   echo_step "uninstalling secret and provider config for postgres"
   "${KUBECTL}" delete secret postgresdb-creds
@@ -450,11 +409,11 @@ setup_extension_test() {
 
   # Apply extension resources
   echo_sub_step "Creating PostgreSQL extensions"
-  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+  "${KUBECTL}" apply -f "${EXAMPLES}/postgresql/extension.yaml"
 
   # Wait for extensions to be ready
   echo_sub_step "Waiting for extensions to be ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml" > /dev/null
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/postgresql/extension.yaml" > /dev/null
   echo_step_completed
 }
 
@@ -463,8 +422,8 @@ check_extension_test() {
 
   # Check that extensions are ready
   echo_sub_step "Checking extension status"
-  hstore_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/hstore-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-  ltree_status=$("${KUBECTL}" get extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/ltree-extension-db -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+  hstore_status=$("${KUBECTL}" get "extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/hstore-extension-db" -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+  ltree_status=$("${KUBECTL}" get "extension.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/ltree-extension-db" -n default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
 
   if [[ "$hstore_status" == "True" ]] && [[ "$ltree_status" == "True" ]]; then
     echo_info "Extensions are Ready as expected"
@@ -474,8 +433,8 @@ check_extension_test() {
 
   # Verify extensions are installed in the database
   echo_sub_step "Checking extensions in database"
-  hstore_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'hstore';")
-  ltree_installed=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d example -wtAc "SELECT COUNT(*) FROM pg_extension WHERE extname = 'ltree';")
+  hstore_installed=$(pg_query example "SELECT COUNT(*) FROM pg_extension WHERE extname = 'hstore';")
+  ltree_installed=$(pg_query example "SELECT COUNT(*) FROM pg_extension WHERE extname = 'ltree';")
 
   if [[ "$hstore_installed" == "1" ]] && [[ "$ltree_installed" == "1" ]]; then
     echo_info "Extensions are installed in database as expected"
@@ -488,7 +447,7 @@ check_extension_test() {
 
 delete_extension_test() {
   echo_step "Cleaning up PostgreSQL extensions"
-  "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/extension.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true -f "${EXAMPLES}/postgresql/extension.yaml"
   echo_step_completed
 }
 

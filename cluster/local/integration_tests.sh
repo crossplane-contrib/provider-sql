@@ -1,55 +1,50 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 set -e
 
 # setting up colors
 BLU='\033[0;34m'
-YLW='\033[0;33m'
 GRN='\033[0;32m'
 RED='\033[0;31m'
 NOC='\033[0m' # No Color
 echo_info() {
-    printf "\n${BLU}%s${NOC}" "$1"
+    printf '\n%b%s%b' "${BLU}" "$1" "${NOC}"
 }
 echo_step() {
-    printf "\n${BLU}>>>>>>> %s${NOC}\n" "$1"
+    printf '\n%b>>>>>>> %s%b\n' "${BLU}" "$1" "${NOC}"
 }
 echo_sub_step() {
-    printf "\n${BLU}>>> %s${NOC}\n" "$1"
+    printf '\n%b>>> %s%b\n' "${BLU}" "$1" "${NOC}"
 }
 
 echo_step_completed() {
-    printf "${GRN} [✔]${NOC}"
+    printf '%b [✔]%b' "${GRN}" "${NOC}"
 }
 
 echo_success() {
-    printf "\n${GRN}%s${NOC}\n" "$1"
-}
-echo_warn() {
-    printf "\n${YLW}%s${NOC}" "$1"
+    printf '\n%b%s%b\n' "${GRN}" "$1" "${NOC}"
 }
 echo_error() {
-    printf "\n${RED}%s${NOC}" "$1"
+    printf '\n%b%s%b' "${RED}" "$1" "${NOC}"
     exit 1
 }
 
 # ------------------------------
-projectdir="$( cd "$( dirname "${BASH_SOURCE[0]}")"/../.. && pwd )"
-scriptdir="$(dirname "$0")"
+scriptdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+projectdir="$(cd "${scriptdir}/../.." && pwd)"
 
 # get the build environment variables from the special build.vars target in the main makefile
-eval $(make --no-print-directory -C ${projectdir} build.vars)
+eval "$(make --no-print-directory -C "${projectdir}" build.vars)"
 
 # ------------------------------
-
-SAFEHOSTARCH="${SAFEHOSTARCH:-amd64}"
-CONTROLLER_IMAGE="${BUILD_REGISTRY}/${PROJECT_NAME}-${SAFEHOSTARCH}"
 
 K8S_CLUSTER="${K8S_CLUSTER:-${BUILD_REGISTRY}-inttests}"
 
 PACKAGE_NAME="provider-sql"
 MARIADB_ROOT_PW=$(openssl rand -base64 32)
 MARIADB_TEST_PW=$(openssl rand -base64 32)
-MSSQL_SA_PW="$(openssl rand -base64 16)Aa1!"  # MSSQL requires complex password
+
+skipcleanup="${skipcleanup:-false}"
 
 # cleanup on exit
 if [ "$skipcleanup" != true ]; then
@@ -65,20 +60,8 @@ fi
 # Global variable to control API type
 API_TYPE="cluster"
 
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-# shellcheck source="$SCRIPT_DIR/postgresdb_functions.sh"
-source "$SCRIPT_DIR/postgresdb_functions.sh"
-if [ $? -ne 0 ]; then
-  echo "postgresdb_functions.sh failed. Exiting."
-  exit 1
-fi
-
-# shellcheck source="$SCRIPT_DIR/mssqldb_functions.sh"
-source "$SCRIPT_DIR/mssqldb_functions.sh"
-if [ $? -ne 0 ]; then
-  echo "mssqldb_functions.sh failed. Exiting."
-  exit 1
-fi
+source "${scriptdir}/postgresdb_functions.sh"
+source "${scriptdir}/mssqldb_functions.sh"
 
 integration_tests_end() {
   if [ "$skipcleanup" != true ]; then
@@ -119,7 +102,7 @@ setup_crossplane() {
 
 setup_provider() {
   echo_step "deploying provider via local.xpkg.deploy"
-  make -C "${projectdir}" local.xpkg.deploy.provider.${PACKAGE_NAME} KIND_CLUSTER_NAME="${K8S_CLUSTER}"
+  make -C "${projectdir}" "local.xpkg.deploy.provider.${PACKAGE_NAME}" KIND_CLUSTER_NAME="${K8S_CLUSTER}"
 
   echo_step "waiting for provider to be installed"
   "${KUBECTL}" wait "provider.pkg.crossplane.io/${PACKAGE_NAME}" --for=condition=healthy --timeout=60s
@@ -129,13 +112,13 @@ cleanup_provider() {
   echo_step "uninstalling provider"
 
   "${KUBECTL}" delete provider.pkg.crossplane.io "${PACKAGE_NAME}"
-  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io runtimeconfig-${PACKAGE_NAME}
+  "${KUBECTL}" delete deploymentruntimeconfig.pkg.crossplane.io "runtimeconfig-${PACKAGE_NAME}"
 
   echo_step "waiting for provider pods to be deleted"
   timeout=60
   current=0
   step=3
-  while [[ $(kubectl get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
+  while [[ $("${KUBECTL}" get providerrevision.pkg.crossplane.io -o name | wc -l | tr -d '[:space:]') != "0" ]]; do
     echo "waiting another $step seconds"
     current=$((current + step))
     if [[ $current -ge $timeout ]]; then
@@ -146,38 +129,37 @@ cleanup_provider() {
 }
 
 setup_tls_certs() {
+  certdir="$(mktemp -d)"
   echo_step "generating CA key and certificate"
-  openssl genrsa -out ca-key.pem 2048
-  openssl req -new -x509 -key ca-key.pem -out ca-cert.pem -days 365 -subj "/CN=CA"
+  openssl genrsa -out "${certdir}/ca-key.pem" 2048
+  openssl req -new -x509 -key "${certdir}/ca-key.pem" -out "${certdir}/ca-cert.pem" -days 365 -subj "/CN=CA"
 
   echo_step "generating server key and certificate"
-  openssl genrsa -out server-key.pem 2048
-  openssl req -new -key server-key.pem -out server-req.pem -subj "/CN=mariadb.default.svc.cluster.local"
-  openssl x509 -req -in server-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -days 365
+  openssl genrsa -out "${certdir}/server-key.pem" 2048
+  openssl req -new -key "${certdir}/server-key.pem" -out "${certdir}/server-req.pem" -subj "/CN=mariadb.default.svc.cluster.local"
+  openssl x509 -req -in "${certdir}/server-req.pem" -CA "${certdir}/ca-cert.pem" -CAkey "${certdir}/ca-key.pem" -CAcreateserial -out "${certdir}/server-cert.pem" -days 365
 
   echo_step "generating client key and certificate"
-  openssl genrsa -out client-key.pem 2048
-  openssl req -new -key client-key.pem -out client-req.pem -subj "/CN=client"
-  openssl x509 -req -in client-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out client-cert.pem -days 365
+  openssl genrsa -out "${certdir}/client-key.pem" 2048
+  openssl req -new -key "${certdir}/client-key.pem" -out "${certdir}/client-req.pem" -subj "/CN=client"
+  openssl x509 -req -in "${certdir}/client-req.pem" -CA "${certdir}/ca-cert.pem" -CAkey "${certdir}/ca-key.pem" -CAcreateserial -out "${certdir}/client-cert.pem" -days 365
 
   echo_step "creating secret for the TLS certificates and keys"
   "${KUBECTL}" create secret generic mariadb-server-tls \
-      --from-file=ca-cert.pem \
-      --from-file=server-cert.pem \
-      --from-file=server-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/server-cert.pem" \
+      --from-file="${certdir}/server-key.pem"
 
   echo_step "creating secret for the client TLS certificates and keys"
   "${KUBECTL}" create secret generic mariadb-client-tls \
-      --from-file=ca-cert.pem \
-      --from-file=client-cert.pem \
-      --from-file=client-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/client-cert.pem" \
+      --from-file="${certdir}/client-key.pem"
 }
 
 cleanup_tls_certs() {
   echo_step "cleaning up TLS certificate files and secrets"
-  for file in *.pem *.srl; do
-      rm -f "$file"
-  done
+  rm -rf "${certdir}"
   "${KUBECTL}" delete secret mariadb-server-tls
   "${KUBECTL}" delete secret mariadb-client-tls
 }
@@ -194,7 +176,7 @@ setup_provider_config_tls() {
 
 cleanup_provider_config() {
   echo_step "cleaning up ProviderConfig"
-  "${KUBECTL}" delete providerconfig.mysql.sql.${APIGROUP_SUFFIX}crossplane.io default
+  "${KUBECTL}" delete "providerconfig.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" default
 }
 
 setup_mariadb_no_tls() {
@@ -205,7 +187,7 @@ setup_mariadb_no_tls() {
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306"
 
-  "${KUBECTL}" apply -f ${scriptdir}/mariadb.server.yaml
+  "${KUBECTL}" apply -f "${scriptdir}/mariadb.server.yaml"
 
   echo_step "Waiting for MariaDB to be ready"
   "${KUBECTL}" rollout status statefulset/mariadb --timeout=120s
@@ -218,9 +200,9 @@ setup_mariadb_tls() {
       --from-literal password="${MARIADB_TEST_PW}" \
       --from-literal endpoint="mariadb.default.svc.cluster.local" \
       --from-literal port="3306" \
-      --from-file=ca-cert.pem \
-      --from-file=client-cert.pem \
-      --from-file=client-key.pem
+      --from-file="${certdir}/ca-cert.pem" \
+      --from-file="${certdir}/client-cert.pem" \
+      --from-file="${certdir}/client-key.pem"
 
   # Create init script ConfigMap
   "${KUBECTL}" create configmap mariadb-init-script --from-literal=init.sql="
@@ -244,12 +226,23 @@ cleanup_mariadb() {
   "${KUBECTL}" delete secret mariadb-creds
 }
 
+# Runs SQL as root inside the MariaDB pod. The password expands in the pod, the SQL is passed as $1.
+mariadb_query() {
+  # shellcheck disable=SC2016
+  "${KUBECTL}" exec mariadb-0 -- bash -c 'mariadb -uroot -p"${MARIADB_ROOT_PASSWORD}" -N -e "$1"' _ "$1"
+}
+
+# Prints a column of information_schema.schemata for example-db.
+example_db_schema_field() {
+  mariadb_query "SELECT $1 FROM information_schema.schemata WHERE schema_name = 'example-db'" | tr -d '[:space:]'
+}
+
 test_create_database() {
   echo_step "test creating MySQL Database resource"
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/mysql/database.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/mysql/database.yaml"
   echo_step_completed
 }
 
@@ -257,13 +250,8 @@ test_database_charset() {
   echo_step "test database has correct charset and collation"
 
   local charset collation
-  charset=$("${KUBECTL}" exec mariadb-0 -- bash -c \
-    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_character_set_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
-  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
-    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
-
-  charset=$(echo "${charset}" | tr -d '[:space:]')
-  collation=$(echo "${collation}" | tr -d '[:space:]')
+  charset=$(example_db_schema_field default_character_set_name)
+  collation=$(example_db_schema_field default_collation_name)
 
   echo_info "charset=${charset}, collation=${collation}"
 
@@ -280,7 +268,7 @@ test_update_database_charset() {
   echo_step "test updating MySQL Database charset and collation"
 
   # Patch the database to use a different collation
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type merge \
     -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_general_ci"}}}'
 
   # Wait for the controller to reconcile the change
@@ -288,9 +276,7 @@ test_update_database_charset() {
 
   echo_info "check if collation was updated in MariaDB"
   local collation
-  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
-    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
-  collation=$(echo "${collation}" | tr -d '[:space:]')
+  collation=$(example_db_schema_field default_collation_name)
 
   echo_info "collation=${collation}"
 
@@ -300,7 +286,7 @@ test_update_database_charset() {
   echo_step_completed
 
   # Restore original collation for subsequent tests
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type merge \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type merge \
     -p '{"spec":{"forProvider":{"defaultCollation":"utf8mb4_bin"}}}'
   sleep 10
 }
@@ -309,25 +295,20 @@ test_remove_database_charset() {
   echo_step "test removing charset/collation from spec leaves database unchanged"
 
   # Remove charset and collation from the spec (set forProvider to only have empty fields)
-  "${KUBECTL}" patch database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io example-db --type json \
+  "${KUBECTL}" patch "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io" example-db --type json \
     -p '[{"op":"remove","path":"/spec/forProvider/defaultCharacterSet"},{"op":"remove","path":"/spec/forProvider/defaultCollation"}]'
 
   # Wait for the controller to reconcile -- late init should re-populate the fields
   sleep 15
 
   echo_info "check database resource is still Ready"
-  "${KUBECTL}" wait --timeout 30s --for condition=Ready database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db
+  "${KUBECTL}" wait --timeout 30s --for condition=Ready "database.mysql.sql.${APIGROUP_SUFFIX}crossplane.io/example-db"
   echo_step_completed
 
   echo_info "check charset/collation unchanged in MariaDB"
   local charset collation
-  charset=$("${KUBECTL}" exec mariadb-0 -- bash -c \
-    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_character_set_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
-  collation=$("${KUBECTL}" exec mariadb-0 -- bash -c \
-    'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name = '"'"'example-db'"'"'"')
-
-  charset=$(echo "${charset}" | tr -d '[:space:]')
-  collation=$(echo "${collation}" | tr -d '[:space:]')
+  charset=$(example_db_schema_field default_character_set_name)
+  collation=$(example_db_schema_field default_collation_name)
 
   echo_info "charset=${charset}, collation=${collation}"
 
@@ -344,14 +325,15 @@ test_create_user() {
   echo_step "test creating MySQL User resource"
   local user_pw="asdf1234"
   "${KUBECTL}" create secret generic example-pw --from-literal password="${user_pw}" --save-config
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/mysql/user.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/mysql/user.yaml"
   echo_step_completed
 
   echo_info "check if connection secret exists"
-  local pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
+  local pw
+  pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
   [ "${pw}" == "${user_pw}" ]
   echo_step_completed
 }
@@ -363,27 +345,28 @@ test_update_user_password() {
     "${KUBECTL}" apply -f -
 
   # trigger reconcile
-  "${KUBECTL}" annotate -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml reconcile=now
+  "${KUBECTL}" annotate -f "${EXAMPLES}/mysql/user.yaml" reconcile=now
 
   sleep 3
 
   echo_info "check if connection secret has been updated"
-  local pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
+  local pw
+  pw=$("${KUBECTL}" get secret example-connection-secret -ojsonpath='{.data.password}' | base64 --decode)
   [ "${pw}" == "${user_pw}" ]
   echo_step_completed
 }
 
 test_create_grant() {
   echo_step "test creating MySQL Grant resource"
-  "${KUBECTL}" exec mariadb-0 -- bash -c \
-  'mariadb -uroot -p${MARIADB_ROOT_PASSWORD} -N -e "CREATE TABLE \`example-db\`.\`example-table\` (id INT, status VARCHAR(50), updated_at TIMESTAMP);"'
+  # shellcheck disable=SC2016 # backticks are MariaDB identifier quotes
+  mariadb_query 'CREATE TABLE `example-db`.`example-table` (id INT, status VARCHAR(50), updated_at TIMESTAMP);'
 
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
+  "${KUBECTL}" apply -f "${EXAMPLES}/mysql/grant_database.yaml"
+  "${KUBECTL}" apply -f "${EXAMPLES}/mysql/grant_table.yaml"
 
   echo_info "check if is ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/mysql/grant_database.yaml"
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${EXAMPLES}/mysql/grant_table.yaml"
   echo_step_completed
 }
 
@@ -399,22 +382,22 @@ test_all() {
 
 cleanup_test_resources() {
   echo_step "cleaning up test resources"
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/grant_table.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/database.yaml
-  "${KUBECTL}" delete -f ${projectdir}/examples/${API_TYPE}/mysql/user.yaml
+  "${KUBECTL}" delete -f "${EXAMPLES}/mysql/grant_database.yaml"
+  "${KUBECTL}" delete -f "${EXAMPLES}/mysql/grant_table.yaml"
+  "${KUBECTL}" delete -f "${EXAMPLES}/mysql/database.yaml"
+  "${KUBECTL}" delete -f "${EXAMPLES}/mysql/user.yaml"
   "${KUBECTL}" delete secret example-pw
 }
 
-# DB selects which database suite to run: all (default), mysql, postgresql or mssql.
-DB="${DB:-all}"
-case "${DB}" in
+# ENGINE selects which database engine suite to run: all (default), mysql, postgresql or mssql.
+ENGINE="${ENGINE:-all}"
+case "${ENGINE}" in
   all|mysql|postgresql|mssql) ;;
-  *) echo_error "Invalid DB='${DB}'. Expected one of: all, mysql, postgresql, mssql." ;;
+  *) echo_error "Invalid ENGINE='${ENGINE}'. Expected one of: all, mysql, postgresql, mssql." ;;
 esac
 
-db_selected() {
-  [[ "${DB}" == "all" || "${DB}" == "$1" ]]
+engine_selected() {
+  [[ "${ENGINE}" == "all" || "${ENGINE}" == "$1" ]]
 }
 
 # reuse a cluster kept by a previous run with skipcleanup=true
@@ -459,29 +442,30 @@ run_test() {
     APIGROUP_SUFFIX="m."
   fi
 
+  EXAMPLES="${projectdir}/examples/${API_TYPE}"
   local testmain="$1"
 
   echo_step "--- TESTING $testmain $API_TYPE WITH TLS=$TLS ---"
   start=$(date +%s)
 
-  $testmain
+  "$testmain"
 
   duration=$(( $(date +%s) - start ))
   echo_step "--- TESTING $testmain DONE IN ${duration}s ---"
 }
 
-if db_selected mysql; then
+if engine_selected mysql; then
   TLS=true API_TYPE="namespaced" run_test integration_tests_mariadb
   TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
 fi
 
-if db_selected postgresql; then
+if engine_selected postgresql; then
   TLS=false API_TYPE="cluster" run_test integration_tests_postgres
   TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
 fi
 
 # no TLS=false variant - MSSQL uses built-in encryption
-if db_selected mssql; then
+if engine_selected mssql; then
   TLS=true API_TYPE="cluster" run_test integration_tests_mssql
   TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
 fi
