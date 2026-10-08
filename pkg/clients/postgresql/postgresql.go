@@ -22,6 +22,7 @@ const (
 
 type postgresDB struct {
 	dsn      string
+	redacted string // dsn with the password masked, for error messages
 	endpoint string
 	port     string
 	sslmode  string
@@ -40,10 +41,22 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 
 	return postgresDB{
 		dsn:      dsn,
+		redacted: DSN(username, "xxxxx", endpoint, port, database, sslmode),
 		endpoint: endpoint,
 		port:     port,
 		sslmode:  sslmode,
 	}
+}
+
+// redact masks the password in DSN parse errors. lib/pq reports a DSN it
+// cannot parse as a *url.Error that carries the whole DSN, and the error
+// ends up in status conditions and events.
+func (c postgresDB) redact(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	return &url.Error{Op: uerr.Op, URL: c.redacted, Err: uerr.Err}
 }
 
 // DSN returns the DSN URL
@@ -70,7 +83,7 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return c.redact(err)
 	}
 
 	// Rollback or Commit based on error state. Defer close in defer to make
@@ -102,7 +115,7 @@ func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
 	defer d.Close() //nolint:errcheck
 
 	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
-	return err
+	return c.redact(err)
 }
 
 // Query the supplied query.
@@ -114,7 +127,7 @@ func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) 
 	defer d.Close() //nolint:errcheck
 
 	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
-	return rows, err
+	return rows, c.redact(err)
 }
 
 // Scan the results of the supplied query into the supplied destination.
@@ -125,7 +138,7 @@ func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{})
 	}
 	defer db.Close() //nolint:errcheck
 
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
+	return c.redact(db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...))
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB
