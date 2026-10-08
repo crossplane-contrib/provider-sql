@@ -1,7 +1,7 @@
 package v1alpha1
 
 import (
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,13 +28,13 @@ type DefaultPrivileges struct {
 
 // A DefaultPrivilegesSpec defines the desired state of a Default Grant.
 type DefaultPrivilegesSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DefaultPrivilegesParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     DefaultPrivilegesParameters `json:"forProvider"`
 }
 
 // A DefaultPrivilegesStatus represents the observed state of a Grant.
 type DefaultPrivilegesStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // DefaultPrivilegesParameters defines the desired state of a Default Grant.
@@ -74,12 +74,12 @@ type DefaultPrivilegesParameters struct {
 	// RoleRef to which default privileges are granted.
 	// +immutable
 	// +optional
-	RoleRef *xpv1.Reference `json:"roleRef,omitempty"`
+	RoleRef *xpv2.Reference `json:"roleRef,omitempty"`
 
 	// RoleSelector selects a reference to a Role this default grant is for.
 	// +immutable
 	// +optional
-	RoleSelector *xpv1.Selector `json:"roleSelector,omitempty"`
+	RoleSelector *xpv2.Selector `json:"roleSelector,omitempty"`
 
 	// Database in which the default privileges are applied
 	// +optional
@@ -89,12 +89,12 @@ type DefaultPrivilegesParameters struct {
 	// DatabaseRef references the database object this default grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.Selector `json:"databaseSelector,omitempty"`
 
 	// Schema in which the default privileges are applied.
 	// Not applicable when objectType is schema.

@@ -26,8 +26,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 )
@@ -60,7 +60,7 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 		}
 		// if newPwd was set to some value, compare value in output secret with
 		// newPwd
-		changed = newPwd != "" && newPwd != string(s.Data[xpv1.ResourceCredentialsSecretPasswordKey])
+		changed = newPwd != "" && newPwd != string(s.Data[xpv2.CredentialsSecretPasswordKey])
 
 		return newPwd, changed, nil
 	}
@@ -128,7 +128,7 @@ func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role)
 		if resource.IgnoreNotFound(err) != nil {
 			return false, errors.Wrap(err, errGetConnectionSecretFailed)
 		}
-	} else if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
+	} else if len(s.Data[xpv2.CredentialsSecretPasswordKey]) > 0 {
 		return false, nil
 	}
 

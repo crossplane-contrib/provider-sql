@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	namespacedv1alpha1 "github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -102,7 +102,7 @@ func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1
 	return keyPair, nil
 }
 
-func getSecret(ctx context.Context, kube client.Client, sel common.SecretKeySelector) ([]byte, error) {
+func getSecret(ctx context.Context, kube client.Client, sel xpv2.SecretKeySelector) ([]byte, error) {
 	secret := &corev1.Secret{}
 	if err := kube.Get(ctx, types.NamespacedName{
 		Namespace: sel.Namespace,

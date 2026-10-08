@@ -19,19 +19,19 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A UserSpec defines the desired state of a Database.
 type UserSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       UserParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     UserParameters `json:"forProvider"`
 }
 
 // A UserStatus represents the observed state of a User.
 type UserStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          UserObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 UserObservation `json:"atProvider,omitempty"`
 }
 
 // UserParameters define the desired state of a MySQL user instance.
@@ -41,7 +41,7 @@ type UserParameters struct {
 	// for this user. If no reference is given, a password will be auto-generated.
 	// Cannot be set together with AuthenticationPlugin.
 	// +optional
-	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv2.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 
 	// AuthenticationPlugin selects a non-default MySQL authentication plugin
 	// for the user. When set, the user is created with

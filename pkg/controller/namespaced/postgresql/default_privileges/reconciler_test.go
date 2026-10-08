@@ -32,12 +32,10 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
-
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
@@ -118,7 +116,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.DefaultPrivileges{
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+							ProviderConfigReference: &xpv2.ProviderConfigReference{Kind: "Invalid"},
 						},
 					},
 				},
@@ -140,7 +138,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -168,7 +166,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -185,7 +183,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -201,7 +199,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -247,7 +245,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -269,7 +267,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 					},
 					Spec: v1alpha1.DefaultPrivilegesSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -291,7 +289,7 @@ func TestConnectDatabaseSelection(t *testing.T) {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
 							o.Spec.DefaultDatabase = "default-db"
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "secret"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "secret"}
 						case *corev1.Secret:
 							// Return empty secret data
 						}
@@ -1005,6 +1003,68 @@ func TestDelete(t *testing.T) {
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
+		})
+	}
+}
+
+func TestSelectDefaultPrivilegesQuery(t *testing.T) {
+	type args struct {
+		gp v1alpha1.DefaultPrivilegesParameters
+	}
+
+	tests := map[string]struct {
+		reason string
+		args   args
+		want   func(t *testing.T, q xsql.Query)
+	}{
+		"FiltersByTargetRoleAndSchema": {
+			reason: "The SELECT query must filter by target role and schema so unrelated default privileges are not matched",
+			args: args{gp: v1alpha1.DefaultPrivilegesParameters{
+				Role:       ptr.To("grantee-role"),
+				TargetRole: ptr.To("target-role"),
+				ObjectType: ptr.To("table"),
+				Schema:     ptr.To("myschema"),
+			}},
+			want: func(t *testing.T, q xsql.Query) {
+				for _, want := range []string{
+					"target_role.rolname = $3",
+					"default_acl.defaclnamespace = (select oid from pg_namespace where nspname = $4)",
+				} {
+					if !strings.Contains(q.String, want) {
+						t.Errorf("query should contain %q, got:\n%s", want, q.String)
+					}
+				}
+				if diff := cmp.Diff([]interface{}{"r", "grantee-role", "target-role", "myschema"}, q.Parameters); diff != "" {
+					t.Errorf("unexpected parameters (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"SchemaObjectTypeUsesDatabaseWideNamespace": {
+			reason: "For objectType schema there is no IN SCHEMA, so the query must filter the database-wide namespace (oid 0)",
+			args: args{gp: v1alpha1.DefaultPrivilegesParameters{
+				Role:       ptr.To("grantee-role"),
+				TargetRole: ptr.To("target-role"),
+				ObjectType: ptr.To("schema"),
+			}},
+			want: func(t *testing.T, q xsql.Query) {
+				if !strings.Contains(q.String, "default_acl.defaclnamespace = 0") {
+					t.Errorf("query should filter the database-wide namespace, got:\n%s", q.String)
+				}
+				if strings.Contains(q.String, "pg_namespace") {
+					t.Errorf("query should not filter by schema when objectType is schema, got:\n%s", q.String)
+				}
+				if diff := cmp.Diff([]interface{}{"n", "grantee-role", "target-role"}, q.Parameters); diff != "" {
+					t.Errorf("unexpected parameters (-want +got):\n%s", diff)
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var q xsql.Query
+			selectDefaultPrivilegesQuery(tc.args.gp, &q)
+			tc.want(t, q)
 		})
 	}
 }

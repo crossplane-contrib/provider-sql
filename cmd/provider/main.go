@@ -23,10 +23,15 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/microsoft/go-mssqldb"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/alecthomas/kingpin/v2"
+	"github.com/go-logr/logr"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -35,6 +40,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/ratelimiter"
+	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/customresourcesgate"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 
 	"github.com/crossplane-contrib/provider-sql/apis"
@@ -57,11 +63,16 @@ func main() {
 
 	zl := zap.New(zap.UseDevMode(*debug))
 	log := logging.NewLogrLogger(zl.WithName("provider-sql"))
+
+	// controller-runtime leaves its root logger unset by default and emits a
+	// "log.SetLogger(...) was never called" warning (with a stack trace) on
+	// every reconcile when it is never set. It is also very verbose even at
+	// info level, so in non-debug mode we point it at a discard logger to keep
+	// the previous quiet behaviour while still satisfying controller-runtime.
 	if *debug {
-		// The controller-runtime runs with a no-op logger by default. It is
-		// *very* verbose even at info level, so we only provide it a real
-		// logger when we're running in debug mode.
 		ctrl.SetLogger(zl)
+	} else {
+		ctrl.SetLogger(logr.Discard())
 	}
 
 	log.Debug("Starting", "sync-period", syncPeriod.String())
@@ -69,18 +80,28 @@ func main() {
 	cfg, err := ctrl.GetConfig()
 	kingpin.FatalIfError(err, "Cannot get API server rest config")
 
+	scheme := runtime.NewScheme()
+	kingpin.FatalIfError(clientgoscheme.AddToScheme(scheme), "Cannot add clientgo scheme")
+	kingpin.FatalIfError(apis.AddToScheme(scheme), "Cannot add SQL APIs to scheme")
+	kingpin.FatalIfError(apiextensionsv1.AddToScheme(scheme), "Cannot register k8s apiextensions APIs to scheme")
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme:           scheme,
 		LeaderElection:   *leaderElection,
 		LeaderElectionID: "crossplane-leader-election-provider-sql",
 		Cache: cache.Options{
 			SyncPeriod: syncPeriod,
+			ByObject: map[ctrlclient.Object]cache.ByObject{
+				&apiextensionsv1.CustomResourceDefinition{}: {
+					Transform: customresourcesgate.TransformStripCRDSchema,
+				},
+			},
 		},
 		Metrics: metricsserver.Options{
 			BindAddress: *metricsBindAddress,
 		},
 	})
 	kingpin.FatalIfError(err, "Cannot create controller manager")
-	kingpin.FatalIfError(apis.AddToScheme(mgr.GetScheme()), "Cannot add SQL APIs to scheme")
 
 	mrStateMetrics := statemetrics.NewMRStateMetrics()
 	metrics.Registry.MustRegister(mrStateMetrics)
