@@ -79,8 +79,13 @@ type RoleParameters struct {
 	// +optional
 	Privileges RolePrivilege `json:"privileges,omitempty"`
 
-	// PasswordSecretRef references the secret that contains the password used
-	// for this role. If no reference is given, a password will be auto-generated.
+	// PasswordSecretRef references the secret key holding the password for this
+	// role. The provider applies that value and re-applies it whenever the
+	// secret changes. If omitted, the provider auto-generates a password on
+	// create, writes it to the connection secret, and can rotate it on demand
+	// via passwordRotationTrigger.
+	//
+	// See https://github.com/crossplane-contrib/provider-sql/blob/master/docs/postgresql-role-passwords.md
 	// +optional
 	PasswordSecretRef *xpv2.LocalSecretKeySelector `json:"passwordSecretRef,omitempty"`
 
@@ -91,8 +96,17 @@ type RoleParameters struct {
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 
-	// PasswordRotationTrigger triggers rotation of the auto-generated password when set to
-	// a time after the current LastPasswordChange. Has no effect when passwordSecretRef is set.
+	// PasswordRotationTrigger forces rotation of the auto-generated password.
+	// Set it to a timestamp later than status.atProvider.lastPasswordChange:
+	// once that time has passed, the next reconcile generates a new password,
+	// applies it in the database, and writes it to the connection secret. A
+	// timestamp in the future schedules the rotation; it happens on the first
+	// reconcile after that time, so up to one poll interval late. Each trigger
+	// value rotates once; move it to a newer time to rotate again. Has no
+	// effect when passwordSecretRef is set, and no effect until
+	// lastPasswordChange is set, which the provider does not do on create.
+	//
+	// See https://github.com/crossplane-contrib/provider-sql/blob/master/docs/postgresql-role-passwords.md
 	// +optional
 	PasswordRotationTrigger *metav1.Time `json:"passwordRotationTrigger,omitempty"`
 }
