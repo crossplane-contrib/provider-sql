@@ -24,7 +24,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -32,11 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	xpcontroller "github.com/crossplane/crossplane-runtime/v2/pkg/controller"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/event"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/feature"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/password"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
@@ -47,6 +43,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/setup"
 )
 
 const (
@@ -63,41 +60,21 @@ const (
 	errGetConnectionSecretFailed = "cannot get connection secret"
 	errComparePrivileges         = "cannot compare desired and observed privileges"
 	errSetRoleConfigs            = "cannot set role configuration parameters"
-
-	maxConcurrency = 5
 )
 
 // Setup adds a controller that reconciles Role managed resources.
 func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
-	name := managed.ControllerName(v1alpha1.RoleGroupKind)
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
-
-	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
-		managed.WithLogger(o.Logger.WithValues("controller", name)),
-		managed.WithPollInterval(o.PollInterval),
-		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
-	}
-	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
-		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
-	}
-	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.RoleGroupVersionKind),
-		reconcilerOptions...,
-	)
-	if err := mgr.Add(statemetrics.NewMRStateRecorder(
-		mgr.GetClient(), o.Logger, o.MetricOptions.MRStateMetrics,
-		&v1alpha1.RoleList{}, o.MetricOptions.PollStateMetricInterval,
-	)); err != nil {
-		return err
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		Named(name).
-		For(&v1alpha1.Role{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: maxConcurrency,
-		}).
-		Complete(r)
+	return setup.Setup(mgr, o, setup.ControllerConfig{
+		GVK:      v1alpha1.RoleGroupVersionKind,
+		Resource: &v1alpha1.Role{},
+		List:     &v1alpha1.RoleList{},
+		Connector: managed.WithTypedExternalConnector(&connector{
+			kube:  mgr.GetClient(),
+			track: t.Track,
+			newDB: postgresql.New,
+		}),
+	})
 }
 
 type connector struct {
