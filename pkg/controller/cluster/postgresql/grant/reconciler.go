@@ -1177,6 +1177,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), log: o.Logger.WithValues("controller", name), track: t.Track, newDB: postgresql.New}),
+		managed.WithProviderConfigUsageCleaner(t),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
