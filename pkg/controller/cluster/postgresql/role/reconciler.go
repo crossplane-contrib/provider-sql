@@ -56,6 +56,7 @@ const (
 	errGetSecret    = "cannot get credentials Secret"
 
 	errSelectRole                = "cannot select role"
+	errGetRoleFailed             = "cannot get role"
 	errCreateRole                = "cannot create role"
 	errDropRole                  = "cannot drop role"
 	errUpdateRole                = "cannot update role"
@@ -72,7 +73,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), apiReader: mgr.GetAPIReader(), track: t.Track, newDB: postgresql.New}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -100,9 +101,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 }
 
 type connector struct {
-	kube  client.Client
-	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	kube      client.Client
+	apiReader client.Reader
+	track     func(ctx context.Context, mg resource.LegacyManaged) error
+	newDB     func(creds map[string][]byte, database string, sslmode string) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Role] = &connector{}
@@ -134,14 +136,16 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Role) (managed.Typ
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
 	return &external{
-		db:   c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
-		kube: c.kube,
+		db:        c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
+		kube:      c.kube,
+		apiReader: c.apiReader,
 	}, nil
 }
 
 type external struct {
-	db   xsql.DB
-	kube client.Client
+	db        xsql.DB
+	kube      client.Client
+	apiReader client.Reader
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.Role] = &external{}

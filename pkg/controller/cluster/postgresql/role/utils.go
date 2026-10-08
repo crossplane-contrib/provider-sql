@@ -18,8 +18,10 @@ package role
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/pkg/errors"
@@ -67,34 +69,72 @@ func (c *external) getPassword(ctx context.Context, role *v1alpha1.Role) (newPwd
 	return "", shouldReset, err
 }
 
+// freshRole re-reads role directly from the API server, bypassing the informer cache. role's
+// status, as fetched by the managed reconciler's cached client, can be stale immediately after
+// a prior reconcile wrote it - e.g. right after recording LastPasswordChange - if that write
+// hasn't yet propagated to the cache. shouldResetPassword calls this to confirm a reset is
+// still needed before acting on a cached status field that would trigger one, so a stale read
+// doesn't cause a second, unnecessary password change.
+func (c *external) freshRole(ctx context.Context, role *v1alpha1.Role) (*v1alpha1.Role, error) {
+	fresh := &v1alpha1.Role{}
+	if err := c.apiReader.Get(ctx, types.NamespacedName{Name: role.GetName(), Namespace: role.GetNamespace()}, fresh); err != nil {
+		return nil, errors.Wrap(err, errGetRoleFailed)
+	}
+	return fresh, nil
+}
+
+// rotationDue reports whether trigger asks for a rotation that hasn't happened yet: it must
+// be later than the last password change, and its time must have come. A trigger in the
+// future therefore schedules a rotation, and once it fires LastPasswordChange moves past the
+// trigger, so each trigger value rotates at most once.
+func rotationDue(trigger, last *metav1.Time, now time.Time) bool {
+	if trigger == nil || last == nil {
+		return false
+	}
+	return trigger.After(last.Time) && !trigger.After(now)
+}
+
 // shouldResetPassword returns true when a password change is needed for the non-BYOP path.
-// When LastPasswordChange is set, only a PasswordRotationTrigger newer than it forces a
-// reset. When LastPasswordChange is nil the connection secret decides: a populated secret
-// means Create already ran, while an absent or empty secret means the role was restored
-// out-of-band and needs a fresh password. Without a connection secret reference there is
-// nowhere to publish a regenerated password, so no reset is attempted.
+// When LastPasswordChange is set, only a due PasswordRotationTrigger forces a reset (see
+// rotationDue). When LastPasswordChange is nil the connection secret decides: a populated
+// secret means Create already ran, while an absent or empty secret means the role was
+// restored out-of-band and needs a fresh password. Without a connection secret reference
+// there is nowhere to publish a regenerated password, so no reset is attempted. Either way the
+// decision is made from the cached role first, and only a reset is confirmed against a fresh
+// read, see freshRole.
 func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
-	last := role.Status.AtProvider.LastPasswordChange
-	if last != nil {
-		if role.Spec.ForProvider.PasswordRotationTrigger != nil {
-			return role.Spec.ForProvider.PasswordRotationTrigger.After(last.Time), nil
+	if role.Status.AtProvider.LastPasswordChange != nil {
+		trigger := role.Spec.ForProvider.PasswordRotationTrigger
+		now := time.Now()
+		if !rotationDue(trigger, role.Status.AtProvider.LastPasswordChange, now) {
+			return false, nil
 		}
-		return false, nil
+		fresh, err := c.freshRole(ctx, role)
+		if err != nil {
+			return false, err
+		}
+		return rotationDue(trigger, fresh.Status.AtProvider.LastPasswordChange, now), nil
 	}
 	if role.Spec.WriteConnectionSecretToReference == nil {
 		return false, nil
 	}
+
 	nn := types.NamespacedName{
 		Name:      role.Spec.WriteConnectionSecretToReference.Name,
 		Namespace: role.Spec.WriteConnectionSecretToReference.Namespace,
 	}
 	s := &corev1.Secret{}
-	err := c.kube.Get(ctx, nn, s)
-	if err != nil {
+	if err := c.kube.Get(ctx, nn, s); err != nil {
 		if resource.IgnoreNotFound(err) != nil {
 			return false, errors.Wrap(err, errGetConnectionSecretFailed)
 		}
-		return true, nil
+	} else if len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) > 0 {
+		return false, nil
 	}
-	return len(s.Data[xpv1.ResourceCredentialsSecretPasswordKey]) == 0, nil
+
+	fresh, err := c.freshRole(ctx, role)
+	if err != nil {
+		return false, err
+	}
+	return fresh.Status.AtProvider.LastPasswordChange == nil, nil
 }

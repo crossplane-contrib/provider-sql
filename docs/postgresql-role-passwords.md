@@ -63,7 +63,9 @@ Runnable manifests covering both modes: [cluster-scoped](../examples/cluster/pos
 
 ### With an auto-generated password
 
-Set `spec.forProvider.passwordRotationTrigger` to a timestamp later than `status.atProvider.lastPasswordChange`. On the next reconcile the provider generates a new password, applies it to the role in the database, writes it to the connection secret, and updates `lastPasswordChange` to the current time. To rotate again later, move the trigger to a newer timestamp; a trigger equal to or older than `lastPasswordChange` does nothing.
+Set `spec.forProvider.passwordRotationTrigger` to a timestamp later than `status.atProvider.lastPasswordChange`. Once that time has passed, the next reconcile generates a new password, applies it to the role in the database, writes it to the connection secret, and updates `lastPasswordChange` to the current time. Because `lastPasswordChange` is then later than the trigger, each trigger value rotates the password once. To rotate again later, move the trigger to a newer timestamp; a trigger equal to or older than `lastPasswordChange` does nothing.
+
+A timestamp in the future schedules the rotation: nothing happens until that time, then the password rotates once. The provider does not wake up at the trigger time, so the rotation happens on the first reconcile after it - at most one poll interval late (the provider's `--poll` flag, 10 minutes by default).
 
 ```yaml
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
@@ -74,7 +76,7 @@ spec:
   forProvider:
     privileges:
       login: true
-    # Move past status.atProvider.lastPasswordChange to rotate.
+    # Rotates once this time has passed, if it is later than status.atProvider.lastPasswordChange.
     passwordRotationTrigger: "2026-01-01T00:00:00Z"
   writeConnectionSecretToRef:
     name: example-role-secret

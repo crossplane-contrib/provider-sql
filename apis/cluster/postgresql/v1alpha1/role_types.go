@@ -97,12 +97,14 @@ type RoleParameters struct {
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
 
 	// PasswordRotationTrigger forces rotation of the auto-generated password.
-	// Set it to a timestamp later than status.atProvider.lastPasswordChange: on
-	// the next reconcile the provider generates a new password, applies it in
-	// the database, and writes it to the connection secret. Move it to a newer
-	// time to rotate again. Has no effect when passwordSecretRef is set, and no
-	// effect until lastPasswordChange is set, which the provider does not do on
-	// create.
+	// Set it to a timestamp later than status.atProvider.lastPasswordChange:
+	// once that time has passed, the next reconcile generates a new password,
+	// applies it in the database, and writes it to the connection secret. A
+	// timestamp in the future schedules the rotation; it happens on the first
+	// reconcile after that time, so up to one poll interval late. Each trigger
+	// value rotates once; move it to a newer time to rotate again. Has no
+	// effect when passwordSecretRef is set, and no effect until
+	// lastPasswordChange is set, which the provider does not do on create.
 	//
 	// See https://github.com/crossplane-contrib/provider-sql/blob/master/docs/postgresql-role-passwords.md
 	// +optional

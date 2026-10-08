@@ -527,11 +527,14 @@ check_role_passwords() {
   echo_step_completed
 
   # rotation trigger: bumping passwordRotationTrigger past lastPasswordChange
-  # rotates the auto-generated password.
+  # rotates the auto-generated password once the trigger time has passed. The
+  # sleep keeps the trigger strictly later than lastPasswordChange, which is
+  # stored at second precision.
   echo_step "check Role passwordRotationTrigger rotates the auto-generated password"
   local prev_pw trigger
   prev_pw=$(role_connection_password rotating-role-secret)
-  trigger=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
+  sleep 1
+  trigger=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
       -p "{\"spec\":{\"forProvider\":{\"passwordRotationTrigger\":\"${trigger}\"}}}"
   if ! wait_role_password_changed rotating-role-secret "${prev_pw}"; then

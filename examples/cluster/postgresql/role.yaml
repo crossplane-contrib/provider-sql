@@ -62,7 +62,8 @@ spec:
 # With no passwordSecretRef, the provider generates a random password on create
 # and writes it to the connection secret below. To rotate it, set
 # passwordRotationTrigger to a timestamp later than the current
-# status.atProvider.lastPasswordChange; bump it again to rotate again.
+# status.atProvider.lastPasswordChange; it rotates once that time has passed,
+# so a future timestamp schedules the rotation. Bump it again to rotate again.
 # Note: the trigger is ignored until lastPasswordChange has been set once - see
 # docs/postgresql-role-passwords.md.
 apiVersion: postgresql.sql.crossplane.io/v1alpha1

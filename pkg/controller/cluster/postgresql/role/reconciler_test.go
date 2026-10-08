@@ -1070,11 +1070,53 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+// cachedSecretNotFound is the cached kube client for a role whose connection secret is
+// missing. It fails any other read, so the Role itself can't be read from the cache.
+func cachedSecretNotFound(name string) client.Client {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			if _, ok := obj.(*corev1.Secret); !ok {
+				return errors.Errorf("unexpected cached read of %T", obj)
+			}
+			return kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+		},
+	}
+}
+
+// apiServerRole is the uncached reader for a Role whose status, as stored on the API server,
+// records last as its LastPasswordChange. It fails any other read.
+func apiServerRole(last *v1.Time) client.Reader {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			r, ok := obj.(*v1alpha1.Role)
+			if !ok {
+				return errors.Errorf("unexpected uncached read of %T", obj)
+			}
+			r.Status.AtProvider.LastPasswordChange = last
+			return nil
+		},
+	}
+}
+
+// orNoUncachedReads returns r, or when r is nil an uncached reader that fails every read, so
+// cases that don't set one assert that the decision was made from the cache alone.
+func orNoUncachedReads(r client.Reader) client.Reader {
+	if r != nil {
+		return r
+	}
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			return errors.Errorf("unexpected uncached read of %T", obj)
+		},
+	}
+}
+
 func TestGetPassword(t *testing.T) {
 	type args struct {
-		ctx  context.Context
-		role *v1alpha1.Role
-		kube client.Client
+		ctx       context.Context
+		role      *v1alpha1.Role
+		kube      client.Client
+		apiReader client.Reader
 	}
 	type want struct {
 		pwd     string
@@ -1137,9 +1179,8 @@ func TestGetPassword(t *testing.T) {
 						},
 					},
 				},
-				kube: &test.MockClient{
-					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
-				},
+				kube:      cachedSecretNotFound("test-secret"),
+				apiReader: apiServerRole(nil),
 			},
 			want: want{pwd: "", changed: true},
 		},
@@ -1184,12 +1225,12 @@ func TestGetPassword(t *testing.T) {
 			want: want{pwd: "", changed: false},
 		},
 		"RotationTriggerAfterLastChange": {
-			reason: "PasswordRotationTrigger set after LastPasswordChange should trigger rotation",
+			reason: "PasswordRotationTrigger set after LastPasswordChange and already passed should trigger rotation",
 			args: args{
 				role: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordRotationTrigger: &v1.Time{Time: time.Now()},
+							PasswordRotationTrigger: &v1.Time{Time: time.Now().Add(-time.Minute)},
 						},
 					},
 					Status: v1alpha1.RoleStatus{
@@ -1198,6 +1239,7 @@ func TestGetPassword(t *testing.T) {
 						},
 					},
 				},
+				apiReader: apiServerRole(&v1.Time{Time: time.Now().Add(-time.Hour)}),
 			},
 			want: want{pwd: "", changed: true},
 		},
@@ -1219,11 +1261,48 @@ func TestGetPassword(t *testing.T) {
 			},
 			want: want{pwd: "", changed: false},
 		},
+		"RotationTriggerDueButFreshShowsRotated": {
+			reason: "cached role reporting a due trigger must not rotate again when a fresh read from the API server shows LastPasswordChange already moved past it, e.g. right after the reconcile that rotated, before that write reaches the cache used to fetch role",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &v1.Time{Time: time.Now().Add(-time.Minute)},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &v1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+				apiReader: apiServerRole(&v1.Time{Time: time.Now()}),
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NilLastPasswordChangeStaleCacheFreshHasLastChange": {
+			reason: "cached role reporting nil LastPasswordChange with a missing connection secret must not trigger a reset when a fresh read from the API server shows it was already set, e.g. right after a deleted-and-recreated role's password was just restored",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ResourceSpec: xpv1.ResourceSpec{
+							WriteConnectionSecretToReference: &xpv1.SecretReference{
+								Name:      "restored-secret",
+								Namespace: "restored-ns",
+							},
+						},
+					},
+				},
+				kube:      cachedSecretNotFound("restored-secret"),
+				apiReader: apiServerRole(&v1.Time{Time: time.Now()}),
+			},
+			want: want{pwd: "", changed: false},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := external{kube: tc.args.kube}
+			e := external{kube: tc.args.kube, apiReader: orNoUncachedReads(tc.args.apiReader)}
 			pwd, changed, err := e.getPassword(tc.args.ctx, tc.args.role)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.getPassword(...): -want error, +got error:\n%s\n", tc.reason, diff)
@@ -1238,6 +1317,47 @@ func TestGetPassword(t *testing.T) {
 	}
 }
 
+func TestRotationDue(t *testing.T) {
+	last := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	trigger := &v1.Time{Time: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+
+	// A future trigger schedules a rotation: nothing happens until its time,
+	// it fires on the first reconcile after it, and once LastPasswordChange
+	// records that rotation it never fires again for the same trigger value.
+	steps := []struct {
+		now  time.Time
+		want bool
+	}{
+		{now: trigger.Add(-time.Hour), want: false},
+		{now: trigger.Add(5 * time.Minute), want: true},
+		{now: trigger.Add(15 * time.Minute), want: false},
+		{now: trigger.Add(30 * 24 * time.Hour), want: false},
+	}
+
+	lastChange := &v1.Time{Time: last}
+	rotations := 0
+	for i, step := range steps {
+		got := rotationDue(trigger, lastChange, step.now)
+		if got != step.want {
+			t.Errorf("step %d (now=%s): rotationDue(...) = %t, want %t", i, step.now, got, step.want)
+		}
+		if got {
+			rotations++
+			lastChange = &v1.Time{Time: step.now}
+		}
+	}
+	if rotations != 1 {
+		t.Errorf("rotations = %d, want exactly 1", rotations)
+	}
+
+	if rotationDue(nil, lastChange, time.Now()) {
+		t.Error("rotationDue(nil trigger, ...) = true, want false")
+	}
+	if rotationDue(trigger, nil, time.Now()) {
+		t.Error("rotationDue(..., nil LastPasswordChange, ...) = true, want false")
+	}
+}
+
 func TestUpdatePasswordReset(t *testing.T) {
 	errBoom := errors.New("boom")
 
@@ -1246,9 +1366,10 @@ func TestUpdatePasswordReset(t *testing.T) {
 	}
 
 	type args struct {
-		ctx  context.Context
-		mg   *v1alpha1.Role
-		kube client.Client
+		ctx       context.Context
+		mg        *v1alpha1.Role
+		kube      client.Client
+		apiReader client.Reader
 	}
 
 	type want struct {
@@ -1281,9 +1402,8 @@ func TestUpdatePasswordReset(t *testing.T) {
 						},
 					},
 				},
-				kube: &test.MockClient{
-					MockGet: test.NewMockGetFn(kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, "test-secret")),
-				},
+				kube:      cachedSecretNotFound("test-secret"),
+				apiReader: apiServerRole(nil),
 			},
 			want: want{
 				err:               nil,
@@ -1328,8 +1448,9 @@ func TestUpdatePasswordReset(t *testing.T) {
 				},
 			}
 			e := external{
-				db:   db,
-				kube: tc.args.kube,
+				db:        db,
+				kube:      tc.args.kube,
+				apiReader: orNoUncachedReads(tc.args.apiReader),
 			}
 			got, err := e.Update(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
