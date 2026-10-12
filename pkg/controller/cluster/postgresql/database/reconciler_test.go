@@ -27,10 +27,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
@@ -76,7 +76,7 @@ func TestConnect(t *testing.T) {
 	// Stub the AWS IAM token injection so the success case needs no AWS access.
 	origInject := injectIAM
 	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
-		creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("iam-token")
+		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
 		return nil
 	}
 	defer func() { injectIAM = origInject }()
@@ -119,8 +119,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -141,8 +141,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -156,7 +156,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -168,8 +168,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},
@@ -184,12 +184,12 @@ func TestConnect(t *testing.T) {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
 							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
-							o.Spec.Credentials.ConnectionSecretRef = &xpv1.SecretReference{Namespace: "ns", Name: "s"}
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{Namespace: "ns", Name: "s"}
 						case *corev1.Secret:
 							o.Data = map[string][]byte{
-								xpv1.ResourceCredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
-								xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
-								xpv1.ResourceCredentialsSecretUserKey:     []byte("crossplane_admin"),
+								xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+								xpv2.CredentialsSecretPortKey:     []byte("5432"),
+								xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
 							}
 						}
 						return nil
@@ -200,7 +200,7 @@ func TestConnect(t *testing.T) {
 					if sslmode != "require" {
 						t.Errorf("expected sslmode forced to require, got %q", sslmode)
 					}
-					if got := string(creds[xpv1.ResourceCredentialsSecretPasswordKey]); got != "iam-token" {
+					if got := string(creds[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
 						t.Errorf("expected injected token as password, got %q", got)
 					}
 					return mockDB{}
@@ -209,8 +209,8 @@ func TestConnect(t *testing.T) {
 			args: args{
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
-						ResourceSpec: xpv1.ResourceSpec{
-							ProviderConfigReference: &xpv1.Reference{},
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
 						},
 					},
 				},

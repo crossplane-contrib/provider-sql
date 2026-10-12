@@ -25,8 +25,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // builderCall records what a stub TokenBuilder was invoked with, so a test can
@@ -108,9 +108,9 @@ func TestInjectToken(t *testing.T) {
 	// fullCreds is a connection-secret map with everything InjectToken needs.
 	fullCreds := func() map[string][]byte {
 		return map[string][]byte{
-			xpv1.ResourceCredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
-			xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
-			xpv1.ResourceCredentialsSecretUserKey:     []byte("crossplane_admin"),
+			xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+			xpv2.CredentialsSecretPortKey:     []byte("5432"),
+			xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
 		}
 	}
 
@@ -124,7 +124,7 @@ func TestInjectToken(t *testing.T) {
 		}
 
 		// The token must be written into the password slot.
-		if got := string(creds[xpv1.ResourceCredentialsSecretPasswordKey]); got != "FAKE_TOKEN" {
+		if got := string(creds[xpv2.CredentialsSecretPasswordKey]); got != "FAKE_TOKEN" {
 			t.Errorf("password: want %q, got %q", "FAKE_TOKEN", got)
 		}
 		// The builder must have received endpoint as host:port, plus region and user.
@@ -141,7 +141,7 @@ func TestInjectToken(t *testing.T) {
 
 	t.Run("MissingUsername", func(t *testing.T) {
 		creds := fullCreds()
-		delete(creds, xpv1.ResourceCredentialsSecretUserKey)
+		delete(creds, xpv2.CredentialsSecretUserKey)
 		rec := &builderCall{}
 
 		err := InjectToken(ctx, creds, "eu-west-1", noCreds, recordingBuilder("x", nil, rec))
@@ -175,7 +175,7 @@ func TestInjectToken(t *testing.T) {
 			t.Errorf("InjectToken(...): -want error, +got error:\n%s", diff)
 		}
 		// The password must remain unset when token generation fails.
-		if _, ok := creds[xpv1.ResourceCredentialsSecretPasswordKey]; ok {
+		if _, ok := creds[xpv2.CredentialsSecretPasswordKey]; ok {
 			t.Error("password must not be set when token generation fails")
 		}
 	})

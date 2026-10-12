@@ -10,8 +10,8 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 const (
@@ -29,10 +29,10 @@ type mySQLDB struct {
 // allowCleartextPasswords=true, which is required for AWS RDS IAM authentication
 // (the AWSAuthenticationPlugin uses MySQL's cleartext client plugin).
 func New(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB {
-	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
-	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
-	password := string(creds[xpv1.ResourceCredentialsSecretPasswordKey])
+	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
+	port := string(creds[xpv2.CredentialsSecretPortKey])
+	username := string(creds[xpv2.CredentialsSecretUserKey])
+	password := string(creds[xpv2.CredentialsSecretPasswordKey])
 	if tls == nil {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
@@ -119,10 +119,10 @@ func (c mySQLDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) er
 // GetConnectionDetails returns the connection details for a user of this DB
 func (c mySQLDB) GetConnectionDetails(username, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(username),
-		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		xpv1.ResourceCredentialsSecretEndpointKey: []byte(c.endpoint),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte(c.port),
+		xpv2.CredentialsSecretUserKey:     []byte(username),
+		xpv2.CredentialsSecretPasswordKey: []byte(password),
+		xpv2.CredentialsSecretEndpointKey: []byte(c.endpoint),
+		xpv2.CredentialsSecretPortKey:     []byte(c.port),
 	}
 }
 

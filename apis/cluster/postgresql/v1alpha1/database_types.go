@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // DatabaseStrategy sets the method that is used to create a database.
@@ -45,11 +45,11 @@ type DatabaseParameters struct {
 
 	// OwnerRef references the role object that will own this database.
 	// +optional
-	OwnerRef *xpv1.Reference `json:"ownerRef,omitempty"`
+	OwnerRef *xpv2.Reference `json:"ownerRef,omitempty"`
 
 	// OwnerSelector selects a reference to a Role that will own this database.
 	// +optional
-	OwnerSelector *xpv1.Selector `json:"ownerSelector,omitempty"`
+	OwnerSelector *xpv2.Selector `json:"ownerSelector,omitempty"`
 
 	// The name of the template from which to create the new database, or
 	// DEFAULT to use the default template (template1).
@@ -105,13 +105,13 @@ type DatabaseParameters struct {
 
 // A DatabaseSpec defines the desired state of a Database.
 type DatabaseSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       DatabaseParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     DatabaseParameters `json:"forProvider"`
 }
 
 // A DatabaseStatus represents the observed state of a Database.
 type DatabaseStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

@@ -26,7 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/pkg/errors"
 )
 
@@ -74,9 +74,9 @@ func ResolveRegion(specRegion *string, creds map[string][]byte, cfgRegion string
 // then uses it exactly as it would a static password.
 func InjectToken(ctx context.Context, creds map[string][]byte, region string,
 	awsCreds aws.CredentialsProvider, build TokenBuilder) error {
-	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
-	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
+	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
+	port := string(creds[xpv2.CredentialsSecretPortKey])
+	username := string(creds[xpv2.CredentialsSecretUserKey])
 
 	if endpoint == "" || port == "" || username == "" {
 		return errors.New(errMissingConnDetails)
@@ -90,7 +90,7 @@ func InjectToken(ctx context.Context, creds map[string][]byte, region string,
 		return errors.Wrap(err, errBuildToken)
 	}
 
-	creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(token)
+	creds[xpv2.CredentialsSecretPasswordKey] = []byte(token)
 	return nil
 }
 

@@ -24,10 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 )
@@ -40,7 +38,7 @@ func TestGetProviderConfigAWSIAMAuth(t *testing.T) {
 	// Stub the AWS IAM token injection so the test needs no AWS access.
 	origInject := injectIAM
 	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
-		creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("iam-token")
+		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
 		return nil
 	}
 	defer func() { injectIAM = origInject }()
@@ -50,12 +48,12 @@ func TestGetProviderConfigAWSIAMAuth(t *testing.T) {
 			switch o := obj.(type) {
 			case *v1alpha1.ProviderConfig:
 				o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
-				o.Spec.Credentials.ConnectionSecretRef = xpv1.LocalSecretReference{Name: "s"}
+				o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "s"}
 			case *corev1.Secret:
 				o.Data = map[string][]byte{
-					xpv1.ResourceCredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
-					xpv1.ResourceCredentialsSecretPortKey:     []byte("3306"),
-					xpv1.ResourceCredentialsSecretUserKey:     []byte("crossplane_admin"),
+					xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+					xpv2.CredentialsSecretPortKey:     []byte("3306"),
+					xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
 				}
 			}
 			return nil
@@ -66,7 +64,7 @@ func TestGetProviderConfigAWSIAMAuth(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
 		Spec: v1alpha1.DatabaseSpec{
 			ManagedResourceSpec: xpv2.ManagedResourceSpec{
-				ProviderConfigReference: &common.ProviderConfigReference{
+				ProviderConfigReference: &xpv2.ProviderConfigReference{
 					Kind: v1alpha1.ProviderConfigKind,
 					Name: "example",
 				},
@@ -81,7 +79,7 @@ func TestGetProviderConfigAWSIAMAuth(t *testing.T) {
 	if !info.Cleartext {
 		t.Error("expected Cleartext=true for AWS IAM auth")
 	}
-	if got := string(info.SecretData[xpv1.ResourceCredentialsSecretPasswordKey]); got != "iam-token" {
+	if got := string(info.SecretData[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
 		t.Errorf("expected injected token as password, got %q", got)
 	}
 	if info.TLS == nil || *info.TLS != "skip-verify" {
