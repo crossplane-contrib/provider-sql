@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
       - name: mssql
-        image: mcr.microsoft.com/mssql/server:2019-CU32-ubuntu-20.04
+        image: mcr.microsoft.com/mssql/server:${MSSQL_VERSION}
         env:
         - name: SA_PASSWORD
           valueFrom:
