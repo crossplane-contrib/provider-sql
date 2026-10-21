@@ -1,0 +1,25 @@
+---
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+  namespace: default
+spec:
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: default
+        name: amazon-rds-ca
+        key: global-bundle.pem
+  credentials:
+    source: AWSIAMAuth
+    region: us-east-1
+    connectionSecretRef:
+      name: aurora-conn
+
+# amazon-rds-ca and aurora-conn live in the ProviderConfig namespace.
+# aurora-conn holds endpoint, port, and username. No password.
+# amazon-rds-ca key global-bundle.pem is the Amazon RDS global bundle.
+# MySQL tls secret references still set namespace, including on a namespaced
+# ProviderConfig.

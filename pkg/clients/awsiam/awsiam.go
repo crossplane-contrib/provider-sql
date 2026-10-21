@@ -98,6 +98,10 @@ func InjectToken(ctx context.Context, creds map[string][]byte, region string,
 	return nil
 }
 
+// InjectIAM is the injector database connectors call. It defaults to Inject.
+// Tests replace it so they can assert token injection without calling AWS.
+var InjectIAM = Inject
+
 // Inject loads AWS configuration from the environment, resolves the region
 // (ProviderConfig field > secret "region" key > environment) and injects an RDS
 // IAM authentication token into creds as the password. It is called on every

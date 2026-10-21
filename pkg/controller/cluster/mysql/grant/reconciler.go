@@ -51,6 +51,7 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
+	errIAMAuth      = "cannot authenticate with AWS IAM"
 
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -102,7 +103,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
@@ -120,9 +121,6 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (MySQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -133,13 +131,17 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 
-	tlsName, err := tls.LoadConfig(ctx, c.kube, providerConfigName, pc.Spec.TLS, pc.Spec.TLSConfig)
+	tlsName, err := tls.LoadConfig(ctx, c.kube, tls.RegisterKey(providerConfigName), pc.Spec.TLS, pc.Spec.TLSConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, errTLSConfig)
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+	cleartext, err := mysql.ApplyIAM(ctx, string(pc.Spec.Credentials.Source), pc.Spec.Credentials.Region, secretData)
+	if err != nil {
+		return nil, errors.Wrap(err, errIAMAuth)
+	}
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, cleartext)}, nil
 }
 
 type external struct{ db xsql.DB }

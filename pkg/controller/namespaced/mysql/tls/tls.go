@@ -15,46 +15,73 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// LoadConfig loads the TLS configuration when tls mode is set to custom and
-// returns the tls name of registered configuration.
+const (
+	tlsModeCustom = "custom"
+
+	errCARequired = "tlsConfig.caCert name, namespace, and key are required when tls=custom"
+	errClientPair = "clientCert and clientKey must be set together"
+	errParseCA    = "cannot parse CA bundle from tlsConfig.caCert"
+)
+
+// ProviderConfigKey is the go-sql-driver TLS config name for a namespaced
+// ProviderConfig. The namespace is part of the key so two namespaces do not
+// share one trust pool. The driver rejects the reserved names true, false,
+// skip-verify, and preferred.
+func ProviderConfigKey(namespace, name string) string {
+	return "ns-" + namespace + "-" + name
+}
+
+// ClusterProviderConfigKey is the go-sql-driver TLS config name for a
+// ClusterProviderConfig.
+func ClusterProviderConfigKey(name string) string {
+	return "cpc-" + name
+}
+
+// LoadConfig registers tls=custom and returns the name to put in the DSN.
+// Any other mode, including an explicit "false", is returned unchanged.
+// registerKey is the name passed to mysql.RegisterTLSConfig.
 func LoadConfig(
 	ctx context.Context,
 	kube client.Client,
-	providerConfigName string,
+	registerKey string,
 	tlsMode *string,
 	tlsConfig *namespacedv1alpha1.TLSConfig,
 ) (*string, error) {
-	if tlsMode == nil || *tlsMode != "custom" {
+	if tlsMode == nil || *tlsMode != tlsModeCustom {
 		if tlsConfig != nil {
 			return nil, fmt.Errorf("tlsConfig is allowed only when tls=custom")
 		}
-
 		return tlsMode, nil
 	}
 
 	if err := validateTLSConfig(tlsConfig); err != nil {
 		return nil, err
 	}
-
-	tlsName := fmt.Sprintf("custom-%s", providerConfigName)
-	err := registerTLS(ctx, kube, tlsName, tlsConfig)
-	if err != nil {
+	if err := registerTLS(ctx, kube, registerKey, tlsConfig); err != nil {
 		return nil, err
 	}
-	return &tlsName, nil
+	return &registerKey, nil
 }
 
 func validateTLSConfig(cfg *namespacedv1alpha1.TLSConfig) error {
-	if cfg == nil ||
-		cfg.CACert.SecretRef.Name == "" ||
-		cfg.CACert.SecretRef.Key == "" ||
-		cfg.ClientCert.SecretRef.Name == "" ||
-		cfg.ClientCert.SecretRef.Key == "" ||
-		cfg.ClientKey.SecretRef.Name == "" ||
-		cfg.ClientKey.SecretRef.Key == "" {
-		return fmt.Errorf("tlsConfig is required when tls=custom")
+	if cfg == nil || !secretRefComplete(cfg.CACert.SecretRef) {
+		return errors.New(errCARequired)
+	}
+	if secretRefEmpty(cfg.ClientCert.SecretRef) && secretRefEmpty(cfg.ClientKey.SecretRef) {
+		return nil
+	}
+	if !secretRefComplete(cfg.ClientCert.SecretRef) || !secretRefComplete(cfg.ClientKey.SecretRef) {
+		return errors.New(errClientPair)
 	}
 	return nil
+}
+
+func secretRefComplete(sel xpv2.SecretKeySelector) bool {
+	return sel.Name != "" && sel.Namespace != "" && sel.Key != ""
+}
+
+func secretRefEmpty(sel xpv2.SecretKeySelector) bool {
+	return sel.Name == "" && sel.Namespace == "" && sel.Key == ""
 }
 
 func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *namespacedv1alpha1.TLSConfig) error {
@@ -69,19 +96,30 @@ func registerTLS(ctx context.Context, kube client.Client, tlsName string, cfg *n
 
 	pool := x509.NewCertPool()
 	if ok := pool.AppendCertsFromPEM(caCert); !ok {
-		return fmt.Errorf("cannot append CA certificate to pool")
+		return errors.New(errParseCA)
 	}
 
-	keyPair, err := getClientKeyPair(ctx, kube, cfg)
-	if err != nil {
-		return err
+	var certs []tls.Certificate
+	if secretRefComplete(cfg.ClientCert.SecretRef) {
+		keyPair, err := getClientKeyPair(ctx, kube, cfg)
+		if err != nil {
+			return err
+		}
+		certs = []tls.Certificate{keyPair}
 	}
 
-	return mysql.RegisterTLSConfig(tlsName, &tls.Config{
+	// ServerName stays empty. go-sql-driver sets it from the endpoint when
+	// verification is on, which is the hostname check.
+	return mysql.RegisterTLSConfig(tlsName, clientConfig(pool, certs, cfg.InsecureSkipVerify))
+}
+
+func clientConfig(pool *x509.CertPool, certs []tls.Certificate, insecure bool) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
 		RootCAs:            pool,
-		Certificates:       []tls.Certificate{keyPair},
-		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // This is only required by integration tests and should never be used in production
-	})
+		Certificates:       certs,
+		InsecureSkipVerify: insecure, //nolint:gosec // Set only when tlsConfig.insecureSkipVerify is true.
+	}
 }
 
 func getClientKeyPair(ctx context.Context, kube client.Client, cfg *namespacedv1alpha1.TLSConfig) (tls.Certificate, error) {

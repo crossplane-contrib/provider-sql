@@ -25,46 +25,44 @@ type mySQLDB struct {
 	tls      string
 }
 
-// New returns a new MySQL database client.
-func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
+const defaultTLSMode = "preferred"
+
+// New returns a new MySQL database client. A nil tls mode becomes preferred.
+// An explicit mode, including "false", is left unchanged. cleartext sets
+// allowCleartextPasswords, which AWS IAM authentication needs so the driver
+// will send the token with the MySQL cleartext client plugin.
+func New(creds map[string][]byte, tlsMode *string, binlog *bool, cleartext bool) xsql.DB {
 	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
 	port := string(creds[xpv2.CredentialsSecretPortKey])
 	username := string(creds[xpv2.CredentialsSecretUserKey])
 	password := string(creds[xpv2.CredentialsSecretPasswordKey])
-	if tls == nil {
-		defaultTLS := "preferred"
-		tls = &defaultTLS
+	if tlsMode == nil {
+		mode := defaultTLSMode
+		tlsMode = &mode
 	}
-	dsn := DSN(username, password, endpoint, port, *tls, binlog)
+	dsn := DSN(username, password, endpoint, port, *tlsMode, binlog, cleartext)
 
 	return mySQLDB{
 		dsn:      dsn,
 		endpoint: endpoint,
 		port:     port,
-		tls:      *tls,
+		tls:      *tlsMode,
 	}
 }
 
-// DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
+// DSN returns the DSN URL. cleartext appends allowCleartextPasswords=true.
+func DSN(username, password, endpoint, port, tlsMode string, binlog *bool, cleartext bool) string {
 	// Use net/url UserPassword to encode the username and password
 	// This will ensure that any special characters in the username or password
 	// are percent-encoded for use in the user info portion of the DSN URL
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s", username, password, endpoint, port, tlsMode)
 	if binlog != nil {
-		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
-			username,
-			password,
-			endpoint,
-			port,
-			tls,
-			strconv.FormatBool(*binlog))
+		dsn += "&sql_log_bin=" + strconv.FormatBool(*binlog)
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
-		username,
-		password,
-		endpoint,
-		port,
-		tls)
+	if cleartext {
+		dsn += "&allowCleartextPasswords=true"
+	}
+	return dsn
 }
 
 // ExecTx is unsupported in MySQL.

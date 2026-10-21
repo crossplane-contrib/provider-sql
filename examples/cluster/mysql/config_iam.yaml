@@ -1,0 +1,35 @@
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+spec:
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: crossplane-system
+        name: amazon-rds-ca
+        key: global-bundle.pem
+  credentials:
+    source: AWSIAMAuth
+    region: us-east-1
+    connectionSecretRef:
+      namespace: crossplane-system
+      name: aurora-conn
+
+# The connection secret holds endpoint, port, and username. The provider
+# generates a short-lived IAM token and uses it as the password.
+# The CA secret holds the Amazon RDS global bundle, one PEM containing the
+# root and intermediate certificates:
+# https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+# ---
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: aurora-conn
+#   namespace: crossplane-system
+# stringData:
+#   endpoint: my-cluster.cluster-xxxxxxxx.us-east-1.rds.amazonaws.com
+#   port: "3306"
+#   username: crossplane_admin

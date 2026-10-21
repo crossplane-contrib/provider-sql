@@ -1,6 +1,6 @@
 # AWS IAM database authentication
 
-provider-sql can authenticate to Amazon Aurora PostgreSQL with [IAM database authentication](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html). On each connect it generates a short-lived token from the AWS SDK default credential chain and uses that token as the database password. On EKS, [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) supplies those credentials. The token is not cached, so a provider process that runs longer than the 15-minute token lifetime keeps reconciling. A single reconcile that itself lasts longer than 15 minutes and then opens another connection can fail. Normal SQL reconciles are much shorter.
+provider-sql can authenticate to Amazon Aurora PostgreSQL and Aurora MySQL with [IAM database authentication](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html). On each connect it generates a short-lived token from the AWS SDK default credential chain and uses that token as the database password. On EKS, [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) supplies those credentials. The token is not cached, so a provider process that runs longer than the 15-minute token lifetime keeps reconciling. A single reconcile that itself lasts longer than 15 minutes and then opens another connection can fail. Normal SQL reconciles are much shorter.
 
 ```yaml
 spec:
@@ -49,3 +49,37 @@ Examples:
 - `examples/cluster/postgresql/config_iam.yaml`
 - `examples/namespaced/postgresql/config_iam.yaml`
 - `examples/namespaced/postgresql/clusterconfig_iam.yaml`
+
+## MySQL
+
+The same token is used for Aurora MySQL. `tls` is left as set. `allowCleartextPasswords=true` is added only for `AWSIAMAuth`, because the AWS plugin sends the token with the MySQL cleartext client plugin. TLS still carries it. A password login does not set that flag.
+
+```yaml
+spec:
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: crossplane-system
+        name: amazon-rds-ca
+        key: global-bundle.pem
+  credentials:
+    source: AWSIAMAuth
+    region: us-east-1
+    connectionSecretRef:
+      name: aurora-conn
+```
+
+`tls: "false"` is plaintext (`--ssl-mode=DISABLED`). Quote it. An unquoted `false` is a boolean and the string field rejects it. Omitting `tls` still means `preferred`. Aurora rejects a plaintext IAM login.
+
+`tls: custom` verifies the server with `tlsConfig.caCert`. The secret key is the same RDS global bundle. `clientCert` and `clientKey` are optional and must be set together; IAM database auth has no client certificate. The driver sets the hostname check from the endpoint. `tls: true` still uses the pod trust store, which does not contain the RDS CA.
+
+A `User` can set `authenticationPlugin.name: AWSAuthenticationPlugin` and `authString: RDS`. The master login that creates that user still uses a password `ProviderConfig`.
+
+Examples:
+
+- `examples/cluster/mysql/config_iam.yaml`
+- `examples/namespaced/mysql/config_iam.yaml`
+- `examples/namespaced/mysql/clusterconfig_iam.yaml`
+- `examples/cluster/mysql/user_iam_auth.yaml`
+- `examples/namespaced/mysql/user_iam_auth.yaml`

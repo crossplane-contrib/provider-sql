@@ -32,6 +32,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
@@ -66,10 +67,17 @@ func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
+	orig := awsiam.InjectIAM
+	awsiam.InjectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
+		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
+		return nil
+	}
+	t.Cleanup(func() { awsiam.InjectIAM = orig })
+
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+		newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
 	}
 
 	type args struct {
@@ -160,6 +168,97 @@ func TestConnect(t *testing.T) {
 				},
 			},
 			want: errors.Wrap(errBoom, errGetSecret),
+		},
+		"SuccessPassword": {
+			reason: "A password login keeps tls unchanged and does not allow the cleartext plugin.",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceMySQLConnectionSecret
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{Namespace: "ns", Name: "s"}
+							o.Spec.TLS = ptrStr("true")
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								xpv2.CredentialsSecretEndpointKey: []byte("db.example"),
+								xpv2.CredentialsSecretPortKey:     []byte("3306"),
+								xpv2.CredentialsSecretUserKey:     []byte("admin"),
+								xpv2.CredentialsSecretPasswordKey: []byte("secret"),
+							}
+						}
+						return nil
+					}),
+				},
+				track: nopUsage,
+				newDB: func(c map[string][]byte, tlsMode *string, _ *bool, cleartext bool) xsql.DB {
+					if tlsMode == nil || *tlsMode != "true" {
+						t.Errorf("tls: want true, got %v", tlsMode)
+					}
+					if cleartext {
+						t.Error("password login enabled cleartext")
+					}
+					if got := string(c[xpv2.CredentialsSecretPasswordKey]); got != "secret" {
+						t.Errorf("password: want secret, got %q", got)
+					}
+					return mockDB{}
+				},
+			},
+			args: args{
+				ctx: context.Background(),
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{Name: "example"},
+						},
+					},
+				},
+			},
+		},
+		"SuccessAWSIAMAuth": {
+			reason: "AWSIAMAuth injects a token, leaves tls=false unchanged, and allows the cleartext plugin.",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{Namespace: "ns", Name: "s"}
+							o.Spec.TLS = ptrStr("false")
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+								xpv2.CredentialsSecretPortKey:     []byte("3306"),
+								xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
+							}
+						}
+						return nil
+					}),
+				},
+				track: nopUsage,
+				newDB: func(c map[string][]byte, tlsMode *string, _ *bool, cleartext bool) xsql.DB {
+					if tlsMode == nil || *tlsMode != "false" {
+						t.Errorf("tls: want false, got %v", tlsMode)
+					}
+					if !cleartext {
+						t.Error("IAM login did not enable cleartext")
+					}
+					if got := string(c[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
+						t.Errorf("password: want iam-token, got %q", got)
+					}
+					return mockDB{}
+				},
+			},
+			args: args{
+				ctx: context.Background(),
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{Name: "example"},
+						},
+					},
+				},
+			},
 		},
 	}
 
