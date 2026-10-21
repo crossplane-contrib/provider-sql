@@ -11,7 +11,6 @@ spec:
     connectionSecretRef:
       name: aurora-conn # endpoint, port, username - no password
     # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
-  # IAM auth forces sslMode=require. For full server-cert verification set
-  # sslMode: verify-full and supply the Amazon RDS CA to the pod
-  # (see docs/aws-iam-auth.md).
-  sslMode: require
+  # Verify the server certificate and hostname using the mounted CA bundle.
+  # See docs/aws-iam-auth.md and examples/aws-iam/deployment-runtime-config.yaml.
+  sslMode: verify-full

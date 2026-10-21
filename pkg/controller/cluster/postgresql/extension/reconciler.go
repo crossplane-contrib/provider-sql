@@ -135,7 +135,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Extension) (manage
 		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
 			return nil, errors.Wrap(err, errGenerateIAMToken)
 		}
-		sslMode = "require"
+		sslMode = postgresql.EnsureTLS(sslMode)
 	}
 
 	// We do not want to create an extension on the default DB

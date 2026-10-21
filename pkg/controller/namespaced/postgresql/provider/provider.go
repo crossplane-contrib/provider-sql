@@ -9,7 +9,9 @@ import (
 	"context"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -101,10 +103,9 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		if err := injectIAM(ctx, region, secretData); err != nil {
 			return ProviderInfo{}, provErrors.GenerateIAMTokenError(err)
 		}
-		// IAM auth requires TLS. Cert verification depends on the operator
-		// supplying the RDS CA (e.g. via trust-manager or a mounted secret).
-		requireMode := "require"
-		sslMode = &requireMode
+		// Require encryption while preserving operator-configured verification.
+		mode := postgresql.EnsureTLS(clients.ToString(sslMode))
+		sslMode = &mode
 	}
 
 	return ProviderInfo{
