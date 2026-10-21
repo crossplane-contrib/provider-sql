@@ -44,9 +44,10 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/pgconn"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/connect"
 )
 
 const (
@@ -120,9 +121,6 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Role) (managed.Typ
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -134,8 +132,12 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Role) (managed.Typ
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
+	sslMode, err := connect.Prepare(ctx, c.kube, pgconn.Input(pc, secretData))
+	if err != nil {
+		return nil, err
+	}
 	return &external{
-		db:   c.newDB(secretData, pc.Spec.DefaultDatabase, clients.ToString(pc.Spec.SSLMode)),
+		db:   c.newDB(secretData, pc.Spec.DefaultDatabase, sslMode),
 		kube: c.kube,
 	}, nil
 }
