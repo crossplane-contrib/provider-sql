@@ -70,6 +70,12 @@ spec:
                     - name
                     - namespace
                     type: object
+                  region:
+                    description: |-
+                      Region is the AWS region used to generate the IAM authentication token
+                      when source is AWSIAMAuth. When unset it falls back to a "region" key in
+                      the connection secret, then to the controller's AWS environment.
+                    type: string
                   secretKeyMapping:
                     description: |-
                       SecretKeyMapping allows overriding the default secret key names used
@@ -97,6 +103,7 @@ spec:
                     description: Source of the provider credentials.
                     enum:
                     - PostgreSQLConnectionSecret
+                    - AWSIAMAuth
                     type: string
                 required:
                 - source
@@ -118,6 +125,34 @@ spec:
                 - verify-ca
                 - verify-full
                 type: string
+              tlsConfig:
+                description: |-
+                  TLSConfig provides the CA bundle used when sslMode is verify-ca or
+                  verify-full. The secret key is one PEM and may contain multiple
+                  certificates, such as the Amazon RDS global bundle.
+                properties:
+                  caCert:
+                    description: CACert is a PEM bundle of root and intermediate certificates.
+                    properties:
+                      secretRef:
+                        description: SecretRef selects the secret key.
+                        properties:
+                          key:
+                            description: Key to select.
+                            type: string
+                          name:
+                            description: Name of the secret.
+                            type: string
+                          namespace:
+                            description: Namespace of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        - namespace
+                        type: object
+                    type: object
+                type: object
             required:
             - credentials
             type: object

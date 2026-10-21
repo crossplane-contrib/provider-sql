@@ -33,6 +33,7 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/connect"
 )
 
 type mockDB struct {
@@ -72,6 +73,13 @@ func ptr[T any](v T) *T {
 func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
+
+	origInject := connect.InjectIAM
+	connect.InjectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
+		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
+		return nil
+	}
+	t.Cleanup(func() { connect.InjectIAM = origInject })
 
 	type fields struct {
 		kube  client.Client
@@ -167,6 +175,48 @@ func TestConnect(t *testing.T) {
 				},
 			},
 			want: errors.Wrap(errBoom, errGetSecret),
+		},
+		"SuccessAWSIAMAuth": {
+			reason: "When source is AWSIAMAuth, a token is injected as the password and sslMode is left unchanged.",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{Namespace: "ns", Name: "s"}
+							o.Spec.SSLMode = ptr("verify-full")
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+								xpv2.CredentialsSecretPortKey:     []byte("5432"),
+								xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
+							}
+						}
+						return nil
+					}),
+				},
+				track: nopUsage,
+				newDB: func(c map[string][]byte, _ string, sslmode string) xsql.DB {
+					if sslmode != "verify-full" {
+						t.Errorf("expected sslmode verify-full, got %q", sslmode)
+					}
+					if got := string(c[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
+						t.Errorf("expected injected token as password, got %q", got)
+					}
+					return mockDB{}
+				},
+			},
+			args: args{
+				ctx: context.Background(),
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{Name: "example"},
+						},
+					},
+				},
+			},
 		},
 	}
 

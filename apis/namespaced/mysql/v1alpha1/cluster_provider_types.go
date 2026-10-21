@@ -27,13 +27,14 @@ type ClusterProviderConfigSpec struct {
 	// Credentials required to authenticate to this provider.
 	Credentials ClusterProviderCredentials `json:"credentials"`
 
-	// tls=true enables TLS / SSL encrypted connection to the server.
-	// Use skip-verify if you want to use a self-signed or invalid certificate (server side)
-	// or use preferred to use TLS only when advertised by the server. This is similar
-	// to skip-verify, but additionally allows a fallback to a connection which is
-	// not encrypted. Neither skip-verify nor preferred add any reliable security.
-	// Alternatively, set tls=custom and provide a custom TLS configuration via the tlsConfig field.
-	// +kubebuilder:validation:Enum="true";skip-verify;preferred;custom
+	// tls=false disables encryption. Quote it in YAML as tls: "false"; an unquoted
+	// false is a boolean and this string field rejects it. tls=true enables an
+	// encrypted connection verified with the pod trust store. Use skip-verify for
+	// a self-signed or invalid server certificate, or preferred to use TLS only
+	// when the server advertises it. preferred also allows a plaintext fallback.
+	// Neither skip-verify nor preferred verifies the server. Alternatively, set
+	// tls=custom and provide a CA via tlsConfig. An omitted value means preferred.
+	// +kubebuilder:validation:Enum="false";"true";skip-verify;preferred;custom
 	// +optional
 	TLS *string `json:"tls"`
 
@@ -45,7 +46,7 @@ type ClusterProviderConfigSpec struct {
 // ClusterProviderCredentials required to authenticate.
 type ClusterProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=MySQLConnectionSecret
+	// +kubebuilder:validation:Enum=MySQLConnectionSecret;AWSIAMAuth
 	Source MySQLConnectionSecretSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MySQL connection secret
@@ -58,6 +59,12 @@ type ClusterProviderCredentials struct {
 	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
 	// +optional
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+
+	// Region is the AWS region used to generate the IAM authentication token
+	// when source is AWSIAMAuth. When unset it falls back to a "region" key in
+	// the connection secret, then to the controller's AWS environment.
+	// +optional
+	Region *string `json:"region,omitempty"`
 }
 
 // A ClusterProviderConfigStatus reflects the observed state of a ClusterProviderConfig.

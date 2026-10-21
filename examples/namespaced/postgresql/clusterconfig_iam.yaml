@@ -1,0 +1,19 @@
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: aurora-iam
+spec:
+  sslMode: verify-full
+  tlsConfig:
+    caCert:
+      secretRef:
+        namespace: crossplane-system
+        name: amazon-rds-ca
+        key: global-bundle.pem
+  credentials:
+    source: AWSIAMAuth
+    region: us-east-1
+    connectionSecretRef:
+      namespace: crossplane-system
+      name: aurora-conn

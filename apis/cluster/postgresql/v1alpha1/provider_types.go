@@ -36,6 +36,39 @@ type ProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+
+	// TLSConfig provides the CA bundle used when sslMode is verify-ca or
+	// verify-full. The secret key is one PEM and may contain multiple
+	// certificates, such as the Amazon RDS global bundle.
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+}
+
+// TLSConfig provides a CA bundle for sslMode verify-ca and verify-full.
+type TLSConfig struct {
+	// CACert is a PEM bundle of root and intermediate certificates.
+	// +optional
+	CACert TLSSecret `json:"caCert,omitempty"`
+}
+
+// TLSSecret is a reference to a key that contains TLS material in PEM format.
+type TLSSecret struct {
+	// SecretRef selects the secret key.
+	// +optional
+	SecretRef TLSSecretRef `json:"secretRef,omitempty"`
+}
+
+// TLSSecretRef selects a secret key. Name and key are required. Namespace is
+// required on a cluster-scoped ProviderConfig.
+type TLSSecretRef struct {
+	// Name of the secret.
+	Name string `json:"name"`
+
+	// Namespace of the secret.
+	Namespace string `json:"namespace"`
+
+	// Key to select.
+	Key string `json:"key"`
 }
 
 const (
@@ -43,12 +76,17 @@ const (
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a PostgreSQL server.
 	CredentialsSourcePostgreSQLConnectionSecret xpv2.CredentialsSource = "PostgreSQLConnectionSecret"
+
+	// CredentialsSourceAWSIAMAuth indicates that the provider should
+	// authenticate to an AWS RDS/Aurora instance using an IAM authentication
+	// token generated at connection time, instead of a static password.
+	CredentialsSourceAWSIAMAuth xpv2.CredentialsSource = "AWSIAMAuth"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret
+	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret;AWSIAMAuth
 	Source xpv2.CredentialsSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
@@ -61,6 +99,12 @@ type ProviderCredentials struct {
 	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
 	// +optional
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+
+	// Region is the AWS region used to generate the IAM authentication token
+	// when source is AWSIAMAuth. When unset it falls back to a "region" key in
+	// the connection secret, then to the controller's AWS environment.
+	// +optional
+	Region *string `json:"region,omitempty"`
 }
 
 // SecretKeyMapping allows overriding the default secret key names used to
