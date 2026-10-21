@@ -1,0 +1,28 @@
+# First create provider-sql-ca in the provider pod's namespace; see docs/aws-iam-auth.md.
+# Merge into an existing runtime config when preserving workload identity settings.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-sql-aws-iam
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              env:
+                - name: SSL_CERT_FILE
+                  value: /etc/provider-sql/ca/ca-bundle.pem
+              volumeMounts:
+                - name: database-ca
+                  mountPath: /etc/provider-sql/ca
+                  readOnly: true
+          volumes:
+            - name: database-ca
+              configMap:
+                name: provider-sql-ca
+                items:
+                  - key: ca-bundle.pem
+                    path: ca-bundle.pem

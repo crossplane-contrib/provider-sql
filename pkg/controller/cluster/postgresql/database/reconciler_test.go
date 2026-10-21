@@ -177,7 +177,7 @@ func TestConnect(t *testing.T) {
 			want: errors.Wrap(errBoom, errGetSecret),
 		},
 		"SuccessAWSIAMAuth": {
-			reason: "When source is AWSIAMAuth, a token is injected as the password and sslmode is forced to require.",
+			reason: "When source is AWSIAMAuth, a token is injected as the password and an unset sslmode requires encryption.",
 			fields: fields{
 				kube: &test.MockClient{
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
@@ -217,6 +217,34 @@ func TestConnect(t *testing.T) {
 			},
 			want: nil,
 		},
+	}
+
+	for _, mode := range []string{"", "disable", "require", "verify-ca", "verify-full"} {
+		tc := cases["SuccessAWSIAMAuth"]
+		baseGet := tc.fields.kube.(*test.MockClient).MockGet
+		tc.fields.kube = &test.MockClient{MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+			if err := baseGet(ctx, key, obj); err != nil {
+				return err
+			}
+			if pc, ok := obj.(*v1alpha1.ProviderConfig); ok {
+				pc.Spec.SSLMode = &mode
+			}
+			return nil
+		}}
+		wantMode := mode
+		if mode == "" || mode == "disable" {
+			wantMode = "require"
+		}
+		tc.fields.newDB = func(creds map[string][]byte, _ string, got string) xsql.DB {
+			if got != wantMode {
+				t.Errorf("IAM sslmode: want %q, got %q", wantMode, got)
+			}
+			if string(creds[xpv2.CredentialsSecretPasswordKey]) != "iam-token" {
+				t.Error("missing IAM token")
+			}
+			return mockDB{}
+		}
+		cases["AWSIAMAuth/"+mode] = tc
 	}
 
 	for name, tc := range cases {

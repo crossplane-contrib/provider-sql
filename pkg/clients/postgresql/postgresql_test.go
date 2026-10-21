@@ -17,3 +17,16 @@ func TestDSNURLEscaping(t *testing.T) {
 		t.Errorf("DSN string did not match expected output with userinfo URL encoded")
 	}
 }
+
+func TestEnsureTLS(t *testing.T) {
+	for _, tc := range []struct{ mode, want string }{
+		{"", "require"}, {"disable", "require"}, {"require", "require"},
+		{"verify-ca", "verify-ca"}, {"verify-full", "verify-full"}, {"invalid", "invalid"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			if got := EnsureTLS(tc.mode); got != tc.want {
+				t.Errorf("want %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

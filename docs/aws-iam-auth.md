@@ -49,29 +49,96 @@ See the runnable examples: `examples/{cluster,namespaced}/{mysql,postgresql}/con
 
 ## TLS and the Amazon RDS certificate authority
 
-IAM authentication requires TLS - RDS rejects unencrypted connections. To
-*verify* the server certificate, the client needs the Amazon RDS CA, which is
-**not** in the default system trust store. provider-sql does **not** ship the RDS
-CA bundle; making it available to the provider pod is an operator concern. Two
-common approaches:
+IAM authentication requires TLS. Encryption and server verification are separate:
 
-- **[trust-manager](https://cert-manager.io/docs/trust/trust-manager/)** - add the
-  [Amazon RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem)
-  to the provider pod's trust store. Then set `tls: "true"` (MySQL) or
-  `sslMode: verify-full` (PostgreSQL) and the certificate verifies normally.
-- **Mounted secret** - mount the RDS CA and reference it through the provider's
-  existing custom TLS mechanism (`tls: custom` + `tlsConfig` for MySQL;
-  `sslMode: verify-full` with the CA for PostgreSQL).
+| Engine | Server verification enabled | Encrypted without server verification |
+|--------|-----------------------------|---------------------------------------|
+| MySQL | `tls: "true"` with a trusted RDS CA | `tls: skip-verify` |
+| PostgreSQL | `sslMode: verify-full` with a trusted RDS CA | `sslMode: require` (normally) |
 
-If you do neither, IAM auth still works but the connection is **encrypted
-without certificate verification**:
+For IAM, PostgreSQL preserves `require`, `verify-ca` and `verify-full`, and upgrades
+`disable` or an empty mode to `require`. The Kubernetes default remains
+`verify-full`, so an omitted field normally requires a trusted RDS CA.
+`verify-ca` validates the certificate chain but does not check the hostname;
+`verify-full` checks both. lib/pq can also perform CA-only verification in
+`require` mode when a root certificate file is configured or discovered; select
+`verify-full` explicitly for hostname verification.
 
-| Engine | Verified (RDS CA available) | Default fallback |
-|--------|-----------------------------|------------------|
-| MySQL | `tls: "true"` or `tls: custom` | `skip-verify` (encrypted, unverified) |
-| PostgreSQL | `sslMode: verify-full` | `sslMode: require` (encrypted, unverified) |
+For MySQL, IAM upgrades an omitted mode, `false`, or `preferred` to `skip-verify`.
+It preserves `true` and registered custom configurations. The existing custom
+TLS loader requires **all three** of `caCert`, `clientCert`, and `clientKey`;
+it does not support a CA-only `tlsConfig`. IAM tokens do not provide client
+certificates. PostgreSQL has no equivalent CA Secret selector in ProviderConfig.
+Use the shared pod trust bundle below for both engines.
 
-The provider always enforces at least an encrypted connection for IAM auth.
+### Mount a trust bundle into the provider pod
+
+The provider does not ship the RDS CA. Create a bundle containing your normal
+public roots **and** the
+[Amazon RDS CA certificates](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem).
+Public roots are needed for HTTPS connections to AWS services such as STS.
+The following commands run on your workstation, not inside the distroless
+provider container. Set `PUBLIC_CA_BUNDLE` to your maintained PEM bundle of public
+roots (the shown path is common on Debian/Ubuntu):
+
+```sh
+PUBLIC_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+curl --fail --silent --show-error \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+  --output rds-global-bundle.pem
+cat "$PUBLIC_CA_BUNDLE" rds-global-bundle.pem > provider-sql-ca-bundle.pem
+kubectl -n crossplane-system create configmap provider-sql-ca \
+  --from-file=ca-bundle.pem=provider-sql-ca-bundle.pem \
+  --dry-run=client -o yaml | kubectl apply --server-side -f -
+kubectl apply -f examples/aws-iam/deployment-runtime-config.yaml
+```
+
+Use the namespace where the provider pod runs if it differs from
+`crossplane-system`. The certificates are public; a ConfigMap is sufficient.
+Server-side apply avoids the client-side last-applied annotation size limit for
+large combined bundles.
+The runtime configuration mounts this ConfigMap read-only at
+`/etc/provider-sql/ca/ca-bundle.pem` and sets `SSL_CERT_FILE` to that path.
+[Go uses this variable when loading system roots](https://pkg.go.dev/crypto/x509#SystemCertPool).
+No changes to the container image or PostgreSQL ProviderConfig API are needed.
+
+Attach the runtime configuration to your **existing** package Provider (adjust
+`provider-sql` to its installed name):
+
+```sh
+kubectl patch providers.pkg.crossplane.io provider-sql --type=merge \
+  -p '{"spec":{"runtimeConfigRef":{"name":"provider-sql-aws-iam"}}}'
+```
+
+Each Provider has one runtimeConfigRef. If you already use a DeploymentRuntimeConfig
+for workload identity, scheduling or other settings, merge this example's env,
+volume and volumeMount into that configuration instead of replacing its reference.
+Keep your existing IRSA or Pod Identity setup. The container name must be
+`package-runtime` so Crossplane merges these settings into the provider container.
+See [Crossplane runtime configuration](https://docs.crossplane.io/latest/packages/providers/#runtime-configuration).
+
+Then select `sslMode: verify-full` for PostgreSQL or `tls: "true"` for MySQL, as
+shown in the cluster and namespaced IAM examples. Use the actual RDS endpoint
+hostname, which must match the server certificate. A missing or untrusted CA
+must cause a verified connection to fail; the provider does not silently disable
+verification.
+
+Maintain the bundle as public roots and RDS CAs rotate. After updating its
+ConfigMap, restart the provider Deployment so Go reloads the trust roots:
+
+```sh
+PROVIDER_DEPLOYMENT=your-provider-deployment-name
+kubectl -n crossplane-system rollout restart deployment/"$PROVIDER_DEPLOYMENT"
+kubectl -n crossplane-system rollout status deployment/"$PROVIDER_DEPLOYMENT"
+```
+
+[trust-manager](https://cert-manager.io/docs/trust/trust-manager/) can automate
+bundle distribution: combine `useDefaultCAs: true` with an RDS CA source and
+publish the result to a ConfigMap named `provider-sql-ca`, key `ca-bundle.pem`,
+in the provider's namespace. It does **not** mount the bundle or update a running
+process's trust store. The same runtime configuration and restart steps still
+apply. Keep the RDS source current; trust-manager does not fetch the AWS URL for
+you.
 
 ## Region resolution
 

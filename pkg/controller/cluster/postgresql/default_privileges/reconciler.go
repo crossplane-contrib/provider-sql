@@ -148,7 +148,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
 			return nil, errors.Wrap(err, errGenerateIAMToken)
 		}
-		sslMode = "require"
+		sslMode = postgresql.EnsureTLS(sslMode)
 	}
 	return &external{db: c.newDB(secretData, database, sslMode)}, nil
 }

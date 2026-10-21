@@ -46,6 +46,16 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	}
 }
 
+// EnsureTLS requires encryption without weakening configured verification.
+// Kubernetes defaults an omitted sslMode to verify-full; empty handles callers
+// that construct ProviderConfigs without API-server defaulting.
+func EnsureTLS(mode string) string {
+	if mode == "" || mode == "disable" {
+		return "require"
+	}
+	return mode
+}
+
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, database, sslmode string) string {
 	// Use net/url UserPassword to encode the username and password

@@ -145,9 +145,8 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed
 		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
 			return nil, errors.Wrap(err, errGenerateIAMToken)
 		}
-		// IAM auth requires TLS. Cert verification depends on the operator
-		// supplying the RDS CA (e.g. via trust-manager or a mounted secret).
-		sslMode = "require"
+		// Require encryption while preserving operator-configured verification.
+		sslMode = postgresql.EnsureTLS(sslMode)
 	}
 	return &external{db: c.newDB(secretData, pc.Spec.DefaultDatabase, sslMode)}, nil
 }
