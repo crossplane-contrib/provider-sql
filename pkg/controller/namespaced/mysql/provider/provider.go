@@ -7,6 +7,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"context"
+	"fmt"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
@@ -18,6 +19,7 @@ import (
 )
 
 type ProviderInfo struct {
+	PasswordProvider   xsql.PasswordProvider
 	ProviderConfigName string
 	SecretData         map[string][]byte
 	TLS                *string
@@ -27,9 +29,9 @@ type ProviderInfo struct {
 	Cleartext bool
 }
 
-// injectIAM generates and injects an AWS IAM auth token. It is a package
-// variable so tests can replace it with a stub.
-var injectIAM = awsiam.Inject
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
@@ -102,19 +104,21 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 	secretData := xsql.RemapCredentialKeys(s.Data, keyMapping)
 
 	cleartext := false
+	var password xsql.PasswordProvider
 	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
-		if err := injectIAM(ctx, region, secretData); err != nil {
+		var err error
+		password, err = newIAMToken(ctx, region, secretData)
+		if err != nil {
 			return ProviderInfo{}, errors.GenerateIAMTokenError(err)
 		}
 		cleartext = true
-		// IAM auth requires TLS. The operator supplies the RDS CA (e.g. via
-		// trust-manager or a mounted secret); honour a verifying tls mode if set,
-		// otherwise fall back to an encrypted (unverified) connection.
+		// Default IAM connections to verified TLS using the configured trust roots.
 		tlsMode = mysql.EnsureTLS(tlsMode)
 	}
 
 	return ProviderInfo{
-		ProviderConfigName: mg.GetProviderConfigReference().Name,
+		PasswordProvider:   password,
+		ProviderConfigName: fmt.Sprintf("%s/%s/%s", mg.GetProviderConfigReference().Kind, mg.GetNamespace(), mg.GetProviderConfigReference().Name),
 		SecretData:         secretData,
 		TLS:                tlsMode,
 		TLSConfig:          tlsConfig,

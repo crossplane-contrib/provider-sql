@@ -3,9 +3,12 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strconv"
 	"strings"
+
+	driverMySQL "github.com/go-sql-driver/mysql"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
@@ -16,13 +19,15 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
+	tlsVerify       = "true"
 )
 
 type mySQLDB struct {
-	dsn      string
-	endpoint string
-	port     string
-	tls      string
+	dsn              string
+	endpoint         string
+	port             string
+	tls              string
+	passwordProvider xsql.PasswordProvider
 }
 
 // New returns a new MySQL database client. When cleartext is true the DSN sets
@@ -47,16 +52,38 @@ func New(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsq
 	}
 }
 
-// EnsureTLS returns a TLS mode that guarantees an encrypted connection, for use
-// with AWS IAM authentication. If mode is unset or non-encrypting
-// ("preferred"/"false") it returns "skip-verify" (encrypted but unverified);
-// otherwise it returns mode unchanged so an operator-configured verifying mode
-// ("true" or a registered custom configuration) is preserved. Custom TLS
-// configuration loading and certificate requirements are handled separately.
+// NewWithPasswordProvider configures credentials generated for each physical connection.
+func NewWithPasswordProvider(creds map[string][]byte, tls *string, binlog *bool, cleartext bool, password xsql.PasswordProvider) xsql.DB {
+	db := New(creds, tls, binlog, cleartext).(mySQLDB)
+	db.passwordProvider = password
+	return db
+}
+
+func (c mySQLDB) open() (*sql.DB, error) {
+	if c.passwordProvider == nil {
+		return sql.Open("mysql", c.dsn)
+	}
+	cfg, err := driverMySQL.ParseDSN(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	return sql.OpenDB(&xsql.PasswordConnector{
+		Password:  c.passwordProvider,
+		SQLDriver: &driverMySQL.MySQLDriver{},
+		NewConnector: func(password string) (driver.Connector, error) {
+			next := cfg.Clone()
+			next.Passwd = password
+			return driverMySQL.NewConnector(next)
+		},
+	}), nil
+}
+
+// EnsureTLS selects verified TLS for IAM when mode is unset or permits plaintext.
+// Explicit skip-verify and registered custom configurations remain operator choices.
 func EnsureTLS(mode *string) *string {
-	if mode == nil || *mode == "false" || *mode == "preferred" {
-		skipVerify := "skip-verify"
-		return &skipVerify
+	if mode == nil || *mode == "" || *mode == "false" || *mode == "preferred" {
+		verified := tlsVerify
+		return &verified
 	}
 	return mode
 }
@@ -64,9 +91,7 @@ func EnsureTLS(mode *string) *string {
 // DSN returns the DSN URL. When cleartext is true, allowCleartextPasswords=true
 // is appended (required for AWS RDS IAM authentication).
 func DSN(username, password, endpoint, port, tls string, binlog *bool, cleartext bool) string {
-	// Use net/url UserPassword to encode the username and password
-	// This will ensure that any special characters in the username or password
-	// are percent-encoded for use in the user info portion of the DSN URL
+	// MySQL DSN passwords are passed verbatim. URL-encoding would change IAM tokens.
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s", username, password, endpoint, port, tls)
 	if binlog != nil {
 		dsn += "&sql_log_bin=" + strconv.FormatBool(*binlog)
@@ -84,7 +109,7 @@ func (c mySQLDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := c.open()
 	if err != nil {
 		return err
 	}
@@ -96,7 +121,7 @@ func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := c.open()
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +133,7 @@ func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mySQLDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
+	db, err := c.open()
 	if err != nil {
 		return err
 	}

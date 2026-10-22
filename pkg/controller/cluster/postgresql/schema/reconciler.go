@@ -68,7 +68,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.NewWithPasswordProvider}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -97,14 +97,14 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 var _ managed.TypedExternalConnector[*v1alpha1.Schema] = &connector{}
 
-// injectIAM generates and injects an AWS IAM auth token. It is a package
-// variable so tests can replace it with a stub.
-var injectIAM = awsiam.Inject
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
 
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.TypedExternalClient[*v1alpha1.Schema], error) {
@@ -119,9 +119,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.T
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -139,13 +137,16 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.T
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
 
 	sslMode := clients.ToString(pc.Spec.SSLMode)
+	var password xsql.PasswordProvider
 	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
-		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
+		var err error
+		password, err = newIAMToken(ctx, pc.Spec.Credentials.Region, secretData)
+		if err != nil {
 			return nil, errors.Wrap(err, errGenerateIAMToken)
 		}
 		sslMode = postgresql.EnsureTLS(sslMode)
 	}
-	return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, sslMode)}, nil
+	return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, sslMode, password)}, nil
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.Schema] = &external{}

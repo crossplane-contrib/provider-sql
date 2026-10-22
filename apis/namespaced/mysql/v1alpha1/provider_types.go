@@ -42,6 +42,8 @@ type ProviderConfigSpec struct {
 }
 
 // TLSConfig defines the TLS configuration for the provider when tls=custom.
+// CACert verifies the server. ClientCert and ClientKey are optional and must
+// be supplied together when the server requires mutual TLS.
 type TLSConfig struct {
 	CACert             TLSSecret `json:"caCert,omitempty"`
 	ClientCert         TLSSecret `json:"clientCert,omitempty"`

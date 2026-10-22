@@ -19,15 +19,16 @@ import (
 )
 
 type ProviderInfo struct {
+	PasswordProvider   xsql.PasswordProvider
 	ProviderConfigName string
 	SecretData         map[string][]byte
 	DefaultDatabase    string
 	SSLMode            *string
 }
 
-// injectIAM generates and injects an AWS IAM auth token. It is a package
-// variable so tests can replace it with a stub.
-var injectIAM = awsiam.Inject
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
@@ -99,8 +100,11 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 	secretData := xsql.RemapCredentialKeys(s.Data, keyMapping)
 
+	var password xsql.PasswordProvider
 	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
-		if err := injectIAM(ctx, region, secretData); err != nil {
+		var err error
+		password, err = newIAMToken(ctx, region, secretData)
+		if err != nil {
 			return ProviderInfo{}, provErrors.GenerateIAMTokenError(err)
 		}
 		// Require encryption while preserving operator-configured verification.
@@ -109,6 +113,7 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 	}
 
 	return ProviderInfo{
+		PasswordProvider:   password,
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
 		SecretData:         secretData,
 		DefaultDatabase:    defaultDatabase,

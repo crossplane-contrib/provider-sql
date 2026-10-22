@@ -1,7 +1,14 @@
 package postgresql
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	"github.com/lib/pq"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 )
 
 func TestDSNURLEscaping(t *testing.T) {
@@ -18,9 +25,74 @@ func TestDSNURLEscaping(t *testing.T) {
 	}
 }
 
+func TestPasswordProviderRejectsMalformedConfigBeforeSigning(t *testing.T) {
+	const token = "SYNTHETIC-IAM-TOKEN"
+	for _, tc := range []struct {
+		name, endpoint, port, database string
+	}{
+		{"host control character", "db.example.com\n", "5432", "postgres"},
+		{"invalid port", "db.example.com", "invalid", "postgres"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			db := NewWithPasswordProvider(map[string][]byte{
+				xpv2.CredentialsSecretEndpointKey: []byte(tc.endpoint),
+				xpv2.CredentialsSecretPortKey:     []byte(tc.port),
+				xpv2.CredentialsSecretUserKey:     []byte("user"),
+				xpv2.CredentialsSecretPasswordKey: []byte("IGNORED-STATIC-PASSWORD"),
+			}, tc.database, "verify-full", func(context.Context) (string, error) {
+				calls++
+				return token, nil
+			})
+			err := db.Scan(context.Background(), xsql.Query{String: "SELECT 1"}, new(int))
+			if err == nil {
+				t.Fatal("malformed connection settings must fail")
+			}
+			if strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "IGNORED-STATIC-PASSWORD") {
+				t.Fatalf("connection error exposed a credential: %v", err)
+			}
+			if calls != 0 {
+				t.Fatalf("signed %d tokens before rejecting malformed settings", calls)
+			}
+		})
+	}
+}
+
+func TestDSNDatabaseCannotOverrideConnectionSettings(t *testing.T) {
+	for _, database := range []string{
+		"sales%zz", "sales#archive", "sales\n", "sales/2026",
+		"postgres?hostaddr=203.0.113.10&sslmode=disable&x=",
+	} {
+		t.Run(database, func(t *testing.T) {
+			cfg, err := pq.NewConfig(DSN("user", "password", "db.example.com", "5432", database, "verify-full"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Host != "db.example.com" || cfg.Hostaddr.IsValid() || cfg.Database != database || cfg.SSLMode != "verify-full" {
+				t.Fatalf("database name changed connection settings: host=%q hostaddr=%v database=%q sslmode=%q", cfg.Host, cfg.Hostaddr, cfg.Database, cfg.SSLMode)
+			}
+		})
+	}
+}
+
+func TestStaticPasswordNotInConfigError(t *testing.T) {
+	const password = "SYNTHETIC-STATIC-PASSWORD"
+	db := New(map[string][]byte{
+		xpv2.CredentialsSecretEndpointKey: []byte("db.example.com\n"),
+		xpv2.CredentialsSecretPortKey:     []byte("5432"),
+		xpv2.CredentialsSecretUserKey:     []byte("user"),
+		xpv2.CredentialsSecretPasswordKey: []byte(password),
+	}, "postgres", "verify-full")
+	err := db.Scan(context.Background(), xsql.Query{String: "SELECT 1"}, new(int))
+	if err == nil || strings.Contains(err.Error(), password) {
+		t.Fatalf("expected a connection error without the password, got %v", err)
+	}
+}
+
 func TestEnsureTLS(t *testing.T) {
 	for _, tc := range []struct{ mode, want string }{
 		{"", "require"}, {"disable", "require"}, {"require", "require"},
+		{"allow", "require"}, {"prefer", "require"},
 		{"verify-ca", "verify-ca"}, {"verify-full", "verify-full"}, {"invalid", "invalid"},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {

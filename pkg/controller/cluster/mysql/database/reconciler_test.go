@@ -67,17 +67,16 @@ func TestConnect(t *testing.T) {
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
 	// Stub the AWS IAM token injection so the success case needs no AWS access.
-	origInject := injectIAM
-	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
-		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
-		return nil
+	origInject := newIAMToken
+	newIAMToken = func(_ context.Context, _ *string, creds map[string][]byte) (xsql.PasswordProvider, error) {
+		return func(context.Context) (string, error) { return "iam-token", nil }, nil
 	}
-	defer func() { injectIAM = origInject }()
+	defer func() { newIAMToken = origInject }()
 
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
+		newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool, _ xsql.PasswordProvider) xsql.DB
 	}
 
 	type args struct {
@@ -189,15 +188,21 @@ func TestConnect(t *testing.T) {
 					}),
 				},
 				track: nopUsage,
-				newDB: func(creds map[string][]byte, tls *string, _ *bool, cleartext bool) xsql.DB {
+				newDB: func(creds map[string][]byte, tls *string, _ *bool, cleartext bool, password xsql.PasswordProvider) xsql.DB {
 					if !cleartext {
 						t.Error("expected cleartext=true for AWS IAM auth")
 					}
-					if got := string(creds[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
-						t.Errorf("expected injected token as password, got %q", got)
+					if password == nil {
+						t.Fatal("missing per-connection password provider")
 					}
-					if tls == nil || *tls != "skip-verify" {
-						t.Errorf("expected TLS forced to skip-verify, got %v", tls)
+					if got, err := password(context.Background()); err != nil || got != "iam-token" {
+						t.Errorf("token: %q, %v", got, err)
+					}
+					if _, ok := creds[xpv2.CredentialsSecretPasswordKey]; ok {
+						t.Error("token must not be cached in credentials")
+					}
+					if tls == nil || *tls != "true" {
+						t.Errorf("expected verified TLS by default, got %v", tls)
 					}
 					return mockDB{}
 				},

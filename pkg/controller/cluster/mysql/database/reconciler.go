@@ -66,7 +66,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.NewWithPasswordProvider}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -94,14 +94,14 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
-// injectIAM generates and injects an AWS IAM auth token. It is a package
-// variable so tests can replace it with a stub.
-var injectIAM = awsiam.Inject
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
 
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool, password xsql.PasswordProvider) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Database] = &connector{}
@@ -119,9 +119,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (MySQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -140,17 +138,18 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Database) (managed
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
 
 	cleartext := false
+	var password xsql.PasswordProvider
 	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
-		if err := injectIAM(ctx, pc.Spec.Credentials.Region, secretData); err != nil {
+		var err error
+		password, err = newIAMToken(ctx, pc.Spec.Credentials.Region, secretData)
+		if err != nil {
 			return nil, errors.Wrap(err, errGenerateIAMToken)
 		}
 		cleartext = true
-		// IAM auth requires TLS. The operator supplies the RDS CA (e.g. via
-		// trust-manager or a mounted secret); honour a verifying tls mode if set,
-		// otherwise fall back to an encrypted (unverified) connection.
+		// Default IAM connections to verified TLS using the configured trust roots.
 		tlsName = mysql.EnsureTLS(tlsName)
 	}
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, cleartext)}, nil
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, cleartext, password)}, nil
 }
 
 type external struct{ db xsql.DB }

@@ -74,17 +74,16 @@ func TestConnect(t *testing.T) {
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
 	// Stub the AWS IAM token injection so the success case needs no AWS access.
-	origInject := injectIAM
-	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
-		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
-		return nil
+	origInject := newIAMToken
+	newIAMToken = func(_ context.Context, _ *string, creds map[string][]byte) (xsql.PasswordProvider, error) {
+		return func(context.Context) (string, error) { return "iam-token", nil }, nil
 	}
-	defer func() { injectIAM = origInject }()
+	defer func() { newIAMToken = origInject }()
 
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, sslmode string, _ xsql.PasswordProvider) xsql.DB
 	}
 
 	type args struct {
@@ -196,12 +195,18 @@ func TestConnect(t *testing.T) {
 					}),
 				},
 				track: nopUsage,
-				newDB: func(creds map[string][]byte, _ string, sslmode string) xsql.DB {
+				newDB: func(creds map[string][]byte, _ string, sslmode string, password xsql.PasswordProvider) xsql.DB {
 					if sslmode != "require" {
 						t.Errorf("expected sslmode forced to require, got %q", sslmode)
 					}
-					if got := string(creds[xpv2.CredentialsSecretPasswordKey]); got != "iam-token" {
-						t.Errorf("expected injected token as password, got %q", got)
+					if password == nil {
+						t.Fatal("missing per-connection password provider")
+					}
+					if got, err := password(context.Background()); err != nil || got != "iam-token" {
+						t.Errorf("token: %q, %v", got, err)
+					}
+					if _, ok := creds[xpv2.CredentialsSecretPasswordKey]; ok {
+						t.Error("token must not be cached in credentials")
 					}
 					return mockDB{}
 				},
@@ -235,12 +240,15 @@ func TestConnect(t *testing.T) {
 		if mode == "" || mode == "disable" {
 			wantMode = "require"
 		}
-		tc.fields.newDB = func(creds map[string][]byte, _ string, got string) xsql.DB {
+		tc.fields.newDB = func(creds map[string][]byte, _ string, got string, password xsql.PasswordProvider) xsql.DB {
 			if got != wantMode {
 				t.Errorf("IAM sslmode: want %q, got %q", wantMode, got)
 			}
-			if string(creds[xpv2.CredentialsSecretPasswordKey]) != "iam-token" {
-				t.Error("missing IAM token")
+			if password == nil {
+				t.Fatal("missing per-connection password provider")
+			}
+			if got, err := password(context.Background()); err != nil || got != "iam-token" {
+				t.Errorf("token: %q, %v", got, err)
 			}
 			return mockDB{}
 		}
