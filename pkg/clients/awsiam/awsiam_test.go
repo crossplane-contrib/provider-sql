@@ -18,16 +18,145 @@ package awsiam
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
-	"github.com/google/go-cmp/cmp"
-	"github.com/pkg/errors"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
+
+func TestAWSConfigCache(t *testing.T) {
+	var calls atomic.Int32
+	want := errors.New("temporary config failure")
+	cache := awsConfigCache{load: func(context.Context) (aws.Config, error) {
+		if calls.Add(1) == 1 {
+			return aws.Config{}, want
+		}
+		return aws.Config{Region: "eu-west-1"}, nil
+	}}
+	if _, err := cache.get(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("expected first load failure, got %v", err)
+	}
+	var workers sync.WaitGroup
+	for range 20 {
+		workers.Go(func() {
+			cfg, err := cache.get(context.Background())
+			if err != nil || cfg.Region != "eu-west-1" {
+				t.Errorf("cached config: region=%q error=%v", cfg.Region, err)
+			}
+		})
+	}
+	workers.Wait()
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("expected one failure then one shared successful load, got %d", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cache.get(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled config request: %v", err)
+	}
+}
+
+type configWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *configWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestAWSConfigCacheCanceledWaiter(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	cache := awsConfigCache{load: func(context.Context) (aws.Config, error) {
+		close(started)
+		<-release
+		return aws.Config{Region: "eu-west-1"}, nil
+	}}
+	loaded := make(chan error, 1)
+	go func() { _, err := cache.get(context.Background()); loaded <- err }()
+	<-started
+	t.Cleanup(func() { close(release); <-loaded })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waiter := &configWaitContext{Context: ctx, waiting: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() { _, err := cache.get(waiter); result <- err }()
+	select {
+	case <-waiter.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second caller did not wait on the active config load")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiting caller returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled caller remained blocked on another caller's config load")
+	}
+}
+
+func TestNewTokenProviderWithSDKEnvironment(t *testing.T) {
+	// Keep the process-wide cache and the developer's AWS configuration isolated.
+	if os.Getenv("PROVIDER_SQL_AWS_CONFIG_TEST") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestNewTokenProviderWithSDKEnvironment$", "-test.timeout=30s")
+		cmd.Env = append(os.Environ(), "PROVIDER_SQL_AWS_CONFIG_TEST=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("SDK config subprocess: %v\n%s", err, out)
+		}
+		return
+	}
+	for name, value := range map[string]string{
+		"AWS_CONFIG_FILE": os.DevNull, "AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
+		"AWS_PROFILE": "", "AWS_DEFAULT_PROFILE": "",
+		"AWS_ACCESS_KEY_ID": "SYNTHETICACCESS", "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
+		"AWS_SESSION_TOKEN": "", "AWS_REGION": "eu-west-1", "AWS_DEFAULT_REGION": "",
+		"AWS_EC2_METADATA_DISABLED": "true", "AWS_WEB_IDENTITY_TOKEN_FILE": "", "AWS_ROLE_ARN": "",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "", "AWS_CONTAINER_CREDENTIALS_FULL_URI": "",
+	} {
+		t.Setenv(name, value)
+	}
+	creds := map[string][]byte{
+		xpv2.CredentialsSecretEndpointKey: []byte("db.example.com"),
+		xpv2.CredentialsSecretPortKey:     []byte("5432"),
+		xpv2.CredentialsSecretUserKey:     []byte("user"),
+	}
+	for _, region := range []string{"", "eu-central-1"} {
+		provider, err := NewTokenProvider(context.Background(), &region, creds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := provider(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := url.Parse("https://" + token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantRegion := region
+		if wantRegion == "" {
+			wantRegion = "eu-west-1"
+		}
+		if parsed.Query().Get("DBUser") != "user" || !strings.Contains(parsed.Query().Get("X-Amz-Credential"), "/"+wantRegion+"/rds-db/") {
+			t.Fatal("SDK token did not use the configured user and region")
+		}
+	}
+}
 
 // builderCall records what a stub TokenBuilder was invoked with, so a test can
 // assert on it afterwards.
@@ -98,85 +227,116 @@ func TestResolveRegion(t *testing.T) {
 	}
 }
 
-func TestInjectToken(t *testing.T) {
-	ctx := context.Background()
-	errBoom := errors.New("boom")
-
-	// The stub builder ignores the credentials argument, so any value works.
-	var noCreds aws.CredentialsProvider
-
-	// fullCreds is a connection-secret map with everything InjectToken needs.
-	fullCreds := func() map[string][]byte {
-		return map[string][]byte{
-			xpv1.ResourceCredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
-			xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
-			xpv1.ResourceCredentialsSecretUserKey:     []byte("crossplane_admin"),
+func TestTokenProvider(t *testing.T) {
+	creds := map[string][]byte{xpv2.CredentialsSecretEndpointKey: []byte("db.example.com"), xpv2.CredentialsSecretPortKey: []byte("5432"), xpv2.CredentialsSecretUserKey: []byte("admin")}
+	now := time.Unix(0, 0)
+	calls := 0
+	build := func(ctx context.Context, host, region, user string, _ aws.CredentialsProvider, _ ...func(*auth.BuildAuthTokenOptions)) (string, error) {
+		if host != "db.example.com:5432" || region != "eu-west-1" || user != "admin" {
+			t.Error("incorrect signing inputs")
 		}
+		calls++
+		return fmt.Sprintf("token-%d", now.Unix()), nil
 	}
+	provider, err := tokenProvider(creds, "eu-west-1", nil, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatal("must not sign a token before a physical connection needs it")
+	}
+	first, err := provider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(20 * time.Minute)
+	// The closure captures immutable connection data, not the mutable Secret map.
+	creds[xpv2.CredentialsSecretEndpointKey][0] = 'X'
+	next, err := provider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == next || calls != 2 {
+		t.Fatal("later connection reused the initial token")
+	}
+	if _, ok := creds[xpv2.CredentialsSecretPasswordKey]; ok {
+		t.Error("token must not be written into the Secret map")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := provider(ctx); err != context.Canceled {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if calls != 2 {
+		t.Error("cancellation must prevent signing")
+	}
+}
 
-	t.Run("Success", func(t *testing.T) {
-		creds := fullCreds()
-		rec := &builderCall{}
+func TestTokenProviderValidationAndErrors(t *testing.T) {
+	for _, missing := range []string{"endpoint", "port", "username", "region"} {
+		t.Run(missing, func(t *testing.T) {
+			creds := map[string][]byte{"endpoint": []byte("db"), "port": []byte("3306"), "username": []byte("user")}
+			region := "eu-west-1"
+			if missing == "region" {
+				region = ""
+			} else {
+				delete(creds, missing)
+			}
+			if _, err := tokenProvider(creds, region, nil, nil); err == nil {
+				t.Error("expected validation failure")
+			}
+		})
+	}
+	rec := &builderCall{}
+	provider, err := tokenProvider(map[string][]byte{"endpoint": []byte("2001:db8::1"), "port": []byte("5432"), "username": []byte("user")}, "eu-west-1", nil, recordingBuilder("", fmt.Errorf("signing failed"), rec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider(context.Background()); err == nil {
+		t.Error("signing error was swallowed")
+	}
+	if rec.endpoint != "[2001:db8::1]:5432" {
+		t.Fatalf("invalid IPv6 host/port: %q", rec.endpoint)
+	}
+}
 
-		err := InjectToken(ctx, creds, "eu-west-1", noCreds, recordingBuilder("FAKE_TOKEN", nil, rec))
-		if err != nil {
-			t.Fatalf("InjectToken(...): unexpected error: %v", err)
+func TestTokenProviderRefreshesAWSCredentials(t *testing.T) {
+	calls := 0
+	fail := false
+	boom := errors.New("AWS credentials unavailable")
+	cache := aws.NewCredentialsCache(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		if fail {
+			return aws.Credentials{}, boom
 		}
-
-		// The token must be written into the password slot.
-		if got := string(creds[xpv1.ResourceCredentialsSecretPasswordKey]); got != "FAKE_TOKEN" {
-			t.Errorf("password: want %q, got %q", "FAKE_TOKEN", got)
-		}
-		// The builder must have received endpoint as host:port, plus region and user.
-		if rec.endpoint != "db.example.rds.amazonaws.com:5432" {
-			t.Errorf("endpoint passed to builder: want host:port, got %q", rec.endpoint)
-		}
-		if rec.region != "eu-west-1" {
-			t.Errorf("region passed to builder: want %q, got %q", "eu-west-1", rec.region)
-		}
-		if rec.dbUser != "crossplane_admin" {
-			t.Errorf("dbUser passed to builder: want %q, got %q", "crossplane_admin", rec.dbUser)
-		}
-	})
-
-	t.Run("MissingUsername", func(t *testing.T) {
-		creds := fullCreds()
-		delete(creds, xpv1.ResourceCredentialsSecretUserKey)
-		rec := &builderCall{}
-
-		err := InjectToken(ctx, creds, "eu-west-1", noCreds, recordingBuilder("x", nil, rec))
-		if diff := cmp.Diff(errors.New(errMissingConnDetails), err, test.EquateErrors()); diff != "" {
-			t.Errorf("InjectToken(...): -want error, +got error:\n%s", diff)
-		}
-		if rec.called {
-			t.Error("builder must not be called when connection details are incomplete")
-		}
-	})
-
-	t.Run("EmptyRegion", func(t *testing.T) {
-		creds := fullCreds()
-		rec := &builderCall{}
-
-		err := InjectToken(ctx, creds, "", noCreds, recordingBuilder("x", nil, rec))
-		if diff := cmp.Diff(errors.New(errNoRegion), err, test.EquateErrors()); diff != "" {
-			t.Errorf("InjectToken(...): -want error, +got error:\n%s", diff)
-		}
-		if rec.called {
-			t.Error("builder must not be called when region is empty")
-		}
-	})
-
-	t.Run("BuilderError", func(t *testing.T) {
-		creds := fullCreds()
-		rec := &builderCall{}
-
-		err := InjectToken(ctx, creds, "eu-west-1", noCreds, recordingBuilder("", errBoom, rec))
-		if diff := cmp.Diff(errors.Wrap(errBoom, errBuildToken), err, test.EquateErrors()); diff != "" {
-			t.Errorf("InjectToken(...): -want error, +got error:\n%s", diff)
-		}
-		// The password must remain unset when token generation fails.
-		if _, ok := creds[xpv1.ResourceCredentialsSecretPasswordKey]; ok {
-			t.Error("password must not be set when token generation fails")
-		}
-	})
+		calls++
+		return aws.Credentials{AccessKeyID: fmt.Sprintf("TESTKEY%d", calls), SecretAccessKey: "test-secret", SessionToken: "test-session", CanExpire: true, Expires: time.Now().Add(time.Hour)}, nil
+	}))
+	provider, err := tokenProvider(map[string][]byte{"endpoint": []byte("db.example.com"), "port": []byte("3306"), "username": []byte("user")}, "eu-west-1", cache, auth.BuildAuthToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := provider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first, "TESTKEY1") {
+		t.Fatal("token did not use initial AWS credentials")
+	}
+	cache.Invalidate()
+	second, err := provider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(second, "TESTKEY2") {
+		t.Fatal("token reused captured AWS credentials")
+	}
+	fail = true
+	cache.Invalidate()
+	if _, err := provider(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("credential error was lost: %v", err)
+	}
+	fail = false
+	if _, err := provider(context.Background()); err != nil {
+		t.Fatalf("provider failed to recover: %v", err)
+	}
 }

@@ -15,18 +15,22 @@ limitations under the License.
 */
 
 // Package awsiam generates short-lived AWS RDS IAM authentication tokens and
-// injects them in place of a static database password. It lets provider-sql
+// supplies them in place of a static database password. It lets provider-sql
 // connect to Aurora/RDS using an IAM identity (EKS Pod Identity or IRSA)
 // instead of a password stored in a Kubernetes Secret.
 package awsiam
 
 import (
 	"context"
+	"net"
+	"sync"
+
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/pkg/errors"
 )
 
@@ -42,7 +46,7 @@ const (
 )
 
 // TokenBuilder has the same signature as auth.BuildAuthToken from the AWS SDK.
-// InjectToken takes it as a parameter so production code passes the real
+// The token provider takes it as a parameter so production code passes the real
 // auth.BuildAuthToken while tests pass a stub that returns a fixed token
 // without calling AWS.
 type TokenBuilder func(ctx context.Context, endpoint, region, dbUser string,
@@ -63,46 +67,83 @@ func ResolveRegion(specRegion *string, creds map[string][]byte, cfgRegion string
 	return cfgRegion
 }
 
-// InjectToken generates an RDS IAM authentication token and writes it into creds
-// as the password. It reads the endpoint, port and username already present in
-// creds (populated from the connection secret) and combines endpoint and port
-// into the "host:port" form the AWS SDK requires. awsCreds are the AWS
-// credentials used to sign the token; build is the token generator
-// (auth.BuildAuthToken in production).
-//
-// On success the password entry of creds holds the token; the database client
-// then uses it exactly as it would a static password.
-func InjectToken(ctx context.Context, creds map[string][]byte, region string,
-	awsCreds aws.CredentialsProvider, build TokenBuilder) error {
-	endpoint := string(creds[xpv1.ResourceCredentialsSecretEndpointKey])
-	port := string(creds[xpv1.ResourceCredentialsSecretPortKey])
-	username := string(creds[xpv1.ResourceCredentialsSecretUserKey])
-
-	if endpoint == "" || port == "" || username == "" {
-		return errors.New(errMissingConnDetails)
-	}
-	if region == "" {
-		return errors.New(errNoRegion)
-	}
-
-	token, err := build(ctx, endpoint+":"+port, region, username, awsCreds)
-	if err != nil {
-		return errors.Wrap(err, errBuildToken)
-	}
-
-	creds[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(token)
-	return nil
+type awsConfigCache struct {
+	mu      sync.Mutex
+	config  *aws.Config
+	loading chan struct{}
+	load    func(context.Context) (aws.Config, error)
 }
 
-// Inject loads AWS configuration from the environment, resolves the region
-// (ProviderConfig field > secret "region" key > environment) and injects an RDS
-// IAM authentication token into creds as the password. It is the entry point a
-// reconciler's Connect() calls when the credentials source is AWS IAM auth.
-func Inject(ctx context.Context, specRegion *string, creds map[string][]byte) error {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return errors.Wrap(err, errLoadConfig)
+func (c *awsConfigCache) get(ctx context.Context) (aws.Config, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return aws.Config{}, err
+		}
+		c.mu.Lock()
+		if c.config != nil {
+			cfg := *c.config
+			c.mu.Unlock()
+			return cfg, nil
+		}
+		if c.loading != nil {
+			ready := c.loading
+			c.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return aws.Config{}, ctx.Err()
+			case <-ready:
+				continue
+			}
+		}
+		c.loading = make(chan struct{})
+		c.mu.Unlock()
+
+		cfg, err := c.load(ctx)
+		c.mu.Lock()
+		if err == nil {
+			c.config = &cfg
+		}
+		close(c.loading)
+		c.loading = nil
+		c.mu.Unlock()
+		return cfg, err
 	}
-	region := ResolveRegion(specRegion, creds, cfg.Region)
-	return InjectToken(ctx, creds, region, cfg.Credentials, auth.BuildAuthToken)
+}
+
+var defaultConfigCache = awsConfigCache{load: func(ctx context.Context) (aws.Config, error) {
+	return config.LoadDefaultConfig(ctx)
+}}
+
+// NewTokenProvider reuses the process's AWS configuration and signs a new token for
+// every physical connection. The SDK credential provider refreshes temporary
+// AWS credentials as needed. No token is retained in a long-lived DSN.
+func NewTokenProvider(ctx context.Context, specRegion *string, creds map[string][]byte) (xsql.PasswordProvider, error) {
+	cfg, err := defaultConfigCache.get(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, errLoadConfig)
+	}
+	return tokenProvider(creds, ResolveRegion(specRegion, creds, cfg.Region), cfg.Credentials, auth.BuildAuthToken)
+}
+
+func tokenProvider(creds map[string][]byte, region string, awsCreds aws.CredentialsProvider, build TokenBuilder) (xsql.PasswordProvider, error) {
+	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
+	port := string(creds[xpv2.CredentialsSecretPortKey])
+	username := string(creds[xpv2.CredentialsSecretUserKey])
+	if endpoint == "" || port == "" || username == "" {
+		return nil, errors.New(errMissingConnDetails)
+	}
+	if region == "" {
+		return nil, errors.New(errNoRegion)
+	}
+	address := net.JoinHostPort(endpoint, port)
+	return func(ctx context.Context) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		token, err := build(ctx, address, region, username, awsCreds)
+		if err != nil {
+			return "", errors.Wrap(err, errBuildToken)
+		}
+		return token, nil
+	}, nil
 }

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,12 +36,11 @@ import (
 // TestGetProviderConfigTLS covers both ProviderConfig kinds and ensures IAM
 // enforces encryption without downgrading verification or changing password auth.
 func TestGetProviderConfigTLS(t *testing.T) {
-	origInject := injectIAM
-	injectIAM = func(_ context.Context, _ *string, creds map[string][]byte) error {
-		creds[xpv2.CredentialsSecretPasswordKey] = []byte("iam-token")
-		return nil
+	origInject := newIAMToken
+	newIAMToken = func(_ context.Context, _ *string, creds map[string][]byte) (xsql.PasswordProvider, error) {
+		return func(context.Context) (string, error) { return "iam-token", nil }, nil
 	}
-	t.Cleanup(func() { injectIAM = origInject })
+	t.Cleanup(func() { newIAMToken = origInject })
 	for _, kind := range []string{v1alpha1.ProviderConfigKind, v1alpha1.ClusterProviderConfigKind} {
 		for _, iam := range []bool{false, true} {
 			for _, mode := range []string{"unset", "", "disable", "require", "verify-ca", "verify-full"} {
@@ -99,12 +100,18 @@ func TestGetProviderConfigTLS(t *testing.T) {
 					if !iam && mode == "unset" && info.SSLMode != nil {
 						t.Error("password auth should preserve nil SSLMode")
 					}
-					wantPassword := "password"
 					if iam {
-						wantPassword = "iam-token"
+						if info.PasswordProvider == nil {
+							t.Fatal("missing per-connection token provider")
+						}
+						if got, err := info.PasswordProvider(context.Background()); err != nil || got != "iam-token" {
+							t.Errorf("token: %q, %v", got, err)
+						}
+					} else if info.PasswordProvider != nil {
+						t.Error("password auth must not use IAM provider")
 					}
-					if got := string(info.SecretData[xpv2.CredentialsSecretPasswordKey]); got != wantPassword {
-						t.Errorf("password: want %q, got %q", wantPassword, got)
+					if got := string(info.SecretData[xpv2.CredentialsSecretPasswordKey]); got != "password" {
+						t.Errorf("Secret password changed: %q", got)
 					}
 				})
 			}

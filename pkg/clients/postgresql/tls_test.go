@@ -24,6 +24,54 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
+func TestIAMRequiresTLSWhenServerRefusesIt(t *testing.T) {
+	for _, mode := range []string{"", "disable", "allow", "prefer"} {
+		t.Run(mode, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan bool, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					done <- false
+					return
+				}
+				defer conn.Close()
+				_ = listener.Close() // Any plaintext retry must fail too.
+				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+				request := make([]byte, 8)
+				_, err = io.ReadFull(conn, request)
+				isSSL := err == nil && binary.BigEndian.Uint32(request[4:]) == 80877103
+				if isSSL {
+					_, _ = conn.Write([]byte("N"))
+				}
+				done <- isSSL
+			}()
+			host, port, err := net.SplitHostPort(listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			db := NewWithPasswordProvider(map[string][]byte{
+				xpv2.CredentialsSecretEndpointKey: []byte(host),
+				xpv2.CredentialsSecretPortKey:     []byte(port),
+				xpv2.CredentialsSecretUserKey:     []byte("user"),
+			}, "postgres", EnsureTLS(mode), func(context.Context) (string, error) { return "fresh-token", nil })
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err = db.Scan(ctx, xsql.Query{String: "SELECT 1"}, new(int))
+			_ = listener.Close()
+			if !<-done {
+				t.Error("driver did not request TLS before authenticating")
+			}
+			if err == nil || !strings.Contains(err.Error(), "SSL is not enabled on the server") {
+				t.Fatalf("expected refusal of plaintext without fallback, got %v", err)
+			}
+		})
+	}
+}
+
 // Isolate Go's cached system roots so this test exercises the documented
 // SSL_CERT_FILE mount mechanism without affecting other tests in the package.
 func TestTLSSystemRoots(t *testing.T) {
@@ -59,13 +107,21 @@ func TestTLSSystemRoots(t *testing.T) {
 		name, mode        string
 		trusted, matching bool
 		want              string
+		rootFile          bool
 	}{
-		{"trusted matching", "verify-full", true, true, "TLS accepted"},
-		{"untrusted", "verify-full", false, true, "unknown authority"},
-		{"wrong hostname", "verify-full", true, false, "not 127.0.0.1"},
-		{"CA only permits hostname mismatch", "verify-ca", true, false, "TLS accepted"},
+		{"trusted matching", "verify-full", true, true, "TLS accepted", false},
+		{"untrusted", "verify-full", false, true, "unknown authority", false},
+		{"wrong hostname", "verify-full", true, false, "not 127.0.0.1", false},
+		{"CA only permits hostname mismatch", "verify-ca", true, false, "TLS accepted", false},
+		{"require ignores system roots", "require", false, false, "TLS accepted", false},
+		{"verify-ca rejects untrusted", "verify-ca", false, true, "unknown authority", false},
+		{"require with root file verifies CA", "require", false, true, "unknown authority", true},
+		{"require with root file skips hostname", "require", true, false, "TLS accepted", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.rootFile {
+				t.Setenv("PGSSLROOTCERT", os.Getenv("SSL_CERT_FILE"))
+			}
 			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				t.Fatal(err)
@@ -89,6 +145,8 @@ func TestTLSSystemRoots(t *testing.T) {
 			}
 			defer listener.Close()
 			done := make(chan struct{})
+			passwords := make(chan string, 1)
+			const token = "db.example.com:5432/?Action=connect&DBUser=test&X-Amz-Signature=a%2Fb+c"
 			go func() {
 				defer close(done)
 				conn, err := listener.Accept()
@@ -124,6 +182,23 @@ func TestTLSSystemRoots(t *testing.T) {
 				if _, err = io.CopyN(io.Discard, secure, int64(size-4)); err != nil {
 					return
 				}
+				// RDS PostgreSQL requests the IAM token as a cleartext password inside TLS.
+				if _, err = secure.Write([]byte{'R', 0, 0, 0, 8, 0, 0, 0, 3}); err != nil {
+					return
+				}
+				header := make([]byte, 5)
+				if _, err = io.ReadFull(secure, header); err != nil || header[0] != 'p' {
+					return
+				}
+				size = binary.BigEndian.Uint32(header[1:])
+				if size < 5 || size > 65536 {
+					return
+				}
+				password := make([]byte, size-4)
+				if _, err = io.ReadFull(secure, password); err != nil {
+					return
+				}
+				passwords <- string(password)
 				// A PostgreSQL startup error proves TLS verification completed. No real
 				// PostgreSQL server or database credentials are needed.
 				body := []byte("SFATAL\x00C28000\x00MTLS accepted\x00\x00")
@@ -136,7 +211,8 @@ func TestTLSSystemRoots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			db := New(map[string][]byte{xpv2.CredentialsSecretEndpointKey: []byte(host), xpv2.CredentialsSecretPortKey: []byte(port), xpv2.CredentialsSecretUserKey: []byte("test")}, "postgres", EnsureTLS(tc.mode))
+			signed := 0
+			db := NewWithPasswordProvider(map[string][]byte{xpv2.CredentialsSecretEndpointKey: []byte(host), xpv2.CredentialsSecretPortKey: []byte(port), xpv2.CredentialsSecretUserKey: []byte("test")}, "postgres", EnsureTLS(tc.mode), func(context.Context) (string, error) { signed++; return token, nil })
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			var value int
@@ -144,8 +220,23 @@ func TestTLSSystemRoots(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("want error containing %q, got %v", tc.want, err)
 			}
+			if signed != 1 {
+				t.Errorf("expected a freshly generated password, got %d signing calls", signed)
+			}
 			_ = listener.Close()
 			<-done
+			if tc.want == "TLS accepted" {
+				select {
+				case got := <-passwords:
+					if got != token+"\x00" {
+						t.Errorf("driver altered the token: got %q", got)
+					}
+				default:
+					t.Error("server did not receive the generated token")
+				}
+			} else if len(passwords) != 0 {
+				t.Error("driver sent the token before verifying the server")
+			}
 		})
 	}
 }
