@@ -119,7 +119,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Role) (m
 	}
 
 	return &external{
-		db:   c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode), providerInfo.PasswordProvider),
+		db:        c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode), providerInfo.PasswordProvider),
 		kube:      c.kube,
 		apiReader: c.apiReader,
 	}, nil

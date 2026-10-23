@@ -22,6 +22,7 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	"github.com/lib/pq"
 )
 
 func TestIAMRequiresTLSWhenServerRefusesIt(t *testing.T) {
@@ -103,22 +104,60 @@ func TestTLSSystemRoots(t *testing.T) {
 	if err := os.WriteFile(os.Getenv("SSL_CERT_FILE"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0600); err != nil {
 		t.Fatal(err)
 	}
+	secretKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretCA := *ca
+	secretCA.SerialNumber = big.NewInt(10)
+	secretCA.Subject = pkix.Name{CommonName: "separate Secret CA"}
+	secretDER, err := x509.CreateCertificate(rand.Reader, &secretCA, &secretCA, &secretKey.PublicKey, secretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
-		name, mode        string
-		trusted, matching bool
-		want              string
-		rootFile          bool
+		name, mode                                    string
+		trusted, matching                             bool
+		want                                          string
+		rootFile, secretCA, systemRoots, systemServer bool
+		homeRoot, invalidHomeRoot                     bool
 	}{
-		{"trusted matching", "verify-full", true, true, "TLS accepted", false},
-		{"untrusted", "verify-full", false, true, "unknown authority", false},
-		{"wrong hostname", "verify-full", true, false, "not 127.0.0.1", false},
-		{"CA only permits hostname mismatch", "verify-ca", true, false, "TLS accepted", false},
-		{"require ignores system roots", "require", false, false, "TLS accepted", false},
-		{"verify-ca rejects untrusted", "verify-ca", false, true, "unknown authority", false},
-		{"require with root file verifies CA", "require", false, true, "unknown authority", true},
-		{"require with root file skips hostname", "require", true, false, "TLS accepted", true},
+		{name: "trusted matching", mode: "verify-full", trusted: true, matching: true, want: "TLS accepted"},
+		{name: "untrusted", mode: "verify-full", matching: true, want: "unknown authority"},
+		{name: "wrong hostname", mode: "verify-full", trusted: true, want: "not 127.0.0.1"},
+		{name: "CA only permits hostname mismatch", mode: "verify-ca", trusted: true, want: "TLS accepted"},
+		{name: "require ignores system roots", mode: "require", want: "TLS accepted"},
+		{name: "verify-ca rejects untrusted", mode: "verify-ca", matching: true, want: "unknown authority"},
+		{name: "require with root file verifies CA", mode: "require", matching: true, want: "unknown authority", rootFile: true},
+		{name: "require with root file skips hostname", mode: "require", trusted: true, want: "TLS accepted", rootFile: true},
+		{name: "secret CA verifies server absent from system pool", mode: "verify-full", trusted: true, matching: true, want: "TLS accepted", secretCA: true},
+		{name: "secret CA overrides system roots", mode: "verify-full", trusted: true, matching: true, want: "TLS accepted", secretCA: true, systemRoots: true},
+		{name: "secret CA rejects system-trusted server with explicit system roots", mode: "verify-full", trusted: true, matching: true, want: "unknown authority", secretCA: true, systemRoots: true, systemServer: true},
+		{name: "secret CA rejects system-trusted server", mode: "verify-full", trusted: true, matching: true, want: "unknown authority", secretCA: true, systemServer: true},
+		{name: "secret CA ignores unrelated default root file", mode: "verify-full", trusted: true, matching: true, want: "TLS accepted", secretCA: true, homeRoot: true},
+		{name: "secret CA ignores malformed default root file", mode: "verify-full", trusted: true, matching: true, want: "TLS accepted", secretCA: true, homeRoot: true, invalidHomeRoot: true},
+		{name: "secret CA rejects server trusted only by default root file", mode: "verify-full", trusted: true, matching: true, want: "unknown authority", secretCA: true, homeRoot: true, systemServer: true},
+		{name: "secret CA rejects unknown root", mode: "verify-full", matching: true, want: "unknown authority", secretCA: true},
+		{name: "secret CA rejects wrong hostname", mode: "verify-full", trusted: true, want: "not 127.0.0.1", secretCA: true},
+		{name: "secret verify-ca permits different hostname", mode: "verify-ca", trusted: true, want: "TLS accepted", secretCA: true},
+		{name: "secret verify-ca rejects unknown root", mode: "verify-ca", matching: true, want: "unknown authority", secretCA: true},
+		{name: "secret verify-ca rejects system-trusted server", mode: "verify-ca", trusted: true, matching: true, want: "unknown authority", secretCA: true, systemServer: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.homeRoot {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				if err := os.Mkdir(filepath.Join(home, ".postgresql"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				root := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+				if tc.invalidHomeRoot {
+					root = []byte("invalid PEM")
+				}
+				if err := os.WriteFile(filepath.Join(home, ".postgresql", "root.crt"), root, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.rootFile {
 				t.Setenv("PGSSLROOTCERT", os.Getenv("SSL_CERT_FILE"))
 			}
@@ -132,6 +171,9 @@ func TestTLSSystemRoots(t *testing.T) {
 			}
 			leaf := &x509.Certificate{SerialNumber: big.NewInt(2), NotBefore: ca.NotBefore, NotAfter: ca.NotAfter, IPAddresses: []net.IP{net.ParseIP(ip)}, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, KeyUsage: x509.KeyUsageDigitalSignature}
 			parent, signer := ca, caKey
+			if tc.secretCA && tc.trusted && !tc.systemServer {
+				parent, signer = &secretCA, secretKey
+			}
 			if !tc.trusted {
 				parent, signer = leaf, key
 			}
@@ -211,8 +253,29 @@ func TestTLSSystemRoots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			mode := EnsureTLS(tc.mode)
+			if tc.secretCA {
+				// A per-config CA must win over process-wide root settings.
+				t.Setenv("PGSSLROOTCERT", filepath.Join(dir, "does-not-exist.pem"))
+				if tc.systemRoots {
+					t.Setenv("PGSSLROOTCERT", "system")
+				}
+				if tc.homeRoot {
+					t.Setenv("PGSSLROOTCERT", "")
+				}
+				cfg, err := TLSConfig(tc.mode, host, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: secretDER}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				key := "provider-sql-postgresql-" + strings.ReplaceAll(tc.name, " ", "-")
+				if err := pq.RegisterTLSConfig(key, cfg); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = pq.RegisterTLSConfig(key, nil) })
+				mode = "pqgo-" + key
+			}
 			signed := 0
-			db := NewWithPasswordProvider(map[string][]byte{xpv2.CredentialsSecretEndpointKey: []byte(host), xpv2.CredentialsSecretPortKey: []byte(port), xpv2.CredentialsSecretUserKey: []byte("test")}, "postgres", EnsureTLS(tc.mode), func(context.Context) (string, error) { signed++; return token, nil })
+			db := NewWithPasswordProvider(map[string][]byte{xpv2.CredentialsSecretEndpointKey: []byte(host), xpv2.CredentialsSecretPortKey: []byte(port), xpv2.CredentialsSecretUserKey: []byte("test")}, "postgres", mode, func(context.Context) (string, error) { signed++; return token, nil })
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			var value int

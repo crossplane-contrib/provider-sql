@@ -212,6 +212,7 @@ func TestConnect(t *testing.T) {
 				},
 			},
 			args: args{
+				ctx: context.Background(),
 				mg: &v1alpha1.Database{
 					Spec: v1alpha1.DatabaseSpec{
 						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{

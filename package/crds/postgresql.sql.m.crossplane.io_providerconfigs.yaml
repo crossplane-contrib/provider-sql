@@ -121,6 +121,34 @@ spec:
                 - verify-ca
                 - verify-full
                 type: string
+              tlsConfig:
+                description: |-
+                  TLSConfig selects the CA bundle used to verify the PostgreSQL server.
+                  When set, sslMode must be verify-ca or verify-full.
+                properties:
+                  caCert:
+                    description: CACert contains the PEM-encoded certificates trusted
+                      for this connection.
+                    properties:
+                      secretRef:
+                        description: SecretRef selects the CA bundle. The Secret must
+                          be in the ProviderConfig namespace.
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            description: Name of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    required:
+                    - secretRef
+                    type: object
+                required:
+                - caCert
+                type: object
             required:
             - credentials
             type: object
