@@ -36,6 +36,23 @@ type ProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+
+	// TLSConfig selects the CA bundle used to verify the PostgreSQL server.
+	// When set, sslMode must be verify-ca or verify-full.
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+}
+
+// TLSConfig selects the CA bundle for PostgreSQL server verification.
+type TLSConfig struct {
+	// CACert contains the PEM-encoded certificates trusted for this connection.
+	CACert TLSSecret `json:"caCert"`
+}
+
+// TLSSecret selects a Secret key containing a PEM certificate bundle.
+type TLSSecret struct {
+	// SecretRef selects the CA bundle. The Secret must be in the ProviderConfig namespace.
+	SecretRef xpv2.LocalSecretKeySelector `json:"secretRef"`
 }
 
 type PostgreSQLConnectionSource string

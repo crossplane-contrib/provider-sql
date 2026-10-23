@@ -7,6 +7,10 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"context"
+	"fmt"
+
+	postgresqltls "github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/tls"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
@@ -38,6 +42,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		keyMapping      map[string]string
 		source          v1alpha1.PostgreSQLConnectionSource
 		region          *string
+		caRef           *xpv2.SecretKeySelector
+		configIdentity  string
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -63,6 +69,10 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
 		source = providerConfig.Spec.Credentials.Source
 		region = providerConfig.Spec.Credentials.Region
+		configIdentity = "namespaced/ProviderConfig/" + providerConfig.Namespace + "/" + providerConfig.Name
+		if providerConfig.Spec.TLSConfig != nil {
+			caRef = providerConfig.Spec.TLSConfig.CACert.SecretRef.ToSecretKeySelector(providerConfig.Namespace)
+		}
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
 			ObjectMeta: metav1.ObjectMeta{
@@ -84,6 +94,10 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
 		source = clusterProviderConfig.Spec.Credentials.Source
 		region = clusterProviderConfig.Spec.Credentials.Region
+		configIdentity = "namespaced/ClusterProviderConfig/" + clusterProviderConfig.Name
+		if clusterProviderConfig.Spec.TLSConfig != nil {
+			caRef = &clusterProviderConfig.Spec.TLSConfig.CACert.SecretRef
+		}
 	default:
 		return ProviderInfo{}, provErrors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
 	}
@@ -100,23 +114,30 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 
 	secretData := xsql.RemapCredentialKeys(s.Data, keyMapping)
 
-	var password xsql.PasswordProvider
-	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
-		var err error
-		password, err = newIAMToken(ctx, region, secretData)
-		if err != nil {
-			return ProviderInfo{}, provErrors.GenerateIAMTokenError(err)
-		}
-		// Require encryption while preserving operator-configured verification.
-		mode := postgresql.EnsureTLS(clients.ToString(sslMode))
-		sslMode = &mode
-	}
-
-	return ProviderInfo{
-		PasswordProvider:   password,
+	return configureConnection(ctx, kube, ProviderInfo{
 		ProviderConfigName: mg.GetProviderConfigReference().Name,
 		SecretData:         secretData,
 		DefaultDatabase:    defaultDatabase,
 		SSLMode:            sslMode,
-	}, nil
+	}, source, region, configIdentity, caRef)
+}
+
+func configureConnection(ctx context.Context, kube client.Client, info ProviderInfo, source v1alpha1.PostgreSQLConnectionSource, region *string, identity string, caRef *xpv2.SecretKeySelector) (ProviderInfo, error) {
+	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		password, err := newIAMToken(ctx, region, info.SecretData)
+		if err != nil {
+			return ProviderInfo{}, provErrors.GenerateIAMTokenError(err)
+		}
+		info.PasswordProvider = password
+		mode := postgresql.EnsureTLS(clients.ToString(info.SSLMode))
+		info.SSLMode = &mode
+	}
+	mode, err := postgresqltls.LoadConfig(ctx, kube, identity, clients.ToString(info.SSLMode), string(info.SecretData[xpv2.CredentialsSecretEndpointKey]), caRef)
+	if err != nil {
+		return ProviderInfo{}, fmt.Errorf("cannot configure PostgreSQL TLS: %w", err)
+	}
+	if caRef != nil {
+		info.SSLMode = &mode
+	}
+	return info, nil
 }

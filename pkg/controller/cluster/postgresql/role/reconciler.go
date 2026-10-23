@@ -48,6 +48,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	postgresqltls "github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/tls"
 )
 
 const (
@@ -150,6 +151,16 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Role) (managed.Typ
 		}
 		sslMode = postgresql.EnsureTLS(sslMode)
 	}
+
+	var caRef *xpv2.SecretKeySelector
+	if pc.Spec.TLSConfig != nil {
+		caRef = &pc.Spec.TLSConfig.CACert.SecretRef
+	}
+	sslMode, err := postgresqltls.LoadConfig(ctx, c.kube, "cluster/ProviderConfig/"+pc.Name, sslMode, string(secretData[xpv2.CredentialsSecretEndpointKey]), caRef)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot configure PostgreSQL TLS")
+	}
+
 	return &external{
 		db:   c.newDB(secretData, pc.Spec.DefaultDatabase, sslMode, password),
 		kube: c.kube,

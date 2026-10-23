@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -39,7 +40,7 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 	port := string(creds[xpv2.CredentialsSecretPortKey])
 	username := string(creds[xpv2.CredentialsSecretUserKey])
 	password := string(creds[xpv2.CredentialsSecretPasswordKey])
-	dsn := DSN(username, password, endpoint, port, database, sslmode)
+	dsn := DSN(username, password, endpoint, port, database, connectionSSLMode(sslmode))
 
 	return postgresDB{
 		dsn:      dsn,
@@ -55,7 +56,7 @@ func NewWithPasswordProvider(creds map[string][]byte, database, sslmode string, 
 	db.passwordProvider = password
 	if password != nil {
 		// Validate connection settings without including any credential in parser errors.
-		db.dsn = DSN(string(creds[xpv2.CredentialsSecretUserKey]), "", db.endpoint, db.port, database, sslmode)
+		db.dsn = DSN(string(creds[xpv2.CredentialsSecretUserKey]), "", db.endpoint, db.port, database, connectionSSLMode(sslmode))
 	}
 	return db
 }
@@ -64,6 +65,12 @@ func (c postgresDB) open() (*sql.DB, error) {
 	cfg, err := pq.NewConfig(c.dsn)
 	if err != nil {
 		return nil, withoutConnectionURL(err)
+	}
+	if strings.HasPrefix(c.sslmode, "pqgo-provider-sql-postgresql-") {
+		// Apply the selected CA after parsing environment defaults. In particular,
+		// PGSSLROOTCERT must not replace or supplement a ProviderConfig's roots.
+		cfg.SSLMode = pq.SSLMode(c.sslmode)
+		cfg.SSLRootCert = ""
 	}
 	if c.passwordProvider == nil {
 		connector, err := pq.NewConnectorConfig(cfg)
@@ -81,6 +88,16 @@ func (c postgresDB) open() (*sql.DB, error) {
 			return pq.NewConnectorConfig(next)
 		},
 	}), nil
+}
+
+func connectionSSLMode(mode string) string {
+	if strings.HasPrefix(mode, "pqgo-provider-sql-postgresql-") {
+		// Parse with a standard verifying mode before applying the registered
+		// CA config. This also accepts PGSSLROOTCERT=system without allowing that
+		// process-wide setting to override the selected Secret.
+		return "verify-full"
+	}
+	return mode
 }
 
 // URL parser errors quote the complete DSN, including its password.

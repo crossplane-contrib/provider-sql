@@ -36,6 +36,23 @@ type ClusterProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+
+	// TLSConfig selects the CA bundle used to verify the PostgreSQL server.
+	// When set, sslMode must be verify-ca or verify-full.
+	// +optional
+	TLSConfig *ClusterTLSConfig `json:"tlsConfig,omitempty"`
+}
+
+// ClusterTLSConfig selects the CA bundle for a ClusterProviderConfig.
+type ClusterTLSConfig struct {
+	// CACert contains the PEM-encoded certificates trusted for this connection.
+	CACert ClusterTLSSecret `json:"caCert"`
+}
+
+// ClusterTLSSecret selects a Secret key for a cluster-scoped configuration.
+type ClusterTLSSecret struct {
+	// SecretRef selects the CA bundle. Namespace, name and key are required.
+	SecretRef xpv2.SecretKeySelector `json:"secretRef"`
 }
 
 // ClusterProviderCredentials required to authenticate.
