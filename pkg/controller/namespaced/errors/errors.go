@@ -10,6 +10,7 @@ const (
 	errGetSecret                 = "cannot get credentials Secret: %s"
 	errInvalidProviderConfigKind = "invalid ProviderConfig kind: %s"
 	errNoSecretRef               = "providerConfig does not reference a credentials Secret"
+	errGenerateIAMToken          = "cannot generate AWS IAM authentication token: %s"
 )
 
 func GetProviderConfigError(err error) error { return ErrGetProviderConfig{err} }
@@ -49,6 +50,16 @@ type ErrInvalidProviderConfigKind struct{ kind string }
 func (e ErrInvalidProviderConfigKind) Error() string {
 	return fmt.Sprintf(errInvalidProviderConfigKind, e.kind)
 }
+
+func GenerateIAMTokenError(err error) error { return ErrGenerateIAMToken{err} }
+
+type ErrGenerateIAMToken struct{ error }
+
+func (e ErrGenerateIAMToken) Error() string {
+	return fmt.Sprintf(errGenerateIAMToken, e.error)
+}
+
+func (e ErrGenerateIAMToken) Unwrap() error { return e.error }
 
 func MissingSecretRefError() error { return ErrNoSecretRef{} }
 

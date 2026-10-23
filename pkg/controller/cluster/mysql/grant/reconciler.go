@@ -40,6 +40,7 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/mysql/tls"
@@ -51,6 +52,8 @@ const (
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
 	errTLSConfig    = "cannot load TLS config"
+
+	errGenerateIAMToken = "cannot generate AWS IAM authentication token"
 
 	errCreateGrant  = "cannot create grant"
 	errRevokeGrant  = "cannot revoke grant"
@@ -71,7 +74,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.NewWithPasswordProvider}),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
@@ -99,10 +102,14 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Complete(r)
 }
 
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
+
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, tls *string, binlog *bool) xsql.DB
+	newDB func(creds map[string][]byte, tls *string, binlog *bool, cleartext bool, password xsql.PasswordProvider) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*v1alpha1.Grant] = &connector{}
@@ -120,9 +127,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (MySQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -139,7 +144,20 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog)}, nil
+
+	cleartext := false
+	var password xsql.PasswordProvider
+	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		var err error
+		password, err = newIAMToken(ctx, pc.Spec.Credentials.Region, secretData)
+		if err != nil {
+			return nil, errors.Wrap(err, errGenerateIAMToken)
+		}
+		cleartext = true
+		// Default IAM connections to verified TLS using the configured trust roots.
+		tlsName = mysql.EnsureTLS(tlsName)
+	}
+	return &external{db: c.newDB(secretData, tlsName, mg.Spec.ForProvider.BinLog, cleartext, password)}, nil
 }
 
 type external struct{ db xsql.DB }

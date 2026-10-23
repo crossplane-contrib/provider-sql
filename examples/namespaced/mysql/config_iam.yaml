@@ -1,0 +1,20 @@
+---
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+  namespace: default
+spec:
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # Verify the server using the CA Secret; no client certificate or pod mount is needed.
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: rds-ca
+        namespace: default
+        key: ca-bundle.pem
