@@ -16,7 +16,6 @@ on:
 
 env:
   # Common versions
-  GOLANGCI_VERSION: 'v2.10.1'
   DOCKER_BUILDX_VERSION: 'v0.23.0'
 
   # Common users. We can't run a step 'if secrets.AWS_USR != ""' but we can run
@@ -25,6 +24,10 @@ env:
   CONTRIB_DOCKER_USR: ${{ secrets.CONTRIB_DOCKER_USR }}
   XPKG_ACCESS_ID: ${{ secrets.XPKG_ACCESS_ID }}
   AWS_USR: ${{ secrets.AWS_USR }}
+
+  # Keep temp files off the size-capped tmpfs /tmp of ubuntu-26.04 runners.
+  TMPDIR: /home/runner/work/_temp
+  GOTMPDIR: /home/runner/work/_temp
 
 jobs:
   detect-noop:
@@ -79,12 +82,16 @@ jobs:
       - name: Download Go Modules
         run: make modules.download modules.check
 
+      - name: Detect golangci-lint version
+        id: golangci
+        run: echo "version=v$(awk '/^GOLANGCILINT_VERSION/{print $3}' Makefile)" | tee -a "$GITHUB_OUTPUT"
+
       # We could run 'make lint' but we prefer this action because it leaves
       # 'annotations' (i.e. it comments on PRs to point out linter violations).
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_VERSION }}
+          version: ${{ steps.golangci.outputs.version }}
 
   check-diff:
     runs-on: ubuntu-26.04
