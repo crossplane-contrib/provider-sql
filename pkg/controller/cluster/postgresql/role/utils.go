@@ -100,8 +100,9 @@ func rotationDue(trigger, last *metav1.Time, now time.Time) bool {
 // secret means Create already ran, while an absent or empty secret means the role was
 // restored out-of-band and needs a fresh password. Without a connection secret reference
 // there is nowhere to publish a regenerated password, so no reset is attempted. Either way the
-// decision is made from the cached role first, and only a reset is confirmed against a fresh
-// read, see freshRole.
+// decision is made from the cache first, and only a reset is confirmed against the API server:
+// a due rotation by re-reading the Role (see freshRole), a missing password by re-reading the
+// connection secret.
 func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role) (bool, error) {
 	if role.Status.AtProvider.LastPasswordChange != nil {
 		trigger := role.Spec.ForProvider.PasswordRotationTrigger

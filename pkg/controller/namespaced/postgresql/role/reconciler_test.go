@@ -1144,6 +1144,24 @@ func cachedSecretNotFound(name string) client.Client {
 	}
 }
 
+// apiServerSecret is the uncached reader for a connection secret as stored on the API server:
+// missing when password is nil, otherwise holding password. It fails any other read.
+func apiServerSecret(name string, password []byte) client.Reader {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			s, ok := obj.(*corev1.Secret)
+			if !ok {
+				return errors.Errorf("unexpected uncached read of %T", obj)
+			}
+			if password == nil {
+				return kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+			}
+			s.Data = map[string][]byte{xpv2.CredentialsSecretPasswordKey: password}
+			return nil
+		},
+	}
+}
+
 // apiServerRole is the uncached reader for a Role whose status, as stored on the API server,
 // records last as its LastPasswordChange. It fails any other read.
 func apiServerRole(last *metav1.Time) client.Reader {
@@ -1245,7 +1263,7 @@ func TestGetPassword(t *testing.T) {
 					},
 				},
 				kube:      cachedSecretNotFound("test-secret"),
-				apiReader: apiServerRole(nil),
+				apiReader: apiServerSecret("test-secret", nil),
 			},
 			want: want{pwd: "", changed: true},
 		},
@@ -1347,8 +1365,8 @@ func TestGetPassword(t *testing.T) {
 			},
 			want: want{pwd: "", changed: false},
 		},
-		"NilLastPasswordChangeStaleCacheFreshHasLastChange": {
-			reason: "cached role reporting nil LastPasswordChange with a missing connection secret must not trigger a reset when a fresh read from the API server shows it was already set, e.g. right after a deleted-and-recreated role's password was just restored",
+		"NilLastPasswordChangeStaleCacheFreshSecretHasPassword": {
+			reason: "nil LastPasswordChange with a connection secret missing from the cache must not trigger a reset when a fresh read from the API server shows it holds a password, e.g. right after Create or a restore published it",
 			args: args{
 				role: &v1alpha1.Role{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1363,7 +1381,7 @@ func TestGetPassword(t *testing.T) {
 					},
 				},
 				kube:      cachedSecretNotFound("restored-secret"),
-				apiReader: apiServerRole(&metav1.Time{Time: time.Now()}),
+				apiReader: apiServerSecret("restored-secret", []byte("published")),
 			},
 			want: want{pwd: "", changed: false},
 		},
@@ -1475,7 +1493,7 @@ func TestUpdatePasswordReset(t *testing.T) {
 					},
 				},
 				kube:      cachedSecretNotFound("test-secret"),
-				apiReader: apiServerRole(nil),
+				apiReader: apiServerSecret("test-secret", nil),
 			},
 			want: want{
 				err:               nil,
