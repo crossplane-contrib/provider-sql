@@ -124,17 +124,18 @@ func (c *external) shouldResetPassword(ctx context.Context, role *v1alpha1.Role)
 		Namespace: role.Namespace,
 	}
 	s := &corev1.Secret{}
-	if err := c.kube.Get(ctx, nn, s); err != nil {
-		if resource.IgnoreNotFound(err) != nil {
-			return false, errors.Wrap(err, errGetConnectionSecretFailed)
-		}
-	} else if len(s.Data[xpv2.CredentialsSecretPasswordKey]) > 0 {
+	err := c.kube.Get(ctx, nn, s)
+	if resource.IgnoreNotFound(err) != nil {
+		return false, errors.Wrap(err, errGetConnectionSecretFailed)
+	}
+	if len(s.Data[xpv2.CredentialsSecretPasswordKey]) > 0 {
 		return false, nil
 	}
-
-	fresh, err := c.freshRole(ctx, role)
-	if err != nil {
-		return false, err
+	// The cache can lag the secret published by the previous reconcile, so confirm against the API server before resetting.
+	s = &corev1.Secret{}
+	err = c.apiReader.Get(ctx, nn, s)
+	if resource.IgnoreNotFound(err) != nil {
+		return false, errors.Wrap(err, errGetConnectionSecretFailed)
 	}
-	return fresh.Status.AtProvider.LastPasswordChange == nil, nil
+	return len(s.Data[xpv2.CredentialsSecretPasswordKey]) == 0, nil
 }
