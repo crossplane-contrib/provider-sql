@@ -335,6 +335,74 @@ func TestObserve(t *testing.T) {
 				err: nil,
 			},
 		},
+		"SameValuesDifferentPointers": {
+			reason: "We should return ResourceUpToDate=true when the observed values equal the spec through different pointers",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[7].(**int32)) = ptr.To(int32(-1))
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: ptr.To(int32(-1)),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        true,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
+		"ConnectionLimitChanged": {
+			reason: "We should return ResourceUpToDate=false if the connection limit differs from the observed one",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*(dest[7].(**int32)) = ptr.To(int32(-1))
+						return nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							Privileges:      v1alpha1.RolePrivilege{},
+							ConnectionLimit: ptr.To(int32(5)),
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{
+					ResourceExists:          true,
+					ResourceUpToDate:        false,
+					ResourceLateInitialized: true,
+				},
+				err: nil,
+			},
+		},
 		"PasswordChanged": {
 			reason: "We should return ResourceUpToDate=false if the password changed",
 			fields: fields{
