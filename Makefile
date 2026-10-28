@@ -32,9 +32,9 @@ GO111MODULE = on
 
 # ====================================================================================
 # Setup Kubernetes tools
-KIND_NODE_IMAGE_TAG ?= v1.35.1
-KIND_VERSION ?= v0.31.0
-KUBECTL_VERSION ?= v1.35.1
+KIND_NODE_IMAGE_TAG ?= v1.36.4
+KIND_VERSION ?= v0.33.0
+KUBECTL_VERSION ?= v1.36.4
 CROSSPLANE_CLI_VERSION ?= v2.3.3
 -include build/makelib/k8s_tools.mk
 
@@ -92,6 +92,8 @@ POSTGRES_VERSION ?= 18
 test-integration: $(KIND) $(KUBECTL) $(CROSSPLANE_CLI) $(HELM)
 	@$(INFO) running integration tests using kind $(KIND_VERSION)
 	@KIND_NODE_IMAGE_TAG=${KIND_NODE_IMAGE_TAG} \
+	  KIND_VERSION=${KIND_VERSION} \
+	  KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME} \
 	  CROSSPLANE_HELM_CHANNEL=${CROSSPLANE_HELM_CHANNEL} \
 	  CROSSPLANE_HELM_CHART_VERSION=${CROSSPLANE_HELM_CHART_VERSION} \
 	  POSTGRES_VERSION=${POSTGRES_VERSION} \
