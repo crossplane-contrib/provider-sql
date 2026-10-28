@@ -41,6 +41,7 @@ import (
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/mssql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/mssql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/secretwatch"
 )
 
 const (
@@ -79,6 +80,10 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	if o.Features.Enabled(feature.EnableBetaManagementPolicies) {
 		reconcilerOptions = append(reconcilerOptions, managed.WithManagementPolicies())
 	}
+	h, err := secretwatch.PasswordSecretRef(mgr, o.Logger, &v1alpha1.User{}, &v1alpha1.UserList{}, passwordSecretRef)
+	if err != nil {
+		return err
+	}
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.UserGroupVersionKind),
 		reconcilerOptions...,
@@ -92,6 +97,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		For(&v1alpha1.User{}).
+		Watches(&corev1.Secret{}, h).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrency,
 		}).
@@ -348,4 +354,15 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.User) (managed.Exter
 	}
 
 	return managed.ExternalDelete{}, nil
+}
+
+// passwordSecretRef returns the Secret referenced by the passwordSecretRef of
+// a User, and false if it references none.
+func passwordSecretRef(o client.Object) (types.NamespacedName, bool) {
+	cr, ok := o.(*v1alpha1.User)
+	if !ok || cr.Spec.ForProvider.PasswordSecretRef == nil {
+		return types.NamespacedName{}, false
+	}
+	ref := cr.Spec.ForProvider.PasswordSecretRef
+	return types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, true
 }
