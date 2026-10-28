@@ -28,6 +28,8 @@ setup_mssql() {
 cleanup_mssql() {
   echo_step "cleaning up MSSQL server"
   "${KUBECTL}" delete -f "${scriptdir}/mssql.server.yaml" --ignore-not-found=true
+  # StatefulSet PVCs outlive the StatefulSet; a reused volume keeps the previous run's SA password.
+  "${KUBECTL}" delete pvc data-mssql-0 --ignore-not-found=true
   "${KUBECTL}" delete secret mssql-creds --ignore-not-found=true
 }
 
