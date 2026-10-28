@@ -27,6 +27,7 @@ import (
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -58,6 +59,7 @@ func main() {
 		enableManagementPolicies = app.Flag("enable-management-policies", "Enable/disable support for Management Policies.").Default("true").Envar("ENABLE_MANAGEMENT_POLICIES").Bool()
 		pollStateMetricInterval  = app.Flag("poll-state-metric", "State metric recording interval.").Default("5s").Duration()
 		metricsBindAddress       = app.Flag("metrics-bind-address", "The address the metrics endpoint binds to.").Default(":8080").String()
+		enableSecretCache        = app.Flag("enable-secret-cache", "Cache Secrets in memory. Disable to read Secrets directly from the API server, trading API requests for a smaller memory footprint.").Default("true").Envar("ENABLE_SECRET_CACHE").Bool()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
@@ -85,12 +87,19 @@ func main() {
 	kingpin.FatalIfError(apis.AddToScheme(scheme), "Cannot add SQL APIs to scheme")
 	kingpin.FatalIfError(apiextensionsv1.AddToScheme(scheme), "Cannot register k8s apiextensions APIs to scheme")
 
+	var clientOpts ctrlclient.Options
+	if !*enableSecretCache {
+		clientOpts.Cache = &ctrlclient.CacheOptions{DisableFor: []ctrlclient.Object{&corev1.Secret{}}}
+	}
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:           scheme,
+		Client:           clientOpts,
 		LeaderElection:   *leaderElection,
 		LeaderElectionID: "crossplane-leader-election-provider-sql",
 		Cache: cache.Options{
-			SyncPeriod: syncPeriod,
+			SyncPeriod:       syncPeriod,
+			DefaultTransform: cache.TransformStripManagedFields(),
 			ByObject: map[ctrlclient.Object]cache.ByObject{
 				&apiextensionsv1.CustomResourceDefinition{}: {
 					Transform: customresourcesgate.TransformStripCRDSchema,
