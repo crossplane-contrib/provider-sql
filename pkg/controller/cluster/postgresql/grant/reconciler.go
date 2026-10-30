@@ -41,8 +41,10 @@ import (
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	postgresqltls "github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/tls"
 )
 
 const (
@@ -50,6 +52,8 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errNoSecretRef  = "ProviderConfig does not reference a credentials Secret"
 	errGetSecret    = "cannot get credentials Secret"
+
+	errGenerateIAMToken = "cannot generate AWS IAM authentication token"
 
 	errNotGrant     = "managed resource is not a Grant custom resource"
 	errSelectGrant  = "cannot select grant"
@@ -79,11 +83,15 @@ const (
 	versionUnknown = 0
 )
 
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
+
 type connector struct {
 	kube  client.Client
 	log   logging.Logger
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 type external struct {
@@ -116,9 +124,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -129,7 +135,28 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, errors.Wrap(err, errGetSecret)
 	}
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	xdb := c.newDB(secretData, connectDatabase(mg.Spec.ForProvider, pc.Spec.DefaultDatabase), clients.ToString(pc.Spec.SSLMode))
+
+	sslMode := clients.ToString(pc.Spec.SSLMode)
+	var password xsql.PasswordProvider
+	if pc.Spec.Credentials.Source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		var err error
+		password, err = newIAMToken(ctx, pc.Spec.Credentials.Region, secretData)
+		if err != nil {
+			return nil, errors.Wrap(err, errGenerateIAMToken)
+		}
+		sslMode = postgresql.EnsureTLS(sslMode)
+	}
+
+	var caRef *xpv2.SecretKeySelector
+	if pc.Spec.TLSConfig != nil {
+		caRef = &pc.Spec.TLSConfig.CACert.SecretRef
+	}
+	sslMode, err := postgresqltls.LoadConfig(ctx, c.kube, "cluster/ProviderConfig/"+pc.Name, sslMode, string(secretData[xpv2.CredentialsSecretEndpointKey]), caRef)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot configure PostgreSQL TLS")
+	}
+
+	xdb := c.newDB(secretData, connectDatabase(mg.Spec.ForProvider, pc.Spec.DefaultDatabase), sslMode, password)
 
 	// A server that cannot report its version is not a reason to fail: only
 	// table grants are version dependent, and ExpandPrivilegesWithVersion
@@ -1176,7 +1203,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), log: o.Logger.WithValues("controller", name), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), log: o.Logger.WithValues("controller", name), track: t.Track, newDB: postgresql.NewWithPasswordProvider}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),

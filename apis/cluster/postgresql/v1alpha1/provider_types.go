@@ -36,6 +36,23 @@ type ProviderConfigSpec struct {
 	// +kubebuilder:default=verify-full
 	// +kubebuilder:validation:Optional
 	SSLMode *string `json:"sslMode,omitempty"`
+
+	// TLSConfig selects the CA bundle used to verify the PostgreSQL server.
+	// When set, sslMode must be verify-ca or verify-full.
+	// +optional
+	TLSConfig *TLSConfig `json:"tlsConfig,omitempty"`
+}
+
+// TLSConfig selects the CA bundle for PostgreSQL server verification.
+type TLSConfig struct {
+	// CACert contains the PEM-encoded certificates trusted for this connection.
+	CACert TLSSecret `json:"caCert"`
+}
+
+// TLSSecret selects a Secret key containing a PEM certificate bundle.
+type TLSSecret struct {
+	// SecretRef selects the CA bundle. Namespace, name and key are required.
+	SecretRef xpv2.SecretKeySelector `json:"secretRef"`
 }
 
 const (
@@ -43,12 +60,17 @@ const (
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a PostgreSQL server.
 	CredentialsSourcePostgreSQLConnectionSecret xpv2.CredentialsSource = "PostgreSQLConnectionSecret"
+
+	// CredentialsSourceAWSIAMAuth indicates that the provider should
+	// authenticate to an AWS RDS/Aurora instance using an IAM authentication
+	// token generated at connection time, instead of a static password.
+	CredentialsSourceAWSIAMAuth xpv2.CredentialsSource = "AWSIAMAuth"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret
+	// +kubebuilder:validation:Enum=PostgreSQLConnectionSecret;AWSIAMAuth
 	Source xpv2.CredentialsSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a PostgreSQL connection secret
@@ -61,6 +83,12 @@ type ProviderCredentials struct {
 	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
 	// +optional
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+
+	// Region is the AWS region used to generate the IAM authentication token
+	// when source is AWSIAMAuth. When unset it falls back to a "region" key in
+	// the connection secret, then to the controller's AWS environment.
+	// +optional
+	Region *string `json:"region,omitempty"`
 }
 
 // SecretKeyMapping allows overriding the default secret key names used to

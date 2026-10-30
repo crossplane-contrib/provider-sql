@@ -7,8 +7,11 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 
 	"context"
+	"fmt"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/mysql/v1alpha1"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/awsiam"
+	"github.com/crossplane-contrib/provider-sql/pkg/clients/mysql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
 
@@ -16,11 +19,19 @@ import (
 )
 
 type ProviderInfo struct {
+	PasswordProvider   xsql.PasswordProvider
 	ProviderConfigName string
 	SecretData         map[string][]byte
 	TLS                *string
 	TLSConfig          *v1alpha1.TLSConfig
+	// Cleartext is true when the connection uses AWS IAM auth, requiring the
+	// MySQL client to set allowCleartextPasswords=true.
+	Cleartext bool
 }
+
+// newIAMToken prepares a token provider used for every physical connection.
+// Tests replace this factory to avoid AWS access.
+var newIAMToken = awsiam.NewTokenProvider
 
 func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.ModernManaged) (ProviderInfo, error) {
 	var (
@@ -28,6 +39,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode    *string
 		tlsConfig  *v1alpha1.TLSConfig
 		keyMapping map[string]string
+		source     v1alpha1.MySQLConnectionSecretSource
+		region     *string
 	)
 
 	switch mg.GetProviderConfigReference().Kind {
@@ -50,6 +63,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = providerConfig.Spec.TLS
 		tlsConfig = providerConfig.Spec.TLSConfig
 		keyMapping = providerConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		source = providerConfig.Spec.Credentials.Source
+		region = providerConfig.Spec.Credentials.Region
 
 	case v1alpha1.ClusterProviderConfigKind:
 		clusterProviderConfig := &v1alpha1.ClusterProviderConfig{
@@ -69,6 +84,8 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		tlsMode = clusterProviderConfig.Spec.TLS
 		tlsConfig = clusterProviderConfig.Spec.TLSConfig
 		keyMapping = clusterProviderConfig.Spec.Credentials.SecretKeyMapping.ToMap()
+		source = clusterProviderConfig.Spec.Credentials.Source
+		region = clusterProviderConfig.Spec.Credentials.Region
 
 	default:
 		return ProviderInfo{}, errors.InvalidProviderConfigKindError(mg.GetProviderConfigReference().Kind)
@@ -84,10 +101,27 @@ func GetProviderConfig(ctx context.Context, kube client.Client, mg resource.Mode
 		return ProviderInfo{}, errors.GetSecretError(err)
 	}
 
+	secretData := xsql.RemapCredentialKeys(s.Data, keyMapping)
+
+	cleartext := false
+	var password xsql.PasswordProvider
+	if source == v1alpha1.CredentialsSourceAWSIAMAuth {
+		var err error
+		password, err = newIAMToken(ctx, region, secretData)
+		if err != nil {
+			return ProviderInfo{}, errors.GenerateIAMTokenError(err)
+		}
+		cleartext = true
+		// Default IAM connections to verified TLS using the configured trust roots.
+		tlsMode = mysql.EnsureTLS(tlsMode)
+	}
+
 	return ProviderInfo{
-		ProviderConfigName: mg.GetProviderConfigReference().Name,
-		SecretData:         xsql.RemapCredentialKeys(s.Data, keyMapping),
+		PasswordProvider:   password,
+		ProviderConfigName: fmt.Sprintf("%s/%s/%s", mg.GetProviderConfigReference().Kind, mg.GetNamespace(), mg.GetProviderConfigReference().Name),
+		SecretData:         secretData,
 		TLS:                tlsMode,
 		TLSConfig:          tlsConfig,
+		Cleartext:          cleartext,
 	}, nil
 }
