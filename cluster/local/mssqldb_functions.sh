@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-MSSQL_IMAGE="${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2019-CU32-ubuntu-20.04}"
+scriptdir=$(dirname "$0")
 
 setup_mssql() {
-  echo_step "installing MSSQL Server (image ${MSSQL_IMAGE})"
+  echo_step "installing MSSQL Server (version ${MSSQL_VERSION:-2022-CU24-ubuntu-22.04})"
 
   "${KUBECTL}" create secret generic mssql-creds \
       --from-literal username="sa" \
@@ -15,8 +15,7 @@ setup_mssql() {
   echo_step "Verifying secret creation"
   "${KUBECTL}" get secret mssql-creds -o yaml
 
-  sed "s|image: mcr.microsoft.com/mssql/server:.*|image: ${MSSQL_IMAGE}|" \
-      "${scriptdir}/mssql.server.yaml" | "${KUBECTL}" apply -f -
+  MSSQL_VERSION="${MSSQL_VERSION:-2022-CU24-ubuntu-22.04}" envsubst '${MSSQL_VERSION}' < "${scriptdir}/mssql.server.yaml" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for MSSQL Server to be ready"
   "${KUBECTL}" rollout status statefulset/mssql --timeout=300s
@@ -27,7 +26,7 @@ setup_mssql() {
 
 cleanup_mssql() {
   echo_step "cleaning up MSSQL server"
-  "${KUBECTL}" delete -f ${scriptdir}/mssql.server.yaml --ignore-not-found=true
+  "${KUBECTL}" delete -f "${scriptdir}/mssql.server.yaml" --ignore-not-found=true
   "${KUBECTL}" delete secret mssql-creds --ignore-not-found=true
 }
 
@@ -43,10 +42,10 @@ cleanup_mssql_provider_config() {
 
 test_create_mssql_database() {
   echo_step "test creating MSSQL Database resource"
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mssql/database.yaml
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mssql/database.yaml"
 
   echo_step "Waiting for MSSQL Database to be ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mssql/database.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mssql/database.yaml"
 
   echo_step_completed
 }
@@ -56,10 +55,10 @@ test_create_mssql_user() {
   # Create password secret first
   "${KUBECTL}" create secret generic example-pw --from-literal password="Test123!" --dry-run=client -o yaml | "${KUBECTL}" apply -f -
 
-  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mssql/user.yaml
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/mssql/user.yaml"
 
   echo_step "Waiting for MSSQL User to be ready"
-  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mssql/user.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f "${projectdir}/examples/${API_TYPE}/mssql/user.yaml"
 
   echo_step_completed
 }
