@@ -19,6 +19,7 @@ package grant
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -258,6 +259,75 @@ func TestObserve(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"MembershipPresent": {
+			reason: "An existing membership should be available and clear stale privilege status",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						if diff := cmp.Diff([]interface{}{"reader", "app", "10.%", "%"}, q.Parameters); diff != "" {
+							return errors.Errorf("query parameters (-want, +got):\n%s", diff)
+						}
+						*dest[0].(*bool) = true
+						return nil
+					},
+				},
+			},
+			args: args{mg: membershipGrant("SELECT")},
+			want: want{
+				o: managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+			},
+		},
+		"MembershipAbsent": {
+			reason: "A missing membership should be reported as nonexistent and clear stale privilege status",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						*dest[0].(*bool) = false
+						return nil
+					},
+				},
+			},
+			args: args{mg: membershipGrant("SELECT")},
+		},
+		"ErrObserveMembership": {
+			reason: "Errors reading role membership should be returned without changing privilege status",
+			fields: fields{
+				db: &mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						return errBoom
+					},
+				},
+			},
+			args: args{mg: membershipGrant("SELECT")},
+			want: want{
+				err:                errors.Wrap(fmt.Errorf("cannot read role membership: mysql.roles_mapping: %w; mysql.role_edges: %w", errBoom, errBoom), errCurrentGrant),
+				observedPrivileges: []string{"SELECT"},
+			},
+		},
+		"PrivilegeGrantWithRoleMembership": {
+			reason: "Privilege grants should ignore role memberships without reading the role catalog",
+			fields: fields{
+				db: &mockDB{
+					MockQuery: func(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
+						if want := "SHOW GRANTS FOR 'app'@'%'"; q.String != want {
+							return nil, errors.Errorf("query = %q, want %q", q.String, want)
+						}
+						return mockRowsToSQLRows(sqlmock.NewRows([]string{"Grants"}).
+							AddRow("GRANT `reader`@`%` TO `app`@`%`").
+							AddRow("GRANT SELECT ON *.* TO `app`@`%`")), nil
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{Spec: v1alpha1.GrantSpec{ForProvider: v1alpha1.GrantParameters{
+					User: ptr.To("app"), Privileges: v1alpha1.GrantPrivileges{"SELECT"},
+				}}},
+			},
+			want: want{
+				o:                  managed.ExternalObservation{ResourceExists: true, ResourceUpToDate: true},
+				observedPrivileges: []string{"SELECT"},
+			},
+		},
 		"SuccessNoGrant": {
 			reason: "We should return ResourceExists: false when no grant is found, being privileges result empty",
 			fields: fields{
@@ -676,6 +746,9 @@ func TestObserve(t *testing.T) {
 				if diff := cmp.Diff(tc.want.observedPrivileges, cr.Status.AtProvider.Privileges, equateSlices()...); diff != "" {
 					t.Errorf("\n%s\ne.Observe(...): -want, +got:\n%s\n", tc.reason, diff)
 				}
+				if cr.Spec.ForProvider.MemberOf != nil && tc.want.o.ResourceExists && !cr.GetCondition(xpv2.TypeReady).Equal(xpv2.Available()) {
+					t.Errorf("\n%s\ne.Observe(...): expected available condition, got %+v\n", tc.reason, cr.GetCondition(xpv2.TypeReady))
+				}
 			}
 		})
 	}
@@ -704,6 +777,30 @@ func TestCreate(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"SuccessMembership": {
+			reason: "Creating a membership should grant only the requested role",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if want := "GRANT `reader` TO `app`@`10.%`"; q.String != want {
+							return errors.Errorf("query = %q, want %q", q.String, want)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{mg: membershipGrant()},
+		},
+		"ErrCreateMembership": {
+			reason: "Errors granting a membership should be returned with context",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+				},
+			},
+			args: args{mg: membershipGrant()},
+			want: want{err: errors.Wrap(errBoom, errCreateGrant)},
+		},
 		"ErrExec": {
 			reason: "Any errors encountered while creating the grant should be returned",
 			fields: fields{
@@ -842,6 +939,11 @@ func TestUpdate(t *testing.T) {
 		args   args
 		want   want
 	}{
+		"Membership": {
+			reason: "Membership updates should execute no SQL because Observe reports missing memberships for Create",
+			fields: fields{db: &mockDB{}},
+			args:   args{mg: membershipGrant()},
+		},
 		"ErrExecRevokeNotRequired": {
 			reason: "Any errors encountered while revoking a not required privilege from the desired ones should be returned",
 			fields: fields{
@@ -1071,6 +1173,30 @@ func TestDelete(t *testing.T) {
 		args   args
 		want   error
 	}{
+		"SuccessMembership": {
+			reason: "Deleting a membership should revoke only the requested role",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error {
+						if want := "REVOKE `reader` FROM `app`@`10.%`"; q.String != want {
+							return errors.Errorf("query = %q, want %q", q.String, want)
+						}
+						return nil
+					},
+				},
+			},
+			args: args{mg: membershipGrant()},
+		},
+		"ErrRevokeMembership": {
+			reason: "Errors revoking a membership should be returned with context",
+			fields: fields{
+				db: &mockDB{
+					MockExec: func(ctx context.Context, q xsql.Query) error { return errBoom },
+				},
+			},
+			args: args{mg: membershipGrant()},
+			want: errors.Wrap(errBoom, errRevokeGrant),
+		},
 		"ErrDropGrant": {
 			reason: "Errors dropping a grant should be returned",
 			fields: fields{
@@ -1150,6 +1276,17 @@ func TestDelete(t *testing.T) {
 				t.Errorf("\n%s\ne.Delete(...): -want error, +got error:\n%s\n", tc.reason, diff)
 			}
 		})
+	}
+}
+
+func membershipGrant(privileges ...string) *v1alpha1.Grant {
+	return &v1alpha1.Grant{
+		Spec: v1alpha1.GrantSpec{ForProvider: v1alpha1.GrantParameters{
+			User: ptr.To("app@10.%"), MemberOf: ptr.To("reader"),
+		}},
+		Status: v1alpha1.GrantStatus{
+			AtProvider: v1alpha1.GrantObservation{Privileges: privileges},
+		},
 	}
 }
 
