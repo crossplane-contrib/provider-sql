@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"strings"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/lib/pq"
@@ -18,10 +19,14 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pqerror.Code("3D000")
+
+	// redactedPassword replaces the password in the DSN that error messages show.
+	redactedPassword = "xxxxx"
 )
 
 type postgresDB struct {
 	dsn      string
+	redacted string // dsn with the password masked, for error messages
 	endpoint string
 	port     string
 	sslmode  string
@@ -40,11 +45,43 @@ func New(creds map[string][]byte, database, sslmode string) xsql.DB {
 
 	return postgresDB{
 		dsn:      dsn,
+		redacted: DSN(username, redactedPassword, endpoint, port, database, sslmode),
 		endpoint: endpoint,
 		port:     port,
 		sslmode:  sslmode,
 	}
 }
+
+// redact masks the password in DSN parse errors. lib/pq reports a DSN it
+// cannot parse as a *url.Error that carries the whole DSN, and the error
+// ends up in status conditions and events. Text that wraps the *url.Error
+// is kept.
+func (c postgresDB) redact(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	masked := *uerr
+	masked.URL = c.redacted
+	msg := err.Error()
+	if !strings.Contains(msg, uerr.Error()) {
+		// The wrapper doesn't print the *url.Error as is, so its text might
+		// still carry the password in another form.
+		return &masked
+	}
+	return &redactedError{msg: strings.Replace(msg, uerr.Error(), masked.Error(), 1), err: &masked}
+}
+
+// redactedError is an error that wrapped a DSN parse error, with the
+// password masked in its message. It unwraps to the masked *url.Error.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+
+func (e *redactedError) Unwrap() error { return e.err }
 
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, database, sslmode string) string {
@@ -65,12 +102,12 @@ func DSN(username, password, endpoint, port, database, sslmode string) string {
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	d, err := sql.Open("postgres", c.dsn)
 	if err != nil {
-		return err
+		return c.redact(err)
 	}
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return c.redact(err)
 	}
 
 	// Rollback or Commit based on error state. Defer close in defer to make
@@ -97,35 +134,35 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
 	d, err := sql.Open("postgres", c.dsn)
 	if err != nil {
-		return err
+		return c.redact(err)
 	}
 	defer d.Close() //nolint:errcheck
 
 	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
-	return err
+	return c.redact(err)
 }
 
 // Query the supplied query.
 func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 	d, err := sql.Open("postgres", c.dsn)
 	if err != nil {
-		return nil, err
+		return nil, c.redact(err)
 	}
 	defer d.Close() //nolint:errcheck
 
 	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
-	return rows, err
+	return rows, c.redact(err)
 }
 
 // Scan the results of the supplied query into the supplied destination.
 func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
 	db, err := sql.Open("postgres", c.dsn)
 	if err != nil {
-		return err
+		return c.redact(err)
 	}
 	defer db.Close() //nolint:errcheck
 
-	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
+	return c.redact(db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...))
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB
@@ -143,13 +180,13 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
 	db, err := sql.Open("postgres", c.dsn)
 	if err != nil {
-		return 0, err
+		return 0, c.redact(err)
 	}
 	defer db.Close() //nolint:errcheck
 
 	var version int
 	err = db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version)
-	return version, err
+	return version, c.redact(err)
 }
 
 // IsInvalidCatalog returns true if passed a pq error indicating
