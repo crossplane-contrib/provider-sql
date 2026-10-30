@@ -3,6 +3,9 @@ package postgresql
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -54,6 +57,10 @@ func TestDSNParseErrorOmitsPassword(t *testing.T) {
 			var v int
 			return db.Scan(ctx, q, &v)
 		},
+		"GetServerVersion": func(ctx context.Context) error {
+			_, err := db.GetServerVersion(ctx)
+			return err
+		},
 	}
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -91,5 +98,26 @@ func TestRedactPassesOtherErrorsThrough(t *testing.T) {
 				t.Errorf("redact(%v) = %v, want the same error back", tc.err, got)
 			}
 		})
+	}
+}
+
+// A DSN parse error that reaches redact wrapped by another error keeps the
+// wrapper's text, and errors.As still finds the *url.Error, with the password
+// masked.
+func TestRedactKeepsWrapperText(t *testing.T) {
+	c := postgresDB{redacted: "postgres://admin:xxxxx@db.example.org/postgres"}
+	parseErr := &url.Error{Op: "parse", URL: "postgres://admin:s3cr3t@db.example.org/postgres", Err: errors.New("invalid port")}
+
+	err := c.redact(fmt.Errorf("connecting: %w", parseErr))
+	want := `connecting: parse "postgres://admin:xxxxx@db.example.org/postgres": invalid port`
+	if err.Error() != want {
+		t.Errorf("redact(...).Error() = %q, want %q", err.Error(), want)
+	}
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		t.Fatalf("errors.As(redact(...), *url.Error) = false, want true")
+	}
+	if uerr.URL != c.redacted {
+		t.Errorf("unwrapped *url.Error URL = %q, want %q", uerr.URL, c.redacted)
 	}
 }
