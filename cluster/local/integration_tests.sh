@@ -385,6 +385,64 @@ test_create_grant() {
   echo_step_completed
 }
 
+mariadb_exec() {
+  "${KUBECTL}" exec mariadb-0 -- bash -c \
+    'mariadb -uroot -p"${MARIADB_ROOT_PASSWORD}" -N -e "$1"' -- "$1"
+}
+
+test_role_membership() {
+  echo_step "test MySQL Grant role membership"
+  mariadb_exec "CREATE ROLE reporting_reader; CREATE ROLE unrelated_reader;
+    GRANT unrelated_reader TO 'example-user'@'%' WITH ADMIN OPTION;"
+  local provider_user="root"
+  if [[ "${TLS}" == "true" ]]; then
+    provider_user="test"
+  fi
+  mariadb_exec "GRANT reporting_reader TO '${provider_user}'@'%' WITH ADMIN OPTION;"
+
+  local grants_before
+  grants_before=$(mariadb_exec "SHOW GRANTS FOR 'example-user'@'%';" | sort)
+  local membership_query="SELECT COUNT(*) FROM mysql.roles_mapping
+    WHERE \`Role\` = 'reporting_reader' AND \`User\` = 'example-user' AND \`Host\` = '%';"
+
+  "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/mysql/grant_member_of.yaml
+  "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/mysql/grant_member_of.yaml
+  [[ $(mariadb_exec "${membership_query}") == "1" ]]
+
+  echo_info "check that membership and privileges cannot be combined"
+  local admission_error
+  if admission_error=$("${KUBECTL}" patch --dry-run=server --type merge \
+      -f ${projectdir}/examples/${API_TYPE}/mysql/grant_member_of.yaml \
+      -p '{"spec":{"forProvider":{"privileges":["SELECT"]}}}' 2>&1); then
+    echo_error "expected memberOf and privileges to be rejected"
+  fi
+  if [[ "${admission_error}" != *"specify either memberOf or privileges"* ]]; then
+    echo_error "unexpected admission error: ${admission_error}"
+  fi
+  echo_step_completed
+
+  echo_info "check if reconciliation restores a revoked membership"
+  mariadb_exec "REVOKE reporting_reader FROM 'example-user'@'%';"
+  "${KUBECTL}" annotate -f ${projectdir}/examples/${API_TYPE}/mysql/grant_member_of.yaml reconcile=role-membership --overwrite
+  for _ in $(seq 1 30); do
+    if [[ $(mariadb_exec "${membership_query}") == "1" ]]; then
+      break
+    fi
+    sleep 2
+  done
+  [[ $(mariadb_exec "${membership_query}") == "1" ]]
+
+  echo_info "check if deletion removes only the managed membership"
+  "${KUBECTL}" delete --timeout 2m -f ${projectdir}/examples/${API_TYPE}/mysql/grant_member_of.yaml
+  [[ $(mariadb_exec "${membership_query}") == "0" ]]
+  local grants_after
+  grants_after=$(mariadb_exec "SHOW GRANTS FOR 'example-user'@'%';" | sort)
+  [[ "${grants_before}" == "${grants_after}" ]]
+
+  mariadb_exec "DROP ROLE reporting_reader; DROP ROLE unrelated_reader;"
+  echo_step_completed
+}
+
 test_all() {
   test_create_database
   test_database_charset
@@ -393,6 +451,7 @@ test_all() {
   test_create_user
   test_update_user_password
   test_create_grant
+  test_role_membership
 }
 
 cleanup_test_resources() {
