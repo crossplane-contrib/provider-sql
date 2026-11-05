@@ -242,6 +242,11 @@ func (in *GrantParameters) DeepCopyInto(out *GrantParameters) {
 		*out = make(GrantPrivileges, len(*in))
 		copy(*out, *in)
 	}
+	if in.MemberOf != nil {
+		in, out := &in.MemberOf, &out.MemberOf
+		*out = new(string)
+		**out = **in
+	}
 	if in.User != nil {
 		in, out := &in.User, &out.User
 		*out = new(string)

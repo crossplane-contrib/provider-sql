@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -147,6 +148,18 @@ type external struct{ db xsql.DB }
 var _ managed.TypedExternalClient[*v1alpha1.Grant] = &external{}
 
 func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalObservation, error) {
+	if mg.Spec.ForProvider.MemberOf != nil {
+		exists, err := mysql.RoleMembershipExists(ctx, c.db, ptr.Deref(mg.Spec.ForProvider.User, ""), *mg.Spec.ForProvider.MemberOf)
+		if err != nil {
+			return managed.ExternalObservation{}, errors.Wrap(err, errCurrentGrant)
+		}
+		mg.Status.AtProvider.Privileges = nil
+		if exists {
+			mg.SetConditions(xpv2.Available())
+		}
+		return managed.ExternalObservation{ResourceExists: exists, ResourceUpToDate: exists}, nil
+	}
+
 	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
 	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
 	table := defaultIdentifier(mg.Spec.ForProvider.Table)
@@ -288,6 +301,10 @@ func (c *external) parseGrantRows(ctx context.Context, username, host, dbname, t
 }
 
 func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalCreation, error) {
+	if mg.Spec.ForProvider.MemberOf != nil {
+		return managed.ExternalCreation{}, errors.Wrap(mysql.GrantRoleMembership(ctx, c.db, ptr.Deref(mg.Spec.ForProvider.User, ""), *mg.Spec.ForProvider.MemberOf), errCreateGrant)
+	}
+
 	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
 	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
 	table := defaultIdentifier(mg.Spec.ForProvider.Table)
@@ -302,6 +319,11 @@ func (c *external) Create(ctx context.Context, mg *v1alpha1.Grant) (managed.Exte
 }
 
 func (c *external) Update(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalUpdate, error) {
+	if mg.Spec.ForProvider.MemberOf != nil {
+		// Observe reports missing memberships as nonexistent, so Create applies them.
+		return managed.ExternalUpdate{}, nil
+	}
+
 	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
 	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
 	table := defaultIdentifier(mg.Spec.ForProvider.Table)
@@ -388,6 +410,10 @@ func (c *external) Disconnect(ctx context.Context) error {
 }
 
 func (c *external) Delete(ctx context.Context, mg *v1alpha1.Grant) (managed.ExternalDelete, error) {
+	if mg.Spec.ForProvider.MemberOf != nil {
+		return managed.ExternalDelete{}, errors.Wrap(mysql.RevokeRoleMembership(ctx, c.db, ptr.Deref(mg.Spec.ForProvider.User, ""), *mg.Spec.ForProvider.MemberOf), errRevokeGrant)
+	}
+
 	username, host := mysql.SplitUserHost(*mg.Spec.ForProvider.User)
 	dbname := defaultIdentifier(mg.Spec.ForProvider.Database)
 	table := defaultIdentifier(mg.Spec.ForProvider.Table)

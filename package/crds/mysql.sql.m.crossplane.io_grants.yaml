@@ -34,6 +34,9 @@ spec:
     - jsonPath: .spec.forProvider.database
       name: DATABASE
       type: string
+    - jsonPath: .spec.forProvider.memberOf
+      name: MEMBER OF
+      type: string
     - jsonPath: .spec.forProvider.privileges
       name: PRIVILEGES
       type: string
@@ -156,10 +159,20 @@ spec:
                             type: string
                         type: object
                     type: object
+                  memberOf:
+                    description: |-
+                      MemberOf is an existing role to grant to the user.
+                      Use name@host to specify a MySQL role host; the default host is %.
+                      Cannot be combined with privileges, database, databaseRef, databaseSelector, or table.
+                      This Grant does not configure default roles or session activation.
+                      Deleting the Grant revokes the membership without deleting the user or role.
+                    minLength: 1
+                    type: string
                   privileges:
                     description: |-
                       Privileges to be granted.
                       See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
+                      Cannot be combined with MemberOf.
                     items:
                       description: GrantPrivilege represents a privilege to be granted
                       pattern: ^([A-Z0-9_ ]+|[A-Z_ ]+ [(]`[^`]+`(, `[^`]+`)*[)])$
@@ -254,9 +267,16 @@ spec:
                             type: string
                         type: object
                     type: object
-                required:
-                - privileges
                 type: object
+                x-kubernetes-validations:
+                - message: specify either memberOf or privileges
+                  rule: has(self.memberOf) != has(self.privileges)
+                - message: memberOf cannot be combined with database or table targeting
+                  rule: '!has(self.memberOf) || !(has(self.database) || has(self.databaseRef)
+                    || has(self.databaseSelector) || has(self.table))'
+                - message: memberOf requires a user, userRef, or userSelector
+                  rule: '!has(self.memberOf) || has(self.user) || has(self.userRef)
+                    || has(self.userSelector)'
               managementPolicies:
                 default:
                 - '*'

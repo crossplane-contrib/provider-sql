@@ -51,10 +51,24 @@ func (gp *GrantPrivileges) ToStringSlice() []string {
 }
 
 // GrantParameters define the desired state of a MySQL grant instance.
+// +kubebuilder:validation:XValidation:rule="has(self.memberOf) != has(self.privileges)",message="specify either memberOf or privileges"
+// +kubebuilder:validation:XValidation:rule="!has(self.memberOf) || !(has(self.database) || has(self.databaseRef) || has(self.databaseSelector) || has(self.table))",message="memberOf cannot be combined with database or table targeting"
+// +kubebuilder:validation:XValidation:rule="!has(self.memberOf) || has(self.user) || has(self.userRef) || has(self.userSelector)",message="memberOf requires a user, userRef, or userSelector"
 type GrantParameters struct {
 	// Privileges to be granted.
 	// See https://mariadb.com/kb/en/grant/#database-privileges for available privileges.
-	Privileges GrantPrivileges `json:"privileges"`
+	// Cannot be combined with MemberOf.
+	// +optional
+	Privileges GrantPrivileges `json:"privileges,omitempty"`
+
+	// MemberOf is an existing role to grant to the user.
+	// Use name@host to specify a MySQL role host; the default host is %.
+	// Cannot be combined with privileges, database, databaseRef, databaseSelector, or table.
+	// This Grant does not configure default roles or session activation.
+	// Deleting the Grant revokes the membership without deleting the user or role.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	MemberOf *string `json:"memberOf,omitempty"`
 
 	// User this grant is for.
 	// +optional
@@ -116,6 +130,7 @@ type GrantObservation struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="ROLE",type="string",JSONPath=".spec.forProvider.user"
 // +kubebuilder:printcolumn:name="DATABASE",type="string",JSONPath=".spec.forProvider.database"
+// +kubebuilder:printcolumn:name="MEMBER OF",type="string",JSONPath=".spec.forProvider.memberOf"
 // +kubebuilder:printcolumn:name="PRIVILEGES",type="string",JSONPath=".spec.forProvider.privileges"
 // +kubebuilder:resource:scope=Cluster,categories={crossplane,managed,sql}
 type Grant struct {
