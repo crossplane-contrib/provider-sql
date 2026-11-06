@@ -86,11 +86,11 @@ make build
 make e2e   # or: make test-integration
 ```
 
-Options (pass as `make` variables, e.g. `make e2e DB=postgresql`):
+Options (pass as `make` variables, e.g. `make e2e ENGINE=postgresql`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `DB` | `all` | Database suite to run: `all`, `mysql`, `postgresql` or `mssql`. |
+| `ENGINE` | `all` | Database engine suite to run: `all`, `mysql`, `postgresql` or `mssql`. |
 | `skipcleanup` | `false` | `true` keeps the kind cluster and the provider after the run. The next run reuses the cluster (skips cluster and Crossplane setup) and redeploys the provider. |
 | `QUICK_TEST` | unset | `true` stops after the provider is healthy, without running database tests. |
 | `POSTGRES_VERSION` | `18` | PostgreSQL server image version. |
