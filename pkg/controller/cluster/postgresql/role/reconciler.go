@@ -434,35 +434,10 @@ func (c *external) Delete(ctx context.Context, mg *v1alpha1.Role) (managed.Exter
 }
 
 func upToDate(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameters) bool {
-	if !cmp.Equal(observed.ConnectionLimit, desired.ConnectionLimit) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.SuperUser, desired.Privileges.SuperUser) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.Inherit, desired.Privileges.Inherit) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.CreateDb, desired.Privileges.CreateDb) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.CreateRole, desired.Privileges.CreateRole) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.Login, desired.Privileges.Login) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.Replication, desired.Privileges.Replication) {
-		return false
-	}
-	if !cmp.Equal(observed.Privileges.BypassRls, desired.Privileges.BypassRls) {
-		return false
-	}
-	if !cmp.Equal(observed.ConfigurationParameters, desired.ConfigurationParameters,
-		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name })) {
-		return false
-	}
-	return true
+	return cmp.Equal(observed, desired,
+		cmpopts.IgnoreFields(v1alpha1.RoleParameters{}, "PasswordSecretRef", "PasswordRotationTrigger"),
+		cmpopts.SortSlices(func(o, d v1alpha1.RoleConfigurationParameter) bool { return o.Name < d.Name }),
+	)
 }
 
 func lateInit(observed *v1alpha1.RoleParameters, desired *v1alpha1.RoleParameters) bool {
