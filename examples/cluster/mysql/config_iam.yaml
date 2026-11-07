@@ -1,0 +1,32 @@
+---
+apiVersion: mysql.sql.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+spec:
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      namespace: crossplane-system
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # Verify the server using the CA Secret; no client certificate or pod mount is needed.
+  tls: custom
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: rds-ca
+        namespace: crossplane-system
+        key: ca-bundle.pem
+
+# The connection secret holds only endpoint, port and username - no password.
+# The provider generates a short-lived IAM token and uses it as the password.
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: aurora-conn
+#   namespace: crossplane-system
+# stringData:
+#   endpoint: my-cluster.cluster-xxxxxxxx.us-east-1.rds.amazonaws.com
+#   port: "3306"
+#   username: crossplane_admin
