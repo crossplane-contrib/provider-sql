@@ -81,8 +81,10 @@ if [ $? -ne 0 ]; then
 fi
 
 integration_tests_end() {
-  echo_step "--- CLEAN-UP ---"
-  cleanup_provider
+  if [ "$skipcleanup" != true ]; then
+    echo_step "--- CLEAN-UP ---"
+    cleanup_provider
+  fi
   echo_success " All integration tests succeeded!"
 }
 
@@ -404,8 +406,25 @@ cleanup_test_resources() {
   "${KUBECTL}" delete secret example-pw
 }
 
-setup_cluster
-setup_crossplane
+# DB selects which database suite to run: all (default), mysql, postgresql or mssql.
+DB="${DB:-all}"
+case "${DB}" in
+  all|mysql|postgresql|mssql) ;;
+  *) echo_error "Invalid DB='${DB}'. Expected one of: all, mysql, postgresql, mssql." ;;
+esac
+
+db_selected() {
+  [[ "${DB}" == "all" || "${DB}" == "$1" ]]
+}
+
+# reuse a cluster kept by a previous run with skipcleanup=true
+if "${KIND}" get clusters | grep -qx "${K8S_CLUSTER}"; then
+  echo_step "reusing existing k8s cluster ${K8S_CLUSTER}"
+  "${KIND}" export kubeconfig --name="${K8S_CLUSTER}"
+else
+  setup_cluster
+  setup_crossplane
+fi
 setup_provider
 
 if [ "${QUICK_TEST:-}" == "true" ]; then
@@ -451,14 +470,20 @@ run_test() {
   echo_step "--- TESTING $testmain DONE IN ${duration}s ---"
 }
 
-TLS=true API_TYPE="namespaced" run_test integration_tests_mariadb
-TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
+if db_selected mysql; then
+  TLS=true API_TYPE="namespaced" run_test integration_tests_mariadb
+  TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
+fi
 
-TLS=false API_TYPE="cluster" run_test integration_tests_postgres
-TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
+if db_selected postgresql; then
+  TLS=false API_TYPE="cluster" run_test integration_tests_postgres
+  TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
+fi
 
 # no TLS=false variant - MSSQL uses built-in encryption
-TLS=true API_TYPE="cluster" run_test integration_tests_mssql
-TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
+if db_selected mssql; then
+  TLS=true API_TYPE="cluster" run_test integration_tests_mssql
+  TLS=true API_TYPE="namespaced" run_test integration_tests_mssql
+fi
 
 integration_tests_end
