@@ -87,8 +87,8 @@ e2e.run: test-integration
 CROSSPLANE_HELM_CHANNEL ?= stable
 CROSSPLANE_HELM_CHART_VERSION ?=
 POSTGRES_VERSION ?= 18
-# DB selects the integration test suite: all, mysql, postgresql or mssql.
-DB ?= all
+# ENGINE selects the integration test suite: all, mysql, postgresql or mssql.
+ENGINE ?= all
 # skipcleanup=true keeps the kind cluster and provider after the run; the next run reuses them.
 skipcleanup ?= false
 
@@ -99,7 +99,7 @@ test-integration: $(KIND) $(KUBECTL) $(CROSSPLANE_CLI) $(HELM)
 	  CROSSPLANE_HELM_CHANNEL=${CROSSPLANE_HELM_CHANNEL} \
 	  CROSSPLANE_HELM_CHART_VERSION=${CROSSPLANE_HELM_CHART_VERSION} \
 	  POSTGRES_VERSION=${POSTGRES_VERSION} \
-	  DB=${DB} \
+	  ENGINE=${ENGINE} \
 	  skipcleanup=${skipcleanup} \
 	  $(ROOT_DIR)/cluster/local/integration_tests.sh || $(FAIL)
 	@$(OK) integration tests passed
