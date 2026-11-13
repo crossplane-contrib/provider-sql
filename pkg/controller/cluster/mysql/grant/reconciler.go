@@ -72,6 +72,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 
 	reconcilerOptions := []managed.ReconcilerOption{
 		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: mysql.New}),
+		managed.WithProviderConfigUsageCleaner(t),
 		managed.WithReferenceResolver(managed.NewAPISimpleReferenceResolver(mgr.GetClient())),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
