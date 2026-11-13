@@ -89,7 +89,7 @@ func TestConnect(t *testing.T) {
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, sslmode string, _ xsql.PasswordProvider) xsql.DB
 	}
 
 	type args struct {

@@ -1,0 +1,20 @@
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aurora-iam
+  namespace: default
+spec:
+  # defaultDatabase: postgres
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      name: aurora-conn # endpoint, port, username - no password
+    # region: us-east-1 # optional; otherwise a "region" secret key, then the controller's AWS env
+  # Verify the server using the CA Secret; no pod trust mount is needed.
+  sslMode: verify-full
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: rds-ca
+        key: ca-bundle.pem

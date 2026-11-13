@@ -42,6 +42,8 @@ type ProviderConfigSpec struct {
 }
 
 // TLSConfig defines the TLS configuration for the provider when tls=custom.
+// CACert verifies the server. ClientCert and ClientKey are optional and must
+// be supplied together when the server requires mutual TLS.
 type TLSConfig struct {
 	CACert             TLSSecret `json:"caCert,omitempty"`
 	ClientCert         TLSSecret `json:"clientCert,omitempty"`
@@ -61,12 +63,17 @@ const (
 	// should acquire credentials from a connection secret written by a managed
 	// resource that represents a MySQL server.
 	CredentialsSourceMySQLConnectionSecret MySQLConnectionSecretSource = "MySQLConnectionSecret"
+
+	// CredentialsSourceAWSIAMAuth indicates that the provider should
+	// authenticate to an AWS RDS/Aurora instance using an IAM authentication
+	// token generated at connection time, instead of a static password.
+	CredentialsSourceAWSIAMAuth MySQLConnectionSecretSource = "AWSIAMAuth"
 )
 
 // ProviderCredentials required to authenticate.
 type ProviderCredentials struct {
 	// Source of the provider credentials.
-	// +kubebuilder:validation:Enum=MySQLConnectionSecret
+	// +kubebuilder:validation:Enum=MySQLConnectionSecret;AWSIAMAuth
 	Source MySQLConnectionSecretSource `json:"source"`
 
 	// A CredentialsSecretRef is a reference to a MySQL connection secret
@@ -79,6 +86,12 @@ type ProviderCredentials struct {
 	// standard Crossplane keys are used: "endpoint", "port", "username", "password".
 	// +optional
 	SecretKeyMapping *SecretKeyMapping `json:"secretKeyMapping,omitempty"`
+
+	// Region is the AWS region used to generate the IAM authentication token
+	// when source is AWSIAMAuth. When unset it falls back to a "region" key in
+	// the connection secret, then to the controller's AWS environment.
+	// +optional
+	Region *string `json:"region,omitempty"`
 }
 
 // SecretKeyMapping allows overriding the default secret key names used to

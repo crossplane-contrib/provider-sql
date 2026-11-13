@@ -62,7 +62,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewProviderConfigUsageTracker(mgr.GetClient(), &namespacedv1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.NewWithPasswordProvider}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -94,7 +94,7 @@ var _ managed.TypedExternalConnector[*namespacedv1alpha1.Schema] = &connector{}
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.ModernManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Schema) (managed.TypedExternalClient[*namespacedv1alpha1.Schema], error) {
@@ -113,7 +113,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Schema) 
 		return nil, errors.New(errNoDatabase)
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, *mg.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode))}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, *mg.Spec.ForProvider.Database, clients.ToString(providerInfo.SSLMode), providerInfo.PasswordProvider)}, nil
 }
 
 var _ managed.TypedExternalClient[*namespacedv1alpha1.Schema] = &external{}

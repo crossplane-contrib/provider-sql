@@ -1,0 +1,18 @@
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: aurora-iam
+spec:
+  credentials:
+    source: AWSIAMAuth
+    connectionSecretRef:
+      name: aurora-conn
+      namespace: crossplane-system
+  sslMode: verify-full
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: rds-ca
+        namespace: crossplane-system
+        key: ca-bundle.pem
