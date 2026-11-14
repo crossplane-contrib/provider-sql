@@ -119,11 +119,22 @@ func (c mssqlDB) GetConnectionDetails(username, password string) managed.Connect
 	}
 }
 
-// GetServerVersion is not supported by the MSSQL client (only used by PostgreSQL).
+// GetServerVersion returns the MSSQL server version as an integer.
+// For example, SQL Server 2022 (16.0.1125) returns 160000 (major*10000 + minor*100).
+// Build number is ignored as it exceeds the encoding range.
 func (c mssqlDB) GetServerVersion(ctx context.Context) (int, error) {
-	// This method should never be called for MSSQL clients
-	// but is implemented to satisfy the xsql.DB interface
-	return 0, nil
+	db, err := sql.Open(driverName, c.dsn)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close() //nolint:errcheck
+
+	var version string
+	if err := db.QueryRowContext(ctx, "SELECT SERVERPROPERTY('ProductVersion')").Scan(&version); err != nil {
+		return 0, err
+	}
+
+	return xsql.ParseVersion(version)
 }
 
 // QuoteIdentifier for mssql queries
