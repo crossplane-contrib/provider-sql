@@ -10,7 +10,7 @@ require (
 	github.com/crossplane/crossplane/apis/v2 v2.4.0
 	github.com/crossplane/upjet/v2 v2.2.0
 	github.com/go-logr/logr v1.4.4
-	github.com/go-sql-driver/mysql v1.10.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/go-cmp v0.7.0
 	github.com/lib/pq v1.12.3
 	github.com/microsoft/go-mssqldb v1.11.0
