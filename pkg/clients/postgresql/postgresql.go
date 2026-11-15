@@ -67,30 +67,26 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	if err != nil {
 		return err
 	}
+	defer d.Close() //nolint:errcheck
 
+	return execTx(ctx, d, ql)
+}
+
+// execTx runs ql in one transaction on d.
+func execTx(ctx context.Context, d *sql.DB, ql []xsql.Query) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-
-	// Rollback or Commit based on error state. Defer close in defer to make
-	// sure the connection is always closed.
-	defer func() {
-		defer d.Close() //nolint:errcheck
-		// We always rollback, it's a no-op if the tx was already committed.
-		defer tx.Rollback() //nolint:errcheck
-
-		if err == nil {
-			err = tx.Commit()
-		}
-	}()
+	// No-op once Commit has run.
+	defer tx.Rollback() //nolint:errcheck
 
 	for _, q := range ql {
-		if _, err = tx.Exec(q.String, q.Parameters...); err != nil {
+		if _, err := tx.Exec(q.String, q.Parameters...); err != nil {
 			return err
 		}
 	}
-	return err
+	return tx.Commit()
 }
 
 // Exec the supplied query.
