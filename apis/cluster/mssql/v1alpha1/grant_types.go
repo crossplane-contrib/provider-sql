@@ -17,14 +17,14 @@ limitations under the License.
 package v1alpha1
 
 import (
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // A GrantSpec defines the desired state of a Grant.
 type GrantSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       GrantParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     GrantParameters `json:"forProvider"`
 }
 
 // GrantPermission represents a permission to be granted
@@ -68,12 +68,12 @@ type GrantParameters struct {
 	// UserRef references the user object this grant is for.
 	// +immutable
 	// +optional
-	UserRef *xpv1.Reference `json:"userRef,omitempty"`
+	UserRef *xpv2.Reference `json:"userRef,omitempty"`
 
 	// UserSelector selects a reference to a User this grant is for.
 	// +immutable
 	// +optional
-	UserSelector *xpv1.Selector `json:"userSelector,omitempty"`
+	UserSelector *xpv2.Selector `json:"userSelector,omitempty"`
 
 	// Database this grant is for.
 	// +optional
@@ -83,17 +83,17 @@ type GrantParameters struct {
 	// DatabaseRef references the database object this grant it for.
 	// +immutable
 	// +optional
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.Reference `json:"databaseRef,omitempty"`
 
 	// DatabaseSelector selects a reference to a Database this grant is for.
 	// +immutable
 	// +optional
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.Selector `json:"databaseSelector,omitempty"`
 }
 
 // A GrantStatus represents the observed state of a Grant.
 type GrantStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
+	xpv2.ManagedResourceStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

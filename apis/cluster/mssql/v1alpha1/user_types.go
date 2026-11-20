@@ -19,19 +19,19 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A UserSpec defines the desired state of a Database.
 type UserSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       UserParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     UserParameters `json:"forProvider"`
 }
 
 // A UserStatus represents the observed state of a User.
 type UserStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          UserObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 UserObservation `json:"atProvider,omitempty"`
 }
 
 // UserParameters define the desired state of a MSSQL user instance.
@@ -43,21 +43,21 @@ type UserParameters struct {
 	Database *string `json:"database,omitempty"`
 	// DatabaseRef allows you to specify custom resource name of the Database the USER is created for.
 	// to fill Database field.
-	DatabaseRef *xpv1.Reference `json:"databaseRef,omitempty"`
+	DatabaseRef *xpv2.Reference `json:"databaseRef,omitempty"`
 	// DatabaseSelector allows you to use selector constraints to select a Database the USER is created for.
-	DatabaseSelector *xpv1.Selector `json:"databaseSelector,omitempty"`
+	DatabaseSelector *xpv2.Selector `json:"databaseSelector,omitempty"`
 	// PasswordSecretRef references the secret that contains the password used
 	// for this user. If no reference is given, a password will be auto-generated.
 	// +optional
-	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv2.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 	// LoginDatabase allows you to specify the name of the Database to be used to create the user LOGIN in (normally master).
 	// +crossplane:generate:reference:type=Database
 	LoginDatabase *string `json:"loginDatabase,omitempty"`
 	// DatabaseRef allows you to specify custom resource name of the Database to be used to create the user LOGIN in (normally master).
 	// to fill Database field.
-	LoginDatabaseRef *xpv1.Reference `json:"loginDatabaseRef,omitempty"`
+	LoginDatabaseRef *xpv2.Reference `json:"loginDatabaseRef,omitempty"`
 	// DatabaseSelector allows you to use selector constraints to select a Database to be used to create the user LOGIN in (normally master).
-	LoginDatabaseSelector *xpv1.Selector `json:"loginDatabaseSelector,omitempty"`
+	LoginDatabaseSelector *xpv2.Selector `json:"loginDatabaseSelector,omitempty"`
 	// Contained specifies whether to create a contained database user (without server-level login).
 	// When true, the user will be created directly in the specified database using CREATE USER WITH PASSWORD.
 	// When false (default), a server-level LOGIN will be created first, then a database user mapped to that login.

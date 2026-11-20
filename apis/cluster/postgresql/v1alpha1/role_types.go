@@ -19,19 +19,19 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 )
 
 // A RoleSpec defines the desired state of a Role.
 type RoleSpec struct {
-	xpv1.ResourceSpec `json:",inline"`
-	ForProvider       RoleParameters `json:"forProvider"`
+	xpv2.ClusterManagedResourceSpec `json:",inline"`
+	ForProvider                     RoleParameters `json:"forProvider"`
 }
 
 // A RoleStatus represents the observed state of a Role.
 type RoleStatus struct {
-	xpv1.ResourceStatus `json:",inline"`
-	AtProvider          RoleObservation `json:"atProvider,omitempty"`
+	xpv2.ManagedResourceStatus `json:",inline"`
+	AtProvider                 RoleObservation `json:"atProvider,omitempty"`
 }
 
 // RolePrivilege is the PostgreSQL identifier to add or remove a permission
@@ -79,10 +79,15 @@ type RoleParameters struct {
 	// +optional
 	Privileges RolePrivilege `json:"privileges,omitempty"`
 
-	// PasswordSecretRef references the secret that contains the password used
-	// for this role. If no reference is given, a password will be auto-generated.
+	// PasswordSecretRef references the secret key holding the password for this
+	// role. The provider applies that value and re-applies it whenever the
+	// secret changes. If omitted, the provider auto-generates a password on
+	// create, writes it to the connection secret, and can rotate it on demand
+	// via passwordRotationTrigger.
+	//
+	// See https://github.com/crossplane-contrib/provider-sql/blob/master/docs/postgresql-role-passwords.md
 	// +optional
-	PasswordSecretRef *xpv1.SecretKeySelector `json:"passwordSecretRef,omitempty"`
+	PasswordSecretRef *xpv2.SecretKeySelector `json:"passwordSecretRef,omitempty"`
 
 	// ConfigurationParameters to be applied to the role. If specified, any other configuration parameters set on the
 	// role in the database will be reset.
@@ -90,6 +95,20 @@ type RoleParameters struct {
 	// See https://www.postgresql.org/docs/current/runtime-config-client.html for some available configuration parameters.
 	// +optional
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+
+	// PasswordRotationTrigger forces rotation of the auto-generated password.
+	// Set it to a timestamp later than status.atProvider.lastPasswordChange:
+	// once that time has passed, the next reconcile generates a new password,
+	// applies it in the database, and writes it to the connection secret. A
+	// timestamp in the future schedules the rotation; it happens on the first
+	// reconcile after that time, so up to one poll interval late. Each trigger
+	// value rotates once; move it to a newer time to rotate again. Has no
+	// effect when passwordSecretRef is set, and no effect until
+	// lastPasswordChange is set, which the provider does not do on create.
+	//
+	// See https://github.com/crossplane-contrib/provider-sql/blob/master/docs/postgresql-role-passwords.md
+	// +optional
+	PasswordRotationTrigger *metav1.Time `json:"passwordRotationTrigger,omitempty"`
 }
 
 // RoleConfigurationParameter is a role configuration parameter.
@@ -105,6 +124,8 @@ type RoleObservation struct {
 	PrivilegesAsClauses []string `json:"privilegesAsClauses,omitempty"`
 	// ConfigurationParameters represents the applied configuration parameters for the PostgreSQL role.
 	ConfigurationParameters *[]RoleConfigurationParameter `json:"configurationParameters,omitempty"`
+	// LastPasswordChange records when the provider last set the role's password.
+	LastPasswordChange *metav1.Time `json:"lastPasswordChange,omitempty"`
 }
 
 // +kubebuilder:object:root=true

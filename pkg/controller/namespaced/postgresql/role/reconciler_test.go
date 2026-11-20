@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/crossplane-contrib/provider-sql/apis/namespaced/postgresql/v1alpha1"
 	"github.com/google/go-cmp/cmp"
@@ -28,17 +29,17 @@ import (
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/crossplane/crossplane-runtime/v2/apis/common"
-	xpv1 "github.com/crossplane/crossplane-runtime/v2/apis/common/v1"
-	xpv2 "github.com/crossplane/crossplane-runtime/v2/apis/common/v2"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/resource"
 	"github.com/crossplane/crossplane-runtime/v2/pkg/test"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	provErrors "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/errors"
@@ -69,10 +70,10 @@ func (m mockDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 func (m mockDB) GetConnectionDetails(rolename, password string) managed.ConnectionDetails {
 	return managed.ConnectionDetails{
-		xpv1.ResourceCredentialsSecretUserKey:     []byte(rolename),
-		xpv1.ResourceCredentialsSecretPasswordKey: []byte(password),
-		xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-		xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
+		xpv2.CredentialsSecretUserKey:     []byte(rolename),
+		xpv2.CredentialsSecretPasswordKey: []byte(password),
+		xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+		xpv2.CredentialsSecretPortKey:     []byte("5432"),
 	}
 }
 
@@ -123,7 +124,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{Kind: "Invalid"},
+							ProviderConfigReference: &xpv2.ProviderConfigReference{Kind: "Invalid"},
 						},
 					},
 				},
@@ -145,7 +146,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -167,7 +168,7 @@ func TestConnect(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ClusterProviderConfigKind,
 								Name: "example",
 							},
@@ -195,7 +196,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -212,7 +213,7 @@ func TestConnect(t *testing.T) {
 					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
 						switch o := obj.(type) {
 						case *v1alpha1.ProviderConfig:
-							o.Spec.Credentials.ConnectionSecretRef = common.LocalSecretReference{Name: "example"}
+							o.Spec.Credentials.ConnectionSecretRef = xpv2.LocalSecretReference{Name: "example"}
 						case *corev1.Secret:
 							return errBoom
 						}
@@ -228,7 +229,7 @@ func TestConnect(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							ProviderConfigReference: &common.ProviderConfigReference{
+							ProviderConfigReference: &xpv2.ProviderConfigReference{
 								Kind: v1alpha1.ProviderConfigKind,
 								Name: "example",
 							},
@@ -318,6 +319,11 @@ func TestObserve(t *testing.T) {
 							ConnectionLimit: nil,
 						},
 					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
 				},
 			},
 			want: want{
@@ -340,7 +346,7 @@ func TestObserve(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -350,8 +356,8 @@ func TestObserve(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password",
@@ -360,7 +366,7 @@ func TestObserve(t *testing.T) {
 							ConnectionLimit: ptr.To(int32(10)),
 						},
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -503,10 +509,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte(""),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte(""),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
@@ -543,8 +549,8 @@ func TestCreate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
@@ -557,10 +563,10 @@ func TestCreate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalCreation{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte("test1234"),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte("test1234"),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
@@ -623,15 +629,15 @@ func TestUpdate(t *testing.T) {
 				mg: &v1alpha1.Role{
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 						},
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
 								Name: "password-secret",
 							},
 						},
@@ -642,7 +648,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte(key.Name)
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte(key.Name)
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -666,6 +672,11 @@ func TestUpdate(t *testing.T) {
 							meta.AnnotationKeyExternalName: "example",
 						},
 					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
 				},
 			},
 			want: want{
@@ -687,15 +698,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 						},
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -706,7 +717,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -732,15 +743,15 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "example",
 								},
 								Key: "password-custom",
 							},
 						},
 						ManagedResourceSpec: xpv2.ManagedResourceSpec{
-							WriteConnectionSecretToReference: &common.LocalSecretReference{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
 								Name: "connection-secret",
 							},
 						},
@@ -760,7 +771,7 @@ func TestUpdate(t *testing.T) {
 							secret := corev1.Secret{
 								Data: map[string][]byte{},
 							}
-							secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("oldpassword")
+							secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("oldpassword")
 							secret.DeepCopyInto(obj.(*corev1.Secret))
 							return nil
 						default:
@@ -773,10 +784,10 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 				c: managed.ExternalUpdate{
 					ConnectionDetails: managed.ConnectionDetails{
-						xpv1.ResourceCredentialsSecretUserKey:     []byte("example"),
-						xpv1.ResourceCredentialsSecretPasswordKey: []byte("newpassword"),
-						xpv1.ResourceCredentialsSecretEndpointKey: []byte("localhost"),
-						xpv1.ResourceCredentialsSecretPortKey:     []byte("5432"),
+						xpv2.CredentialsSecretUserKey:     []byte("example"),
+						xpv2.CredentialsSecretPasswordKey: []byte("newpassword"),
+						xpv2.CredentialsSecretEndpointKey: []byte("localhost"),
+						xpv2.CredentialsSecretPortKey:     []byte("5432"),
 					},
 				},
 			},
@@ -805,11 +816,11 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
 								Login:   ptr.To(true),
@@ -831,7 +842,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -857,11 +868,11 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
 								Login:   ptr.To(true),
@@ -883,7 +894,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -893,11 +904,17 @@ func TestUpdate(t *testing.T) {
 				err: nil,
 			},
 		},
-		"ErrComparePrivs": {
-			reason: "We should error if observed privilege list is shorter than desired privilege list",
+		"ApplyFullPrivsWhenObservationShort": {
+			reason: "We should apply the full desired privilege list, not error, when the observed privilege list is shorter than desired (e.g. status hasn't been persisted yet).",
 			fields: fields{
 				db: &mockDB{
 					MockExec: func(ctx context.Context, q xsql.Query) error {
+						// Verify that query contains all three desired
+						// clauses, in privilegesToClauses order.
+						crn := pq.QuoteIdentifier("example")
+						if q.String != fmt.Sprintf("ALTER ROLE %s NOINHERIT CREATEDB LOGIN", crn) {
+							return errBoom
+						}
 						return nil
 					},
 				},
@@ -911,11 +928,11 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 							Privileges: v1alpha1.RolePrivilege{
 								Login:    ptr.To(true),
@@ -927,7 +944,7 @@ func TestUpdate(t *testing.T) {
 					Status: v1alpha1.RoleStatus{
 						AtProvider: v1alpha1.RoleObservation{
 							// One privilege field observed but 3 privileges
-							// to apply. Throw error.
+							// to apply. Apply the full desired set.
 							PrivilegesAsClauses: []string{"NOINHERIT"},
 						},
 					},
@@ -937,14 +954,14 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
 				},
 			},
 			want: want{
-				err: errors.Wrap(errors.New(errComparePrivileges), errUpdateRole),
+				err: nil,
 			},
 		},
 		"UpdateConfigurationParameters": {
@@ -978,11 +995,11 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
@@ -1016,7 +1033,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -1044,11 +1061,11 @@ func TestUpdate(t *testing.T) {
 					},
 					Spec: v1alpha1.RoleSpec{
 						ForProvider: v1alpha1.RoleParameters{
-							PasswordSecretRef: &common.LocalSecretKeySelector{
-								LocalSecretReference: common.LocalSecretReference{
+							PasswordSecretRef: &xpv2.LocalSecretKeySelector{
+								LocalSecretReference: xpv2.LocalSecretReference{
 									Name: "connection-secret",
 								},
-								Key: xpv1.ResourceCredentialsSecretPasswordKey,
+								Key: xpv2.CredentialsSecretPasswordKey,
 							},
 							ConfigurationParameters: &[]v1alpha1.RoleConfigurationParameter{
 								{
@@ -1085,7 +1102,7 @@ func TestUpdate(t *testing.T) {
 						secret := corev1.Secret{
 							Data: map[string][]byte{},
 						}
-						secret.Data[xpv1.ResourceCredentialsSecretPasswordKey] = []byte("samesame")
+						secret.Data[xpv2.CredentialsSecretPasswordKey] = []byte("samesame")
 						secret.DeepCopyInto(obj.(*corev1.Secret))
 						return nil
 					},
@@ -1109,6 +1126,438 @@ func TestUpdate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got, cmpopts.IgnoreMapEntries(func(key string, _ []byte) bool { return key == "password" })); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// cachedSecretNotFound is the cached kube client for a role whose connection secret is
+// missing. It fails any other read, so the Role itself can't be read from the cache.
+func cachedSecretNotFound(name string) client.Client {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			if _, ok := obj.(*corev1.Secret); !ok {
+				return errors.Errorf("unexpected cached read of %T", obj)
+			}
+			return kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+		},
+	}
+}
+
+// apiServerSecret is the uncached reader for a connection secret as stored on the API server:
+// missing when password is nil, otherwise holding password. It fails any other read.
+func apiServerSecret(name string, password []byte) client.Reader {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			s, ok := obj.(*corev1.Secret)
+			if !ok {
+				return errors.Errorf("unexpected uncached read of %T", obj)
+			}
+			if password == nil {
+				return kerrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, name)
+			}
+			s.Data = map[string][]byte{xpv2.CredentialsSecretPasswordKey: password}
+			return nil
+		},
+	}
+}
+
+// apiServerRole is the uncached reader for a Role whose status, as stored on the API server,
+// records last as its LastPasswordChange. It fails any other read.
+func apiServerRole(last *metav1.Time) client.Reader {
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			r, ok := obj.(*v1alpha1.Role)
+			if !ok {
+				return errors.Errorf("unexpected uncached read of %T", obj)
+			}
+			r.Status.AtProvider.LastPasswordChange = last
+			return nil
+		},
+	}
+}
+
+// orNoUncachedReads returns r, or when r is nil an uncached reader that fails every read, so
+// cases that don't set one assert that the decision was made from the cache alone.
+func orNoUncachedReads(r client.Reader) client.Reader {
+	if r != nil {
+		return r
+	}
+	return &test.MockClient{
+		MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+			return errors.Errorf("unexpected uncached read of %T", obj)
+		},
+	}
+}
+
+func TestGetPassword(t *testing.T) {
+	type args struct {
+		ctx       context.Context
+		role      *v1alpha1.Role
+		kube      client.Client
+		apiReader client.Reader
+	}
+	type want struct {
+		pwd     string
+		changed bool
+		err     error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChange": {
+			reason: "nil LastPasswordChange with no connection secret reference should not reset (nowhere to publish a regenerated password)",
+			args: args{
+				role: &v1alpha1.Role{},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerNilLastChangeSecretHasPassword": {
+			reason: "PasswordRotationTrigger with nil LastPasswordChange must not reset when the connection secret already has a password (Create just ran)",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now()},
+						},
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv2.CredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NilLastPasswordChangeSecretNotFound": {
+			reason: "nil LastPasswordChange with a missing connection secret should trigger a reset (restoration scenario)",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube:      cachedSecretNotFound("test-secret"),
+				apiReader: apiServerSecret("test-secret", nil),
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"NilLastPasswordChangeSecretHasPassword": {
+			reason: "nil LastPasswordChange with existing connection secret password should not reset (Create already ran)",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube: &test.MockClient{
+					MockGet: func(_ context.Context, _ client.ObjectKey, obj client.Object) error {
+						secret := corev1.Secret{
+							Data: map[string][]byte{
+								xpv2.CredentialsSecretPasswordKey: []byte("existing-password"),
+							},
+						}
+						secret.DeepCopyInto(obj.(*corev1.Secret))
+						return nil
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"LastPasswordChangeSetNoTrigger": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			args: args{
+				role: &v1alpha1.Role{
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerAfterLastChange": {
+			reason: "PasswordRotationTrigger set after LastPasswordChange and already passed should trigger rotation",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+				apiReader: apiServerRole(&metav1.Time{Time: time.Now().Add(-time.Hour)}),
+			},
+			want: want{pwd: "", changed: true},
+		},
+		"RotationTriggerBeforeLastChange": {
+			reason: "PasswordRotationTrigger set before LastPasswordChange should not trigger rotation",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"RotationTriggerDueButFreshShowsRotated": {
+			reason: "cached role reporting a due trigger must not rotate again when a fresh read from the API server shows LastPasswordChange already moved past it, e.g. right after the reconcile that rotated, before that write reaches the cache used to fetch role",
+			args: args{
+				role: &v1alpha1.Role{
+					Spec: v1alpha1.RoleSpec{
+						ForProvider: v1alpha1.RoleParameters{
+							PasswordRotationTrigger: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+						},
+					},
+				},
+				apiReader: apiServerRole(&metav1.Time{Time: time.Now()}),
+			},
+			want: want{pwd: "", changed: false},
+		},
+		"NilLastPasswordChangeStaleCacheFreshSecretHasPassword": {
+			reason: "nil LastPasswordChange with a connection secret missing from the cache must not trigger a reset when a fresh read from the API server shows it holds a password, e.g. right after Create or a restore published it",
+			args: args{
+				role: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "restored-ns",
+					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
+								Name: "restored-secret",
+							},
+						},
+					},
+				},
+				kube:      cachedSecretNotFound("restored-secret"),
+				apiReader: apiServerSecret("restored-secret", []byte("published")),
+			},
+			want: want{pwd: "", changed: false},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := external{kube: tc.args.kube, apiReader: orNoUncachedReads(tc.args.apiReader)}
+			pwd, changed, err := e.getPassword(tc.args.ctx, tc.args.role)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.pwd, pwd); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want pwd, +got pwd:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want.changed, changed); diff != "" {
+				t.Errorf("\n%s\ne.getPassword(...): -want changed, +got changed:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestRotationDue(t *testing.T) {
+	last := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	trigger := &metav1.Time{Time: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+
+	// A future trigger schedules a rotation: nothing happens until its time,
+	// it fires on the first reconcile after it, and once LastPasswordChange
+	// records that rotation it never fires again for the same trigger value.
+	steps := []struct {
+		now  time.Time
+		want bool
+	}{
+		{now: trigger.Add(-time.Hour), want: false},
+		{now: trigger.Add(5 * time.Minute), want: true},
+		{now: trigger.Add(15 * time.Minute), want: false},
+		{now: trigger.Add(30 * 24 * time.Hour), want: false},
+	}
+
+	lastChange := &metav1.Time{Time: last}
+	rotations := 0
+	for i, step := range steps {
+		got := rotationDue(trigger, lastChange, step.now)
+		if got != step.want {
+			t.Errorf("step %d (now=%s): rotationDue(...) = %t, want %t", i, step.now, got, step.want)
+		}
+		if got {
+			rotations++
+			lastChange = &metav1.Time{Time: step.now}
+		}
+	}
+	if rotations != 1 {
+		t.Errorf("rotations = %d, want exactly 1", rotations)
+	}
+
+	if rotationDue(nil, lastChange, time.Now()) {
+		t.Error("rotationDue(nil trigger, ...) = true, want false")
+	}
+	if rotationDue(trigger, nil, time.Now()) {
+		t.Error("rotationDue(..., nil LastPasswordChange, ...) = true, want false")
+	}
+}
+
+func TestUpdatePasswordReset(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	type fields struct {
+		// execQuery receives the SQL query string from MockExec, if called.
+		execQuery *string
+	}
+
+	type args struct {
+		ctx       context.Context
+		mg        *v1alpha1.Role
+		kube      client.Client
+		apiReader client.Reader
+	}
+
+	type want struct {
+		err error
+		// passwordGenerated asserts that ALTER ROLE was called with a non-empty
+		// generated password and that ConnectionDetails carry a non-empty password.
+		passwordGenerated bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		fields fields
+		args   args
+		want   want
+	}{
+		"NilLastPasswordChangeGeneratesPassword": {
+			reason: "nil LastPasswordChange with a connection secret reference but missing secret should generate a new password (restoration scenario)",
+			fields: fields{execQuery: new(string)},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test-ns",
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Spec: v1alpha1.RoleSpec{
+						ManagedResourceSpec: xpv2.ManagedResourceSpec{
+							WriteConnectionSecretToReference: &xpv2.LocalSecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				},
+				kube:      cachedSecretNotFound("test-secret"),
+				apiReader: apiServerSecret("test-secret", nil),
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: true,
+			},
+		},
+		"LastPasswordChangeSetNoReset": {
+			reason: "LastPasswordChange set and no rotation trigger should not reset",
+			fields: fields{execQuery: nil},
+			args: args{
+				mg: &v1alpha1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							meta.AnnotationKeyExternalName: "example",
+						},
+					},
+					Status: v1alpha1.RoleStatus{
+						AtProvider: v1alpha1.RoleObservation{
+							LastPasswordChange: &metav1.Time{Time: metav1.Now().Time},
+						},
+					},
+				},
+				kube: &test.MockClient{},
+			},
+			want: want{
+				err:               nil,
+				passwordGenerated: false,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			execQuery := tc.fields.execQuery
+			db := &mockDB{
+				MockExec: func(ctx context.Context, q xsql.Query) error {
+					if execQuery == nil {
+						// No DB call expected.
+						return errBoom
+					}
+					*execQuery = q.String
+					return nil
+				},
+			}
+			e := external{
+				db:        db,
+				kube:      tc.args.kube,
+				apiReader: orNoUncachedReads(tc.args.apiReader),
+			}
+			got, err := e.Update(tc.args.ctx, tc.args.mg)
+			if diff := cmp.Diff(tc.want.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\ne.Update(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if tc.want.passwordGenerated {
+				// Verify the ALTER ROLE query was issued with a non-empty password.
+				if execQuery == nil || *execQuery == "" {
+					t.Errorf("\n%s\ne.Update(...): expected ALTER ROLE PASSWORD query to be executed\n", tc.reason)
+				} else if *execQuery == fmt.Sprintf("ALTER ROLE %s PASSWORD ''", pq.QuoteIdentifier("example")) {
+					t.Errorf("\n%s\ne.Update(...): ALTER ROLE PASSWORD query contained an empty password\n", tc.reason)
+				}
+				// Verify the returned ConnectionDetails carry a non-empty password.
+				if pw := got.ConnectionDetails[xpv2.CredentialsSecretPasswordKey]; len(pw) == 0 {
+					t.Errorf("\n%s\ne.Update(...): expected non-empty password in ConnectionDetails\n", tc.reason)
+				}
 			}
 		})
 	}

@@ -18,6 +18,16 @@ spec:
 apiVersion: postgresql.sql.crossplane.io/v1alpha1
 kind: Database
 metadata:
+  name: db-owner-ref
+spec:
+  forProvider:
+    ownerSelector:
+      matchLabels:
+        role: owner
+---
+apiVersion: postgresql.sql.crossplane.io/v1alpha1
+kind: Database
+metadata:
   name: db-observe
 spec:
   managementPolicies:

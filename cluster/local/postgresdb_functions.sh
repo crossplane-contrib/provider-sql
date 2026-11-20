@@ -39,7 +39,21 @@ create_grantable_objects() {
   CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1 START WITH 1000 INCREMENT BY 1;
   CREATE SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2 START WITH 1000 INCREMENT BY 1;
   CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure(arg TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  -- Two arguments on purpose: a routine Grant on a single-argument routine is
+  -- observed correctly even when the Observe query cross joins argument rows
+  -- with privilege rows, so only a multi-argument routine catches that bug.
+  CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure_multiarg(arg1 TEXT, arg2 TEXT) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
+  -- An INTEGER argument on purpose: TEXT-like type names happen to work even
+  -- when the provider quotes argument type names, because \"text\" is a real
+  -- pg_type entry. INTEGER is a grammar keyword mapped to int4, so a quoted
+  -- \"integer\" fails to GRANT while an unquoted int4 never matches what
+  -- Observe reads from format_type(). Only a non-text-like type catches that.
+  CREATE PROCEDURE \"$TARGET_SCHEMA\".test_procedure_int(arg INTEGER) LANGUAGE plpgsql AS \$\$ BEGIN END; \$\$;
   CREATE TABLE \"$TARGET_SCHEMA\".test_table_column(test_column INT NULL);
+  -- A view on purpose: GRANT ... ON TABLE accepts views, but an Observe query
+  -- filtering pg_class to relkind = 'r' never reads the grant back, so the
+  -- resource Creates successfully and never becomes Ready.
+  CREATE VIEW \"$TARGET_SCHEMA\".test_view AS SELECT col1 FROM \"$TARGET_SCHEMA\".test_table;
   CREATE FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   CREATE SERVER test_foreign_server FOREIGN DATA WRAPPER test_foreign_data_wrapper;
   "
@@ -57,8 +71,11 @@ delete_grantable_objects() {
   request="
   DROP SERVER test_foreign_server;
   DROP FOREIGN DATA WRAPPER test_foreign_data_wrapper;
+  DROP VIEW \"$TARGET_SCHEMA\".test_view;
   DROP TABLE \"$TARGET_SCHEMA\".test_table_column;
   DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure(TEXT);
+  DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure_multiarg(TEXT, TEXT);
+  DROP PROCEDURE \"$TARGET_SCHEMA\".test_procedure_int(INTEGER);
   DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_1;
   DROP SEQUENCE \"$TARGET_SCHEMA\".test_sequence_2;
   DROP TABLE \"$TARGET_SCHEMA\".test_table;
@@ -76,6 +93,14 @@ setup_postgresdb_tests(){
   echo_step "creating PostgresDB Database resource"
   # create DB
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
+
+  echo_step "creating bring-your-own password secret for Role"
+  # byo-password-role in role.yaml references this secret; without it that Role
+  # never becomes Ready and the readiness wait below times out.
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password \
+      --namespace default --save-config \
+      --from-literal password="${byo_role_pw}"
 
   echo_step "creating PostgresDB Role resource"
   # create grant
@@ -107,6 +132,23 @@ setup_postgresdb_tests(){
 
   echo_step "check if grant is ready"
   "${KUBECTL}" wait --timeout 2m --for condition=Ready -f ${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml
+  echo_step_completed
+}
+
+check_database_owner_ref() {
+  echo_step "check if database created with ownerSelector has correct owner"
+
+  local owner
+  owner=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d postgres -wtAc \
+    "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = 'db-owner-ref';")
+  owner=$(echo "${owner}" | xargs)
+
+  if [ "${owner}" = "ownerrole" ]; then
+    echo_info "ownerSelector resolved correctly: owner=${owner}"
+  else
+    echo_error "ERROR: expected owner 'ownerrole' but got '${owner}'"
+  fi
+
   echo_step_completed
 }
 
@@ -338,6 +380,38 @@ check_observe_only_database(){
   echo_step_completed
 }
 
+check_wildcard_privileges(){
+  # The wildcard grants SELECT on every table in the schema, so the check is
+  # that no table is left without it: a table the GRANT missed is the failure
+  # mode the feature exists to prevent.
+  target_db="db1"
+  schema="public"
+  role='all-objects-role'
+
+  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+    "select count(*) from pg_class c join pg_namespace n on c.relnamespace = n.oid
+     where c.relkind in ('r','p','v','m','f') and n.nspname = '$schema'
+     and not has_table_privilege('$role', c.oid, 'SELECT');" | xargs)
+
+  if [ "${missing}" = "0" ]; then
+    echo_info "every table in $schema is readable by $role"
+  else
+    echo_error "ERROR: ${missing} table(s) in $schema are not readable by $role"
+  fi
+
+  # Same for routines, which take EXECUTE rather than SELECT.
+  missing=$(PGPASSWORD="${postgres_root_pw}" psql -h localhost -p 5432 -U postgres -d "$target_db" -wtAc \
+    "select count(*) from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+     where n.nspname = '$schema'
+     and not has_function_privilege('$role', p.oid, 'EXECUTE');" | xargs)
+
+  if [ "${missing}" = "0" ]; then
+    echo_info "every routine in $schema is executable by $role"
+  else
+    echo_error "ERROR: ${missing} routine(s) in $schema are not executable by $role"
+  fi
+}
+
 check_custom_object_privileges(){
   echo_step "check if custom_object_privileges privileges are set properly"
 
@@ -348,6 +422,7 @@ check_custom_object_privileges(){
   check_foreign_data_wrapper_privileges
   check_foreign_server_privileges
   check_all_privileges_table_grant
+  check_wildcard_privileges
 
   echo_step_completed
 }
@@ -361,6 +436,7 @@ delete_postgresdb_resources(){
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
   "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true secret my-role-password -n default
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
@@ -425,13 +501,111 @@ delete_extension_test() {
   echo_step_completed
 }
 
+role_connection_password() {
+  "${KUBECTL}" get secret "$1" -n default -o jsonpath='{.data.password}' 2>/dev/null | base64 --decode
+}
+
+force_reconcile_role() {
+  "${KUBECTL}" annotate --overwrite \
+    "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/$1" "reconcile=$(date +%s)-${RANDOM}" > /dev/null
+}
+
+# Waits until role_connection_password for $1 is non-empty and different from $2,
+# up to ~60s. Prints nothing; returns non-zero on timeout.
+wait_role_password_changed() {
+  local secret=$1 previous=$2 current _
+  for _ in $(seq 1 30); do
+    current=$(role_connection_password "${secret}")
+    if [ -n "${current}" ] && [ "${current}" != "${previous}" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+check_role_passwords() {
+  # bring-your-own password: the value from my-role-password must be published to
+  # the Role's own connection secret.
+  echo_step "check Role bring-your-own password is published to the connection secret"
+  local conn_pw
+  conn_pw=$(role_connection_password byo-password-role-secret)
+  if [ "${conn_pw}" != "${byo_role_pw}" ]; then
+    echo_error "ERROR: byo-password-role connection secret password does not match my-role-password"
+  fi
+  echo_step_completed
+
+  # bring-your-own password rotation: updating my-role-password must propagate.
+  echo_step "check Role bring-your-own password update propagates to the connection secret"
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password -n default \
+      --from-literal password="${byo_role_pw}" --dry-run=client -o yaml | "${KUBECTL}" apply -f -
+  force_reconcile_role byo-password-role
+  if ! wait_role_password_changed byo-password-role-secret "${conn_pw}"; then
+    echo_error "ERROR: byo-password-role connection secret not updated after my-role-password changed"
+  fi
+  echo_step_completed
+
+  # auto-generated password recovery: losing the connection secret must
+  # regenerate the password and republish it. This also exercises the restore
+  # path where Observe has not yet populated the privilege clauses.
+  echo_step "check Role auto-generated password is regenerated when the connection secret is lost"
+  local old_pw
+  old_pw=$(role_connection_password rotating-role-secret)
+  "${KUBECTL}" delete secret rotating-role-secret -n default
+  force_reconcile_role rotating-role
+  if ! wait_role_password_changed rotating-role-secret "${old_pw}"; then
+    echo_error "ERROR: rotating-role connection secret was not regenerated after deletion"
+  fi
+  echo_step_completed
+
+  # rotation trigger: bumping passwordRotationTrigger past lastPasswordChange
+  # rotates the auto-generated password once the trigger time has passed. The
+  # sleep keeps the trigger strictly later than lastPasswordChange, which is
+  # stored at second precision.
+  echo_step "check Role passwordRotationTrigger rotates the auto-generated password"
+  local prev_pw trigger
+  prev_pw=$(role_connection_password rotating-role-secret)
+  sleep 1
+  trigger=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p "{\"spec\":{\"forProvider\":{\"passwordRotationTrigger\":\"${trigger}\"}}}"
+  if ! wait_role_password_changed rotating-role-secret "${prev_pw}"; then
+    echo_error "ERROR: rotating-role password did not rotate after bumping passwordRotationTrigger"
+  fi
+  echo_step_completed
+
+  # object restore: deleting and recreating the Role k8s object while the database
+  # role persists must recover gracefully. Dropping Delete from managementPolicies
+  # orphans the database role on delete (spec.deletionPolicy does not exist on the
+  # namespaced API). Unlike the secret-only deletion above, the recreated object
+  # starts with an empty status and no finalizer, so its first reconcile goes
+  # through the Observe-finds-it -> Update (not Create) path with privilege
+  # clauses that may not be populated yet.
+  echo_step "check Role password recovers when the Role object is deleted and recreated"
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p '{"spec":{"managementPolicies":["Observe","Create","Update","LateInitialize"]}}'
+  "${KUBECTL}" delete "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  if ! "${KUBECTL}" wait --timeout 2m --for condition=Ready \
+      "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" > /dev/null; then
+    echo_error "ERROR: rotating-role did not become Ready after Role object recreate (possible password-recovery regression)"
+  fi
+  if [ -z "$(role_connection_password rotating-role-secret)" ]; then
+    echo_error "ERROR: rotating-role connection secret empty after Role object recreate"
+  fi
+  echo_step_completed
+}
+
 integration_tests_postgres() {
   setup_postgresdb_no_tls
   setup_provider_config_postgres_no_tls
   setup_observe_only_database
   setup_postgresdb_tests
   check_observe_only_database
+  check_database_owner_ref
   check_all_roles_privileges
+  check_role_passwords
   check_all_schema_privileges
   check_custom_object_privileges
   setup_extension_test

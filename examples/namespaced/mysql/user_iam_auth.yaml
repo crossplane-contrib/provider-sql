@@ -1,0 +1,22 @@
+---
+# AWS RDS IAM authentication: the DB user has no static password and the
+# application authenticates with a short-lived auth token generated from its
+# IAM role (see https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
+#
+# Crossplane runs:
+#   CREATE USER 'example-iam-user'@'%' IDENTIFIED WITH `AWSAuthenticationPlugin` AS 'RDS'
+#
+# The connection secret will not contain a password (only username, endpoint,
+# port). Clients fetch a temporary auth token from AWS RDS at connect time.
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: User
+metadata:
+  name: example-iam-user
+  namespace: default
+spec:
+  forProvider:
+    authenticationPlugin:
+      name: AWSAuthenticationPlugin
+      authString: RDS
+  writeConnectionSecretToRef:
+    name: example-iam-user-connection

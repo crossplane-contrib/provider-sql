@@ -135,3 +135,131 @@ spec:
   providerConfigRef:
     kind: ProviderConfig
     name: default
+---
+# When owner-role creates new sequences, grant usage to writer-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: writer-sequences
+  namespace: default
+spec:
+  forProvider:
+    objectType: sequence
+    roleRef:
+      name: writer-role
+    targetRole: owner-role
+    privileges:
+      - USAGE
+      - SELECT
+      - UPDATE
+    schema: public
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# When owner-role creates new sequences, grant read access to reader-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: reader-sequences
+  namespace: default
+spec:
+  forProvider:
+    objectType: sequence
+    roleRef:
+      name: reader-role
+    targetRole: owner-role
+    privileges:
+      - USAGE
+      - SELECT
+    schema: public
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# When owner-role creates new types, grant usage to writer-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: writer-types
+  namespace: default
+spec:
+  forProvider:
+    objectType: type
+    roleRef:
+      name: writer-role
+    targetRole: owner-role
+    privileges:
+      - USAGE
+    schema: public
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# When owner-role creates new types, grant usage to reader-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: reader-types
+  namespace: default
+spec:
+  forProvider:
+    objectType: type
+    roleRef:
+      name: reader-role
+    targetRole: owner-role
+    privileges:
+      - USAGE
+    schema: public
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# When owner-role creates new schemas, grant usage to writer-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: writer-schemas
+  namespace: default
+spec:
+  forProvider:
+    objectType: schema
+    roleRef:
+      name: writer-role
+    targetRole: owner-role
+    privileges:
+      - CREATE
+      - USAGE
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
+---
+# When owner-role creates new schemas, grant usage to reader-role
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: reader-schemas
+  namespace: default
+spec:
+  forProvider:
+    objectType: schema
+    roleRef:
+      name: reader-role
+    targetRole: owner-role
+    privileges:
+      - USAGE
+    databaseRef:
+      name: example
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
