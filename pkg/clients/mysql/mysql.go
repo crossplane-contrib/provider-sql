@@ -3,9 +3,12 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strconv"
 	"strings"
+
+	driverMySQL "github.com/go-sql-driver/mysql"
 
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
 	"github.com/pkg/errors"
@@ -16,17 +19,21 @@ import (
 
 const (
 	errNotSupported = "%s not supported by mysql client"
+	tlsVerify       = "true"
 )
 
 type mySQLDB struct {
-	dsn      string
-	endpoint string
-	port     string
-	tls      string
+	dsn              string
+	endpoint         string
+	port             string
+	tls              string
+	passwordProvider xsql.PasswordProvider
 }
 
-// New returns a new MySQL database client.
-func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
+// New returns a new MySQL database client. When cleartext is true the DSN sets
+// allowCleartextPasswords=true, which is required for AWS RDS IAM authentication
+// (the AWSAuthenticationPlugin uses MySQL's cleartext client plugin).
+func New(creds map[string][]byte, tls *string, binlog *bool, cleartext bool) xsql.DB {
 	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
 	port := string(creds[xpv2.CredentialsSecretPortKey])
 	username := string(creds[xpv2.CredentialsSecretUserKey])
@@ -35,7 +42,7 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 		defaultTLS := "preferred"
 		tls = &defaultTLS
 	}
-	dsn := DSN(username, password, endpoint, port, *tls, binlog)
+	dsn := DSN(username, password, endpoint, port, *tls, binlog, cleartext)
 
 	return mySQLDB{
 		dsn:      dsn,
@@ -45,26 +52,54 @@ func New(creds map[string][]byte, tls *string, binlog *bool) xsql.DB {
 	}
 }
 
-// DSN returns the DSN URL
-func DSN(username, password, endpoint, port, tls string, binlog *bool) string {
-	// Use net/url UserPassword to encode the username and password
-	// This will ensure that any special characters in the username or password
-	// are percent-encoded for use in the user info portion of the DSN URL
-	if binlog != nil {
-		return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s&sql_log_bin=%s",
-			username,
-			password,
-			endpoint,
-			port,
-			tls,
-			strconv.FormatBool(*binlog))
+// NewWithPasswordProvider configures credentials generated for each physical connection.
+func NewWithPasswordProvider(creds map[string][]byte, tls *string, binlog *bool, cleartext bool, password xsql.PasswordProvider) xsql.DB {
+	db := New(creds, tls, binlog, cleartext).(mySQLDB)
+	db.passwordProvider = password
+	return db
+}
+
+func (c mySQLDB) open() (*sql.DB, error) {
+	if c.passwordProvider == nil {
+		return sql.Open("mysql", c.dsn)
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s",
-		username,
-		password,
-		endpoint,
-		port,
-		tls)
+	cfg, err := driverMySQL.ParseDSN(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	return sql.OpenDB(&xsql.PasswordConnector{
+		Password:  c.passwordProvider,
+		SQLDriver: &driverMySQL.MySQLDriver{},
+		NewConnector: func(password string) (driver.Connector, error) {
+			next := cfg.Clone()
+			next.Passwd = password
+			return driverMySQL.NewConnector(next)
+		},
+	}), nil
+}
+
+// EnsureTLS selects verified TLS for IAM when mode is unset or permits plaintext.
+// Explicit skip-verify and registered custom configurations remain operator choices.
+func EnsureTLS(mode *string) *string {
+	if mode == nil || *mode == "" || *mode == "false" || *mode == "preferred" {
+		verified := tlsVerify
+		return &verified
+	}
+	return mode
+}
+
+// DSN returns the DSN URL. When cleartext is true, allowCleartextPasswords=true
+// is appended (required for AWS RDS IAM authentication).
+func DSN(username, password, endpoint, port, tls string, binlog *bool, cleartext bool) string {
+	// MySQL DSN passwords are passed verbatim. URL-encoding would change IAM tokens.
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/?tls=%s", username, password, endpoint, port, tls)
+	if binlog != nil {
+		dsn += "&sql_log_bin=" + strconv.FormatBool(*binlog)
+	}
+	if cleartext {
+		dsn += "&allowCleartextPasswords=true"
+	}
+	return dsn
 }
 
 // ExecTx is unsupported in MySQL.
@@ -74,7 +109,7 @@ func (c mySQLDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := c.open()
 	if err != nil {
 		return err
 	}
@@ -86,7 +121,7 @@ func (c mySQLDB) Exec(ctx context.Context, q xsql.Query) error {
 
 // Query the supplied query.
 func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("mysql", c.dsn)
+	d, err := c.open()
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +133,7 @@ func (c mySQLDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
 
 // Scan the results of the supplied query into the supplied destination.
 func (c mySQLDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("mysql", c.dsn)
+	db, err := c.open()
 	if err != nil {
 		return err
 	}

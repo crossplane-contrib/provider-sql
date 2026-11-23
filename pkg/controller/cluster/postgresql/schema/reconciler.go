@@ -39,9 +39,9 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/connect"
 )
 
 const (
@@ -65,7 +65,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 	t := resource.NewLegacyProviderConfigUsageTracker(mgr.GetClient(), &v1alpha1.ProviderConfigUsage{})
 
 	reconcilerOptions := []managed.ReconcilerOption{
-		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.New}),
+		managed.WithTypedExternalConnector(&connector{kube: mgr.GetClient(), track: t.Track, newDB: postgresql.NewWithPasswordProvider}),
 		managed.WithLogger(o.Logger.WithValues("controller", name)),
 		managed.WithPollInterval(o.PollInterval),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))),
@@ -97,7 +97,7 @@ var _ managed.TypedExternalConnector[*v1alpha1.Schema] = &connector{}
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.TypedExternalClient[*v1alpha1.Schema], error) {
@@ -112,9 +112,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.T
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -130,7 +128,13 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Schema) (managed.T
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, clients.ToString(pc.Spec.SSLMode))}, nil
+
+	sslMode, password, err := connect.Configure(ctx, c.kube, pc, secretData)
+	if err != nil {
+		return nil, err
+	}
+
+	return &external{db: c.newDB(secretData, *mg.Spec.ForProvider.Database, sslMode, password)}, nil
 }
 
 var _ managed.TypedExternalClient[*v1alpha1.Schema] = &external{}

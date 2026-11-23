@@ -3,7 +3,9 @@ package postgresql
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"net"
 	"net/url"
 	"strings"
 
@@ -25,11 +27,12 @@ const (
 )
 
 type postgresDB struct {
-	dsn      string
-	redacted string // dsn with the password masked, for error messages
-	endpoint string
-	port     string
-	sslmode  string
+	dsn              string
+	redacted         string // dsn with the password masked, for error messages
+	endpoint         string
+	port             string
+	sslmode          string
+	passwordProvider xsql.PasswordProvider
 }
 
 // New returns a new PostgreSQL database client. The default database name is
@@ -37,19 +40,72 @@ type postgresDB struct {
 // value of PGDATABASE, or if unset, the hardcoded string 'postgres'.
 // The sslmode defines the mode used to set up the connection for the provider.
 func New(creds map[string][]byte, database, sslmode string) xsql.DB {
+	return newPostgresDB(creds, database, sslmode, nil)
+}
+
+// NewWithPasswordProvider configures credentials generated for each physical connection.
+func NewWithPasswordProvider(creds map[string][]byte, database, sslmode string, password xsql.PasswordProvider) xsql.DB {
+	return newPostgresDB(creds, database, sslmode, password)
+}
+
+func newPostgresDB(creds map[string][]byte, database, sslmode string, passwordProvider xsql.PasswordProvider) postgresDB {
 	endpoint := string(creds[xpv2.CredentialsSecretEndpointKey])
 	port := string(creds[xpv2.CredentialsSecretPortKey])
 	username := string(creds[xpv2.CredentialsSecretUserKey])
 	password := string(creds[xpv2.CredentialsSecretPasswordKey])
-	dsn := DSN(username, password, endpoint, port, database, sslmode)
-
-	return postgresDB{
-		dsn:      dsn,
-		redacted: DSN(username, redactedPassword, endpoint, port, database, sslmode),
-		endpoint: endpoint,
-		port:     port,
-		sslmode:  sslmode,
+	if passwordProvider != nil {
+		// Parse connection settings without retaining a password in the DSN.
+		password = ""
 	}
+	masked := redactedPassword
+	if password == "" {
+		// Nothing to mask, as with a password provider.
+		masked = ""
+	}
+	return postgresDB{
+		dsn:      DSN(username, password, endpoint, port, database, connectionSSLMode(sslmode)),
+		redacted: DSN(username, masked, endpoint, port, database, connectionSSLMode(sslmode)),
+		endpoint: endpoint, port: port, sslmode: sslmode, passwordProvider: passwordProvider,
+	}
+}
+
+func (c postgresDB) open() (*sql.DB, error) {
+	cfg, err := pq.NewConfig(c.dsn)
+	if err != nil {
+		return nil, c.redact(err)
+	}
+	if strings.HasPrefix(c.sslmode, "pqgo-provider-sql-postgresql-") {
+		// Apply the selected CA after parsing environment defaults. In particular,
+		// PGSSLROOTCERT must not replace or supplement a ProviderConfig's roots.
+		cfg.SSLMode = pq.SSLMode(c.sslmode)
+		cfg.SSLRootCert = ""
+	}
+	if c.passwordProvider == nil {
+		connector, err := pq.NewConnectorConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return sql.OpenDB(connector), nil
+	}
+	return sql.OpenDB(&xsql.PasswordConnector{
+		Password:  c.passwordProvider,
+		SQLDriver: &pq.Driver{},
+		NewConnector: func(password string) (driver.Connector, error) {
+			next := cfg.Clone()
+			next.Password = password
+			return pq.NewConnectorConfig(next)
+		},
+	}), nil
+}
+
+func connectionSSLMode(mode string) string {
+	if strings.HasPrefix(mode, "pqgo-provider-sql-postgresql-") {
+		// Parse with a standard verifying mode before applying the registered
+		// CA config. This also accepts PGSSLROOTCERT=system without allowing that
+		// process-wide setting to override the selected Secret.
+		return "verify-full"
+	}
+	return mode
 }
 
 // redact masks the password in DSN parse errors. lib/pq reports a DSN it
@@ -83,37 +139,47 @@ func (e *redactedError) Error() string { return e.msg }
 
 func (e *redactedError) Unwrap() error { return e.err }
 
+// EnsureTLS requires encryption without weakening configured verification.
+// Kubernetes defaults an omitted sslMode to verify-full; empty handles callers
+// that construct ProviderConfigs without API-server defaulting.
+func EnsureTLS(mode string) string {
+	if mode == "" || mode == "disable" || mode == "allow" || mode == "prefer" {
+		return "require"
+	}
+	return mode
+}
+
 // DSN returns the DSN URL
 func DSN(username, password, endpoint, port, database, sslmode string) string {
-	// Use net/url UserPassword to encode the username and password
-	// This will ensure that any special characters in the username or password
-	// are percent-encoded for use in the user info portion of the DSN URL
-	userInfo := url.UserPassword(username, password)
-	return "postgres://" +
-		userInfo.String() + "@" +
-		endpoint + ":" +
-		port + "/" +
-		database +
-		"?sslmode=" + sslmode
+	// Keep database names and credentials separate from connection options.
+	connection := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(username, password),
+		Host:     net.JoinHostPort(endpoint, port),
+		Path:     "/" + database,
+		RawQuery: url.Values{"sslmode": {sslmode}}.Encode(),
+	}
+	return connection.String()
 }
 
 // ExecTx executes an array of queries, committing if all are successful and
 // rolling back immediately on failure.
 func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open()
 	if err != nil {
-		return c.redact(err)
+		return err
 	}
+
+	defer d.Close() //nolint:errcheck
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return c.redact(err)
+		return err
 	}
 
 	// Rollback or Commit based on error state. Defer close in defer to make
 	// sure the connection is always closed.
 	defer func() {
-		defer d.Close() //nolint:errcheck
 		// We always rollback, it's a no-op if the tx was already committed.
 		defer tx.Rollback() //nolint:errcheck
 
@@ -123,7 +189,7 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 	}()
 
 	for _, q := range ql {
-		if _, err = tx.Exec(q.String, q.Parameters...); err != nil {
+		if _, err = tx.ExecContext(ctx, q.String, q.Parameters...); err != nil {
 			return err
 		}
 	}
@@ -132,37 +198,37 @@ func (c postgresDB) ExecTx(ctx context.Context, ql []xsql.Query) error {
 
 // Exec the supplied query.
 func (c postgresDB) Exec(ctx context.Context, q xsql.Query) error {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open()
 	if err != nil {
-		return c.redact(err)
+		return err
 	}
 	defer d.Close() //nolint:errcheck
 
 	_, err = d.ExecContext(ctx, q.String, q.Parameters...)
-	return c.redact(err)
+	return err
 }
 
 // Query the supplied query.
 func (c postgresDB) Query(ctx context.Context, q xsql.Query) (*sql.Rows, error) {
-	d, err := sql.Open("postgres", c.dsn)
+	d, err := c.open()
 	if err != nil {
-		return nil, c.redact(err)
+		return nil, err
 	}
 	defer d.Close() //nolint:errcheck
 
 	rows, err := d.QueryContext(ctx, q.String, q.Parameters...)
-	return rows, c.redact(err)
+	return rows, err
 }
 
 // Scan the results of the supplied query into the supplied destination.
 func (c postgresDB) Scan(ctx context.Context, q xsql.Query, dest ...interface{}) error {
-	db, err := sql.Open("postgres", c.dsn)
+	db, err := c.open()
 	if err != nil {
-		return c.redact(err)
+		return err
 	}
 	defer db.Close() //nolint:errcheck
 
-	return c.redact(db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...))
+	return db.QueryRowContext(ctx, q.String, q.Parameters...).Scan(dest...)
 }
 
 // GetConnectionDetails returns the connection details for a user of this DB
@@ -178,15 +244,15 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 // GetServerVersion returns the PostgreSQL server version as an integer
 // For example, PostgreSQL 16.2 would return 160200.
 func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
-	db, err := sql.Open("postgres", c.dsn)
+	db, err := c.open()
 	if err != nil {
-		return 0, c.redact(err)
+		return 0, err
 	}
 	defer db.Close() //nolint:errcheck
 
 	var version int
 	err = db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version)
-	return version, c.redact(err)
+	return version, err
 }
 
 // IsInvalidCatalog returns true if passed a pq error indicating

@@ -51,15 +51,26 @@ MARIADB_ROOT_PW=$(openssl rand -base64 32)
 MARIADB_TEST_PW=$(openssl rand -base64 32)
 MSSQL_SA_PW="$(openssl rand -base64 16)Aa1!"  # MSSQL requires complex password
 
+# Remove generated private keys even when retaining the test cluster for debugging.
+POSTGRES_TLS_DIR=""
+cleanup_postgres_tls_files() {
+  if [[ -n "${POSTGRES_TLS_DIR}" ]]; then
+    rm -rf "${POSTGRES_TLS_DIR}"
+  fi
+}
+
 # cleanup on exit
 if [ "$skipcleanup" != true ]; then
   function cleanup {
     echo_step "Cleaning up..."
+    cleanup_postgres_tls_files
     export KUBECONFIG=
     cleanup_cluster
   }
 
   trap cleanup EXIT
+else
+  trap cleanup_postgres_tls_files EXIT
 fi
 
 # Global variable to control API type
@@ -456,6 +467,8 @@ TLS=false API_TYPE="cluster" run_test integration_tests_mariadb
 
 TLS=false API_TYPE="cluster" run_test integration_tests_postgres
 TLS=false API_TYPE="namespaced" run_test integration_tests_postgres
+TLS=true API_TYPE="cluster" run_test integration_tests_postgres
+TLS=true API_TYPE="namespaced" run_test integration_tests_postgres
 
 # no TLS=false variant - MSSQL uses built-in encryption
 TLS=true API_TYPE="cluster" run_test integration_tests_mssql
