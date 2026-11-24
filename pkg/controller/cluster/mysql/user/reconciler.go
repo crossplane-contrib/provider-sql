@@ -562,21 +562,14 @@ func upToDate(observed *v1alpha1.UserParameters, desired *v1alpha1.UserParameter
 	if !authPluginEqual(observed.AuthenticationPlugin, desired.AuthenticationPlugin) {
 		return false
 	}
-	if desired.ResourceOptions == nil {
-		// Return true if there are no desired ResourceOptions
-		return true
-	}
-	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxConnectionsPerHour != desired.ResourceOptions.MaxConnectionsPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxUserConnections != desired.ResourceOptions.MaxUserConnections {
-		return false
-	}
-	return true
+	// Compare only the options set in the spec, by value, with the same
+	// function Update uses to decide whether to run ALTER USER, so that
+	// Observe does not report drift that Update would not act on. If the
+	// options cannot be compared, report drift: Update then fails with
+	// errCompareResourceOptions instead of silently doing nothing.
+	changed, err := changedResourceOptions(
+		resourceOptionsToClauses(observed.ResourceOptions),
+		resourceOptionsToClauses(desired.ResourceOptions),
+	)
+	return err == nil && len(changed) == 0
 }

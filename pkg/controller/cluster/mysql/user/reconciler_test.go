@@ -1143,6 +1143,89 @@ func TestChangedResourceOptions(t *testing.T) {
 	}
 }
 
+func TestUpToDateResourceOptionsSetInSpec(t *testing.T) {
+	// Observe reads every limit from mysql.user, so all four are set.
+	observed := func() *v1alpha1.UserParameters {
+		return &v1alpha1.UserParameters{
+			ResourceOptions: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(0),
+				MaxUserConnections:    ptr.To(4),
+			},
+		}
+	}
+
+	cases := map[string]struct {
+		reason   string
+		observed *v1alpha1.UserParameters
+		desired  *v1alpha1.ResourceOptions
+		want     bool
+	}{
+		"NilSpec": {
+			reason:   "A User without resourceOptions is up to date",
+			observed: observed(),
+			desired:  nil,
+			want:     true,
+		},
+		"NoOptionSet": {
+			reason:   "A User whose resourceOptions sets none of the options is up to date",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{},
+			want:     true,
+		},
+		"OneOptionUnchanged": {
+			reason:   "Options left unset in the spec must not be compared",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			want:     true,
+		},
+		"OneOptionChanged": {
+			reason:   "An option set in the spec to another value is drift",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(5)},
+			want:     false,
+		},
+		"AllOptionsUnchanged": {
+			reason:   "Options must be compared by value, not by pointer",
+			observed: observed(),
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(0),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: true,
+		},
+		"AllOptionsOneChanged": {
+			reason:   "One option set in the spec to another value is drift",
+			observed: observed(),
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(10),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: false,
+		},
+		"DesiredOptionNotObserved": {
+			reason:   "An option set in the spec that was not observed is not up to date",
+			observed: &v1alpha1.UserParameters{ResourceOptions: &v1alpha1.ResourceOptions{}},
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			want:     false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := upToDate(tc.observed, &v1alpha1.UserParameters{ResourceOptions: tc.desired})
+			if got != tc.want {
+				t.Errorf("\n%s\nupToDate(...): want %t, got %t\n", tc.reason, tc.want, got)
+			}
+		})
+	}
+}
+
 // TestObserveUpdateResourceOptions runs Observe and then, if Observe reports
 // the User as not up to date, Update, as the managed reconciler does. The
 // database already holds the given limits, so ALTER USER must only be issued
@@ -1152,24 +1235,28 @@ func TestObserveUpdateResourceOptions(t *testing.T) {
 		reason string
 		// limits are max_questions, max_updates, max_connections and
 		// max_user_connections as stored in mysql.user.
-		limits      [4]int
-		spec        *v1alpha1.ResourceOptions
-		wantQueries []string
+		limits       [4]int
+		spec         *v1alpha1.ResourceOptions
+		wantUpToDate bool
+		wantQueries  []string
 	}{
 		"NoResourceOptions": {
-			reason: "No ALTER USER must be issued when the spec has no resourceOptions",
-			limits: [4]int{0, 0, 0, 10},
-			spec:   nil,
+			reason:       "No ALTER USER must be issued when the spec has no resourceOptions",
+			limits:       [4]int{0, 0, 0, 10},
+			spec:         nil,
+			wantUpToDate: true,
 		},
 		"OneOptionMatches": {
-			reason: "No ALTER USER must be issued when the only option set in the spec already has its value",
-			limits: [4]int{0, 0, 0, 4},
-			spec:   &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			reason:       "No ALTER USER must be issued when the only option set in the spec already has its value",
+			limits:       [4]int{0, 0, 0, 4},
+			spec:         &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			wantUpToDate: true,
 		},
 		"UnsetOptionsAreNotManaged": {
-			reason: "Options left unset in the spec must not be changed, whatever their value",
-			limits: [4]int{1000, 0, 0, 4},
-			spec:   &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			reason:       "Options left unset in the spec must not be changed, whatever their value",
+			limits:       [4]int{1000, 0, 0, 4},
+			spec:         &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			wantUpToDate: true,
 		},
 		"AllOptionsMatch": {
 			reason: "No ALTER USER must be issued when all four options already have their values",
@@ -1180,6 +1267,7 @@ func TestObserveUpdateResourceOptions(t *testing.T) {
 				MaxConnectionsPerHour: ptr.To(10),
 				MaxUserConnections:    ptr.To(4),
 			},
+			wantUpToDate: true,
 		},
 		"OneOptionDiffers": {
 			reason:      "ALTER USER must set the option set in the spec when its value differs",
@@ -1228,6 +1316,9 @@ func TestObserveUpdateResourceOptions(t *testing.T) {
 			obs, err := e.Observe(context.Background(), mg)
 			if err != nil {
 				t.Fatalf("\n%s\ne.Observe(...): unexpected error: %v", tc.reason, err)
+			}
+			if obs.ResourceUpToDate != tc.wantUpToDate {
+				t.Errorf("\n%s\ne.Observe(...): want ResourceUpToDate %t, got %t\n", tc.reason, tc.wantUpToDate, obs.ResourceUpToDate)
 			}
 			if !obs.ResourceUpToDate {
 				if _, err := e.Update(context.Background(), mg); err != nil {
