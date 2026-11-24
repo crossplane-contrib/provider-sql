@@ -1103,3 +1103,51 @@ func TestDelete(t *testing.T) {
 		})
 	}
 }
+
+// TestUpToDateResourceOptions is a regression test for the pointer-comparison
+// bug: a User whose spec declares resourceOptions explicitly must compare
+// EQUAL when the values are equal, even though observed and desired live in
+// distinct allocations.
+func TestUpToDateResourceOptions(t *testing.T) {
+	i := func(v int) *int { return &v }
+	ro := func() *v1alpha1.ResourceOptions {
+		return &v1alpha1.ResourceOptions{
+			MaxQueriesPerHour:     i(100),
+			MaxUpdatesPerHour:     i(50),
+			MaxConnectionsPerHour: i(10),
+			MaxUserConnections:    i(5),
+		}
+	}
+	cases := map[string]struct {
+		observed *v1alpha1.UserParameters
+		desired  *v1alpha1.UserParameters
+		want     bool
+	}{
+		"EqualValuesDistinctAllocations": {
+			observed: &v1alpha1.UserParameters{ResourceOptions: ro()},
+			desired:  &v1alpha1.UserParameters{ResourceOptions: ro()},
+			want:     true,
+		},
+		"DifferentValue": {
+			observed: &v1alpha1.UserParameters{ResourceOptions: ro()},
+			desired: func() *v1alpha1.UserParameters {
+				o := ro()
+				o.MaxUserConnections = i(6)
+				return &v1alpha1.UserParameters{ResourceOptions: o}
+			}(),
+			want: false,
+		},
+		"NoDesiredOptions": {
+			observed: &v1alpha1.UserParameters{ResourceOptions: &v1alpha1.ResourceOptions{}},
+			desired:  &v1alpha1.UserParameters{},
+			want:     true,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := upToDate(tc.observed, tc.desired); got != tc.want {
+				t.Errorf("upToDate(...): got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

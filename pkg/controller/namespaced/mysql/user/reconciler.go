@@ -19,6 +19,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"github.com/google/go-cmp/cmp"
 	"strings"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/statemetrics"
@@ -544,16 +545,12 @@ func upToDate(observed *namespacedv1alpha1.UserParameters, desired *namespacedv1
 		// Return true if there are no desired ResourceOptions
 		return true
 	}
-	if observed.ResourceOptions.MaxQueriesPerHour != desired.ResourceOptions.MaxQueriesPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxUpdatesPerHour != desired.ResourceOptions.MaxUpdatesPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxConnectionsPerHour != desired.ResourceOptions.MaxConnectionsPerHour {
-		return false
-	}
-	if observed.ResourceOptions.MaxUserConnections != desired.ResourceOptions.MaxUserConnections {
+	// NOTE: the ResourceOptions fields are pointers; comparing them with !=
+	// compares ADDRESSES, not values. Observe() builds `observed` with a fresh
+	// allocation, so any User whose spec declares resourceOptions explicitly
+	// would never compare as up to date and would run an (empty) external
+	// Update on every reconcile. Same bug as the PostgreSQL Role upToDate.
+	if !cmp.Equal(observed.ResourceOptions, desired.ResourceOptions) {
 		return false
 	}
 	return true
