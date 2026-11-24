@@ -27,6 +27,7 @@ import (
 	namespacedmssql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mssql"
 	namespacedmysql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/mysql"
 	namespacedpostgresql "github.com/crossplane-contrib/provider-sql/pkg/controller/namespaced/postgresql"
+	postgresqltls "github.com/crossplane-contrib/provider-sql/pkg/controller/postgresql/tls"
 )
 
 // Setup creates all controllers with the supplied logger and adds
@@ -39,6 +40,7 @@ func Setup(mgr ctrl.Manager, l controller.Options) error {
 		namespacedmssql.Setup,
 		namespacedmysql.Setup,
 		namespacedpostgresql.Setup,
+		postgresqltls.Setup,
 	} {
 		if err := setup(mgr, l); err != nil {
 			return err
