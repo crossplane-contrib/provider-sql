@@ -171,24 +171,30 @@ func resourceOptionsToClauses(r *v1alpha1.ResourceOptions) []string {
 	return ro
 }
 
+// changedResourceOptions returns the desired clauses whose value differs from
+// the existing clause for the same option. Both inputs are built by
+// resourceOptionsToClauses, but they do not hold the same options: existing
+// holds every limit Observe reads from mysql.user, while desired holds only
+// the options set in the spec (an unset option is not managed). Clauses are
+// therefore matched by option name, not by position. A desired option that is
+// missing from existing cannot be compared and results in an error.
 func changedResourceOptions(existing []string, desired []string) ([]string, error) {
-	out := []string{}
-
-	// Make sure existing observation has at least as many items as
-	// desired. If it does not, then we cannot safely compare
-	// resource options.
-	if len(existing) < len(desired) {
-		return nil, errors.New(errCompareResourceOptions)
+	// Each clause is "<OPTION> <value>", see handleClause.
+	existingByOption := make(map[string]string, len(existing))
+	for _, clause := range existing {
+		option, _, _ := strings.Cut(clause, " ")
+		existingByOption[option] = clause
 	}
 
-	// The input slices here are outputted by resourceOptionsToClauses above.
-	// Because these are created by repeated calls to negateClause in the
-	// same order, we can rely on each clause being in the same array
-	// position in the 'desired' and 'existing' inputs.
-
-	for i, v := range desired {
-		if v != existing[i] {
-			out = append(out, v)
+	out := []string{}
+	for _, clause := range desired {
+		option, _, _ := strings.Cut(clause, " ")
+		current, ok := existingByOption[option]
+		if !ok {
+			return nil, errors.New(errCompareResourceOptions)
+		}
+		if current != clause {
+			out = append(out, clause)
 		}
 	}
 	return out, nil
