@@ -35,9 +35,9 @@ import (
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
-	"github.com/crossplane-contrib/provider-sql/pkg/clients"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/postgresql"
 	"github.com/crossplane-contrib/provider-sql/pkg/clients/xsql"
+	"github.com/crossplane-contrib/provider-sql/pkg/controller/cluster/postgresql/connect"
 	"github.com/crossplane-contrib/provider-sql/pkg/controller/setup"
 )
 
@@ -67,7 +67,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Connector: managed.WithTypedExternalConnector(&connector{
 			kube:  mgr.GetClient(),
 			track: t.Track,
-			newDB: postgresql.New,
+			newDB: postgresql.NewWithPasswordProvider,
 		}),
 	})
 }
@@ -75,7 +75,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.LegacyManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges) (managed.TypedExternalClient[*v1alpha1.DefaultPrivileges], error) {
@@ -90,9 +90,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 		return nil, errors.Wrap(err, errGetPC)
 	}
 
-	// We don't need to check the credentials source because we currently only
-	// support one source (PostgreSQLConnectionSecret), which is required and
-	// enforced by the ProviderConfig schema.
+	// Load connection details for either password or IAM authentication.
 	ref := pc.Spec.Credentials.ConnectionSecretRef
 	if ref == nil {
 		return nil, errors.New(errNoSecretRef)
@@ -111,7 +109,13 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.DefaultPrivileges)
 	}
 
 	secretData := xsql.RemapCredentialKeys(s.Data, pc.Spec.Credentials.SecretKeyMapping.ToMap())
-	return &external{db: c.newDB(secretData, database, clients.ToString(pc.Spec.SSLMode))}, nil
+
+	sslMode, password, err := connect.Configure(ctx, c.kube, pc, secretData)
+	if err != nil {
+		return nil, err
+	}
+
+	return &external{db: c.newDB(secretData, database, sslMode, password)}, nil
 }
 
 type external struct {

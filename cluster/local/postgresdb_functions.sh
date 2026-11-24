@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-setup_postgresdb_no_tls() {
+setup_postgresdb() {
   echo_step "Installing PostgresDB into default namespace"
   postgres_root_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
 
@@ -12,7 +12,12 @@ setup_postgresdb_no_tls() {
       --from-literal port="5432"
 
   scriptdir=$(dirname "$0")
-  POSTGRES_VERSION="${POSTGRES_VERSION:-18}" envsubst '${POSTGRES_VERSION}' < "${scriptdir}/postgres.server.yaml" | "${KUBECTL}" apply -f -
+  local manifest="${scriptdir}/postgres.server.yaml"
+  if [[ "${TLS}" == "true" ]]; then
+    setup_postgres_ca_secrets
+    manifest="${scriptdir}/postgres.tls.server.yaml"
+  fi
+  POSTGRES_VERSION="${POSTGRES_VERSION:-18}" envsubst '${POSTGRES_VERSION}' < "${manifest}" | "${KUBECTL}" apply -f -
 
   echo_step "Waiting for PostgreSQL to be ready"
   "${KUBECTL}" rollout status statefulset/postgresdb-postgresql --timeout=120s
@@ -26,9 +31,36 @@ setup_postgresdb_no_tls() {
   done
 }
 
-setup_provider_config_postgres_no_tls() {
-  echo_step "creating ProviderConfig for PostgresDb with no TLS ${API_TYPE}"
-  "${KUBECTL}" apply -f "${scriptdir}/postgres.providerconfig.${API_TYPE}.yaml"
+setup_provider_config_postgres() {
+  echo_step "creating PostgreSQL ProviderConfig ${API_TYPE} with TLS=${TLS}"
+  PROVIDER_CONFIG_POSTGRES_YAML=$(cat "${scriptdir}/postgres.providerconfig.${API_TYPE}.yaml")
+  if [[ "${TLS}" == "true" ]]; then
+    local ca_namespace=""
+    if [[ "${API_TYPE}" == "cluster" ]]; then
+      ca_namespace="        namespace: default"
+    fi
+    PROVIDER_CONFIG_POSTGRES_YAML=$(cat <<EOF
+apiVersion: postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      name: postgresdb-creds
+$(if [[ "${API_TYPE}" == "cluster" ]]; then echo "      namespace: default"; fi)
+  sslMode: verify-full
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: postgres-ca
+${ca_namespace}
+        key: ca-bundle.pem
+EOF
+)
+  fi
+  echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" apply -f -
 }
 
 create_grantable_objects() {
@@ -93,6 +125,14 @@ setup_postgresdb_tests(){
   echo_step "creating PostgresDB Database resource"
   # create DB
   "${KUBECTL}" apply -f ${projectdir}/examples/${API_TYPE}/postgresql/database.yaml
+
+  echo_step "creating bring-your-own password secret for Role"
+  # byo-password-role in role.yaml references this secret; without it that Role
+  # never becomes Ready and the readiness wait below times out.
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password \
+      --namespace default --save-config \
+      --from-literal password="${byo_role_pw}"
 
   echo_step "creating PostgresDB Role resource"
   # create grant
@@ -428,6 +468,7 @@ delete_postgresdb_resources(){
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/grant.yaml"
   "${KUBECTL}" delete --ignore-not-found=true -f "${projectdir}/examples/${API_TYPE}/postgresql/database.yaml"
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  "${KUBECTL}" delete --ignore-not-found=true secret my-role-password -n default
   "${KUBECTL}" delete -f "${projectdir}/examples/${API_TYPE}/postgresql/schema.yaml"
   echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" delete -f -
 
@@ -492,18 +533,408 @@ delete_extension_test() {
   echo_step_completed
 }
 
+role_connection_password() {
+  "${KUBECTL}" get secret "$1" -n default -o jsonpath='{.data.password}' 2>/dev/null | base64 --decode
+}
+
+force_reconcile_role() {
+  "${KUBECTL}" annotate --overwrite \
+    "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/$1" "reconcile=$(date +%s)-${RANDOM}" > /dev/null
+}
+
+# Waits until role_connection_password for $1 is non-empty and different from $2,
+# up to ~60s. Prints nothing; returns non-zero on timeout.
+wait_role_password_changed() {
+  local secret=$1 previous=$2 current _
+  for _ in $(seq 1 30); do
+    current=$(role_connection_password "${secret}")
+    if [ -n "${current}" ] && [ "${current}" != "${previous}" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+check_role_passwords() {
+  # bring-your-own password: the value from my-role-password must be published to
+  # the Role's own connection secret.
+  echo_step "check Role bring-your-own password is published to the connection secret"
+  local conn_pw
+  conn_pw=$(role_connection_password byo-password-role-secret)
+  if [ "${conn_pw}" != "${byo_role_pw}" ]; then
+    echo_error "ERROR: byo-password-role connection secret password does not match my-role-password"
+  fi
+  echo_step_completed
+
+  # bring-your-own password rotation: updating my-role-password must propagate.
+  echo_step "check Role bring-your-own password update propagates to the connection secret"
+  byo_role_pw=$(LC_ALL=C tr -cd "A-Za-z0-9" </dev/urandom | head -c 32)
+  "${KUBECTL}" create secret generic my-role-password -n default \
+      --from-literal password="${byo_role_pw}" --dry-run=client -o yaml | "${KUBECTL}" apply -f -
+  force_reconcile_role byo-password-role
+  if ! wait_role_password_changed byo-password-role-secret "${conn_pw}"; then
+    echo_error "ERROR: byo-password-role connection secret not updated after my-role-password changed"
+  fi
+  echo_step_completed
+
+  # auto-generated password recovery: losing the connection secret must
+  # regenerate the password and republish it. This also exercises the restore
+  # path where Observe has not yet populated the privilege clauses.
+  echo_step "check Role auto-generated password is regenerated when the connection secret is lost"
+  local old_pw
+  old_pw=$(role_connection_password rotating-role-secret)
+  "${KUBECTL}" delete secret rotating-role-secret -n default
+  force_reconcile_role rotating-role
+  if ! wait_role_password_changed rotating-role-secret "${old_pw}"; then
+    echo_error "ERROR: rotating-role connection secret was not regenerated after deletion"
+  fi
+  echo_step_completed
+
+  # rotation trigger: bumping passwordRotationTrigger past lastPasswordChange
+  # rotates the auto-generated password once the trigger time has passed. The
+  # sleep keeps the trigger strictly later than lastPasswordChange, which is
+  # stored at second precision.
+  echo_step "check Role passwordRotationTrigger rotates the auto-generated password"
+  local prev_pw trigger
+  prev_pw=$(role_connection_password rotating-role-secret)
+  sleep 1
+  trigger=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p "{\"spec\":{\"forProvider\":{\"passwordRotationTrigger\":\"${trigger}\"}}}"
+  if ! wait_role_password_changed rotating-role-secret "${prev_pw}"; then
+    echo_error "ERROR: rotating-role password did not rotate after bumping passwordRotationTrigger"
+  fi
+  echo_step_completed
+
+  # object restore: deleting and recreating the Role k8s object while the database
+  # role persists must recover gracefully. Dropping Delete from managementPolicies
+  # orphans the database role on delete (spec.deletionPolicy does not exist on the
+  # namespaced API). Unlike the secret-only deletion above, the recreated object
+  # starts with an empty status and no finalizer, so its first reconcile goes
+  # through the Observe-finds-it -> Update (not Create) path with privilege
+  # clauses that may not be populated yet.
+  echo_step "check Role password recovers when the Role object is deleted and recreated"
+  "${KUBECTL}" patch "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" --type merge \
+      -p '{"spec":{"managementPolicies":["Observe","Create","Update","LateInitialize"]}}'
+  "${KUBECTL}" delete "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role"
+  "${KUBECTL}" apply -f "${projectdir}/examples/${API_TYPE}/postgresql/role.yaml"
+  if ! "${KUBECTL}" wait --timeout 2m --for condition=Ready \
+      "role.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/rotating-role" > /dev/null; then
+    echo_error "ERROR: rotating-role did not become Ready after Role object recreate (possible password-recovery regression)"
+  fi
+  if [ -z "$(role_connection_password rotating-role-secret)" ]; then
+    echo_error "ERROR: rotating-role connection secret empty after Role object recreate"
+  fi
+  echo_step_completed
+}
+
 integration_tests_postgres() {
-  setup_postgresdb_no_tls
-  setup_provider_config_postgres_no_tls
+  # Fixture administration uses plaintext inside the local Kubernetes forward.
+  # psql TLS shutdown can reset that forward; provider TLS is tested separately
+  # through its ProviderConfig and the CA rejection/rotation assertions.
+  local PGSSLMODE=disable
+  export PGSSLMODE
+  setup_postgresdb
+  setup_provider_config_postgres
   setup_observe_only_database
   setup_postgresdb_tests
   check_observe_only_database
   check_database_owner_ref
   check_all_roles_privileges
+  check_role_passwords
   check_all_schema_privileges
   check_custom_object_privileges
   setup_extension_test
   check_extension_test
   delete_extension_test
+  if [[ "${TLS}" == "true" ]]; then
+    check_postgres_ca_admission
+    check_postgres_ca_rotation
+    check_postgres_verification_modes
+    check_postgres_default_privileges_ca
+    if [[ "${API_TYPE}" == "namespaced" ]]; then
+      check_postgres_cluster_ca_config
+      check_postgres_ca_namespace_isolation
+    fi
+  fi
   delete_postgresdb_resources
+  if [[ "${TLS}" == "true" ]]; then
+    "${KUBECTL}" delete secret postgres-ca postgres-server-tls
+    rm -rf "${POSTGRES_TLS_DIR}"
+  fi
+}
+
+setup_postgres_ca_secrets() {
+  echo_step "Creating PostgreSQL CA and server Secrets"
+  POSTGRES_TLS_DIR=$(mktemp -d)
+  cat > "${POSTGRES_TLS_DIR}/ca.cnf" <<EOFCA
+[req]
+distinguished_name=dn
+x509_extensions=v3_ca
+[dn]
+[v3_ca]
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign,cRLSign
+EOFCA
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -subj "/CN=provider-sql-e2e-ca" -config "${POSTGRES_TLS_DIR}/ca.cnf" \
+    -keyout "${POSTGRES_TLS_DIR}/ca-key.pem" -out "${POSTGRES_TLS_DIR}/ca-cert.pem" > /dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes -subj "/CN=postgresdb-postgresql.default.svc.cluster.local" \
+    -keyout "${POSTGRES_TLS_DIR}/server-key.pem" -out "${POSTGRES_TLS_DIR}/server.csr" > /dev/null 2>&1
+  echo "subjectAltName=DNS:postgresdb-postgresql.default.svc.cluster.local" > "${POSTGRES_TLS_DIR}/server.ext"
+  openssl x509 -req -days 1 -in "${POSTGRES_TLS_DIR}/server.csr" \
+    -CA "${POSTGRES_TLS_DIR}/ca-cert.pem" -CAkey "${POSTGRES_TLS_DIR}/ca-key.pem" -CAcreateserial \
+    -extfile "${POSTGRES_TLS_DIR}/server.ext" -out "${POSTGRES_TLS_DIR}/server-cert.pem" > /dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=untrusted-e2e-ca" \
+    -keyout "${POSTGRES_TLS_DIR}/wrong-key.pem" -out "${POSTGRES_TLS_DIR}/wrong-ca.pem" > /dev/null 2>&1
+  "${KUBECTL}" create secret generic postgres-server-tls \
+    --from-file=server-cert.pem="${POSTGRES_TLS_DIR}/server-cert.pem" \
+    --from-file=server-key.pem="${POSTGRES_TLS_DIR}/server-key.pem"
+  replace_postgres_ca default "${POSTGRES_TLS_DIR}/ca-cert.pem"
+}
+
+replace_postgres_ca() {
+  "${KUBECTL}" -n "$1" create secret generic postgres-ca \
+    --from-file=ca-bundle.pem="$2" --dry-run=client -o yaml | "${KUBECTL}" apply --server-side -f -
+}
+
+# Wait for the expected failure itself, rather than accepting an unrelated
+# transient False condition while the provider is switching configurations.
+wait_postgres_tls_rejection() {
+  local namespace="$1" resource="$2" expected="$3"
+  local deadline=$((SECONDS + 90)) status message
+  while (( SECONDS < deadline )); do
+    status=$("${KUBECTL}" -n "${namespace}" get "${resource}" -o 'jsonpath={.status.conditions[?(@.type=="Synced")].status}')
+    message=$("${KUBECTL}" -n "${namespace}" get "${resource}" -o 'jsonpath={.status.conditions[?(@.type=="Synced")].message}')
+    if [[ "${status}" == "False" && "${message}" == *"${expected}"* ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo_error "Expected TLS rejection containing '${expected}', got ${status}: ${message}"
+}
+
+check_postgres_ca_rotation() {
+  echo_step "Checking PostgreSQL CA Secret rejection and rotation without provider restart"
+  local db="database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/db1"
+  replace_postgres_ca default "${POSTGRES_TLS_DIR}/wrong-ca.pem"
+  "${KUBECTL}" annotate "${db}" test.sql.crossplane.io/ca-rotation=wrong --overwrite
+  wait_postgres_tls_rejection default "${db}" "unknown authority"
+  replace_postgres_ca default "${POSTGRES_TLS_DIR}/ca-cert.pem"
+  "${KUBECTL}" annotate "${db}" test.sql.crossplane.io/ca-rotation=restored --overwrite
+  "${KUBECTL}" wait "${db}" --for=condition=Synced=true --timeout=90s
+  echo_step_completed
+}
+
+check_postgres_cluster_ca_config() {
+  echo_step "Checking PostgreSQL ClusterProviderConfig CA selector"
+  "${KUBECTL}" create namespace postgres-ca-trust
+  replace_postgres_ca postgres-ca-trust "${POSTGRES_TLS_DIR}/ca-cert.pem"
+  cat <<EOFCONFIG | "${KUBECTL}" apply -f -
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: ca-cluster
+spec:
+  credentials:
+    source: PostgreSQLConnectionSecret
+    connectionSecretRef:
+      name: postgresdb-creds
+      namespace: default
+  sslMode: verify-full
+  tlsConfig:
+    caCert:
+      secretRef:
+        name: postgres-ca
+        namespace: postgres-ca-trust
+        key: ca-bundle.pem
+---
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: ca-cluster-db
+spec:
+  providerConfigRef:
+    name: ca-cluster
+    kind: ClusterProviderConfig
+  forProvider: {}
+EOFCONFIG
+  "${KUBECTL}" wait database.postgresql.sql.m.crossplane.io/ca-cluster-db --for=condition=Ready --timeout=90s
+  replace_postgres_ca postgres-ca-trust "${POSTGRES_TLS_DIR}/wrong-ca.pem"
+  "${KUBECTL}" annotate database.postgresql.sql.m.crossplane.io/ca-cluster-db test.sql.crossplane.io/ca-rotation=wrong --overwrite
+  wait_postgres_tls_rejection default database.postgresql.sql.m.crossplane.io/ca-cluster-db "unknown authority"
+  replace_postgres_ca postgres-ca-trust "${POSTGRES_TLS_DIR}/ca-cert.pem"
+  "${KUBECTL}" annotate database.postgresql.sql.m.crossplane.io/ca-cluster-db test.sql.crossplane.io/ca-rotation=restored --overwrite
+  "${KUBECTL}" wait database.postgresql.sql.m.crossplane.io/ca-cluster-db --for=condition=Synced=true --timeout=90s
+  "${KUBECTL}" delete database.postgresql.sql.m.crossplane.io/ca-cluster-db --timeout=90s
+  "${KUBECTL}" delete clusterproviderconfig.postgresql.sql.m.crossplane.io/ca-cluster
+  "${KUBECTL}" delete namespace postgres-ca-trust --timeout=90s
+  echo_step_completed
+}
+
+check_postgres_ca_namespace_isolation() {
+  echo_step "Checking same-name PostgreSQL ProviderConfig CA isolation across namespaces"
+  "${KUBECTL}" create namespace postgres-ca-other
+  "${KUBECTL}" -n postgres-ca-other create secret generic postgresdb-creds \
+    --from-literal username=postgres --from-literal password="${postgres_root_pw}" \
+    --from-literal endpoint=postgresdb-postgresql.default.svc.cluster.local --from-literal port=5432
+  replace_postgres_ca postgres-ca-other "${POSTGRES_TLS_DIR}/wrong-ca.pem"
+  echo "${PROVIDER_CONFIG_POSTGRES_YAML}" | "${KUBECTL}" -n postgres-ca-other apply -f -
+  cat <<EOFISOLATION | "${KUBECTL}" -n postgres-ca-other apply -f -
+apiVersion: postgresql.sql.m.crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: ca-isolation
+  annotations:
+    crossplane.io/external-name: db1
+spec:
+  managementPolicies: [Observe]
+  providerConfigRef:
+    name: default
+    kind: ProviderConfig
+  forProvider: {}
+EOFISOLATION
+  local db=database.postgresql.sql.m.crossplane.io/ca-isolation
+  wait_postgres_tls_rejection postgres-ca-other "${db}" "unknown authority"
+  # Verify both namespaces continue reconciling with their own selected CAs.
+  # Deterministic registry-identity isolation is covered by Go unit tests.
+  local original_db=database.postgresql.sql.m.crossplane.io/db1
+  "${KUBECTL}" -n default patch "${original_db}" --type=merge -p '{"spec":{"forProvider":{"connectionLimit":100}}}'
+  local generation
+  generation=$("${KUBECTL}" -n default get "${original_db}" -o jsonpath='{.metadata.generation}')
+  "${KUBECTL}" -n default wait "${original_db}" --for="jsonpath={.status.conditions[?(@.type==\"Synced\")].observedGeneration}=${generation}" --timeout=90s
+  "${KUBECTL}" -n default wait "${original_db}" --for=condition=Synced=true --timeout=90s
+  replace_postgres_ca postgres-ca-other "${POSTGRES_TLS_DIR}/ca-cert.pem"
+  "${KUBECTL}" -n postgres-ca-other annotate "${db}" test.sql.crossplane.io/ca-rotation=restored --overwrite
+  "${KUBECTL}" -n postgres-ca-other wait "${db}" --for=condition=Synced=true --timeout=90s
+  "${KUBECTL}" delete namespace postgres-ca-other --timeout=90s
+  echo_step_completed
+}
+
+create_postgres_observe_probe() {
+  cat <<EOFPROBE | "${KUBECTL}" apply -f -
+apiVersion: postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
+kind: Database
+metadata:
+  name: $1
+  annotations:
+    crossplane.io/external-name: db1
+spec:
+  managementPolicies: [Observe]
+  providerConfigRef:
+    name: default
+$(if [[ "${API_TYPE}" == "namespaced" ]]; then echo "    kind: ProviderConfig"; fi)
+  forProvider: {}
+EOFPROBE
+}
+
+check_postgres_verification_modes() {
+  echo_step "Checking PostgreSQL verify-ca and verify-full hostname behavior"
+  local pc="providerconfig.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/default"
+  local db="database.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io"
+  # A DNS alias reaches the existing Service without waiting for a second
+  # Service's EndpointSlices or proxy rules. TLS still checks the alias name.
+  cat <<EOFALIAS | "${KUBECTL}" apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresdb-alias
+spec:
+  type: ExternalName
+  externalName: postgresdb-postgresql.default.svc.cluster.local
+  ports:
+  - port: 5432
+EOFALIAS
+  "${KUBECTL}" patch secret postgresdb-creds --type=merge -p '{"stringData":{"endpoint":"postgresdb-alias.default.svc.cluster.local"}}'
+  "${KUBECTL}" patch "${pc}" --type=merge -p '{"spec":{"sslMode":"verify-ca"}}'
+  create_postgres_observe_probe ca-verifyca
+  "${KUBECTL}" wait "${db}/ca-verifyca" --for=condition=Ready --timeout=90s
+  "${KUBECTL}" patch "${pc}" --type=merge -p '{"spec":{"sslMode":"verify-full"}}'
+  create_postgres_observe_probe ca-verifyfull
+  wait_postgres_tls_rejection default "${db}/ca-verifyfull" "not postgresdb-alias.default.svc.cluster.local"
+  "${KUBECTL}" patch secret postgresdb-creds --type=merge -p '{"stringData":{"endpoint":"postgresdb-postgresql.default.svc.cluster.local"}}'
+  "${KUBECTL}" annotate "${db}/ca-verifyfull" test.sql.crossplane.io/endpoint=restored --overwrite
+  "${KUBECTL}" wait "${db}/ca-verifyfull" --for=condition=Synced=true --timeout=90s
+  "${KUBECTL}" delete "${db}/ca-verifyca" "${db}/ca-verifyfull" --timeout=90s
+  "${KUBECTL}" delete service postgresdb-alias
+  echo_step_completed
+}
+
+check_postgres_default_privileges_ca() {
+  echo_step "Checking PostgreSQL DefaultPrivileges through the CA selector"
+  cat <<EOFPRIVILEGES | "${KUBECTL}" apply -f -
+apiVersion: postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1
+kind: DefaultPrivileges
+metadata:
+  name: ca-default-privileges
+spec:
+  providerConfigRef:
+    name: default
+$(if [[ "${API_TYPE}" == "namespaced" ]]; then echo "    kind: ProviderConfig"; fi)
+  forProvider:
+    database: db1
+    schema: public
+    targetRole: ownerrole
+    role: example-role
+    objectType: table
+    privileges: [SELECT]
+EOFPRIVILEGES
+  local resource="defaultprivileges.postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/ca-default-privileges"
+  "${KUBECTL}" wait "${resource}" --for=condition=Ready --timeout=90s
+  "${KUBECTL}" delete "${resource}" --timeout=90s
+  echo_step_completed
+}
+
+# Check admission on the generated CRDs, including defaulting before CEL validation.
+check_postgres_ca_admission() {
+  echo_step "check PostgreSQL CA selector admission and sslMode defaulting"
+  local kind source sample mode has_ca selector_namespace manifest result rejected count=0
+  local kinds="ProviderConfig"
+  if [[ "${API_TYPE}" == "namespaced" ]]; then
+    kinds="ProviderConfig ClusterProviderConfig"
+  fi
+  for kind in ${kinds}; do
+    selector_namespace=default
+    if [[ "${API_TYPE}" == "namespaced" && "${kind}" == "ProviderConfig" ]]; then
+      selector_namespace=""
+    fi
+    for source in PostgreSQLConnectionSecret AWSIAMAuth; do
+      for sample in omitted verify-ca verify-full require disable require-no-ca disable-no-ca; do
+        mode=${sample%-no-ca}
+        has_ca=true
+        rejected=false
+        if [[ "${sample}" == *-no-ca ]]; then
+          has_ca=false
+        elif [[ "${mode}" == "require" || "${mode}" == "disable" ]]; then
+          rejected=true
+        fi
+        manifest=$(jq -n \
+          --arg api "postgresql.sql.${APIGROUP_SUFFIX}crossplane.io/v1alpha1" \
+          --arg kind "${kind}" --arg source "${source}" --arg mode "${mode}" \
+          --arg ns "${selector_namespace}" --argjson ca "${has_ca}" '
+          {apiVersion: $api, kind: $kind, metadata: {name: "e2e-ca-admission"},
+           spec: {credentials: {source: $source, connectionSecretRef: {name: "unused"}}}}
+          | if $ns == "" then .metadata.namespace = "default"
+            else .spec.credentials.connectionSecretRef.namespace = $ns end
+          | if $mode == "omitted" then . else .spec.sslMode = $mode end
+          | if $ca then .spec.tlsConfig.caCert.secretRef = {name: "unused", key: "bundle"}
+            | if $ns == "" then . else .spec.tlsConfig.caCert.secretRef.namespace = $ns end
+            else . end')
+        if result=$(printf '%s\n' "${manifest}" | "${KUBECTL}" create --dry-run=server -f - -o json 2>&1); then
+          if [[ "${rejected}" == "true" ]]; then
+            echo_error "${kind} accepted ${source} with a CA and sslMode=${mode}"
+          fi
+          if [[ "${mode}" == "omitted" && $(jq -r '.spec.sslMode' <<<"${result}") != "verify-full" ]]; then
+            echo_error "${kind} did not default sslMode to verify-full"
+          fi
+        elif [[ "${rejected}" != "true" || "${result}" != *"tlsConfig requires sslMode verify-ca or verify-full"* ]]; then
+          echo_error "Unexpected PostgreSQL admission failure for ${kind}/${source}/${sample}: ${result}"
+        fi
+        count=$((count + 1))
+      done
+    done
+  done
+  echo_info "${count} PostgreSQL admission cases passed"
+  echo_step_completed
 }

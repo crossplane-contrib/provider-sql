@@ -83,7 +83,7 @@ func TestConnectServerVersionUnavailable(t *testing.T) {
 		kube:  kubeWithSecret("postgres"),
 		log:   logging.NewNopLogger(),
 		track: func(context.Context, resource.LegacyManaged) error { return nil },
-		newDB: func(_ map[string][]byte, _ string, _ string) xsql.DB {
+		newDB: func(_ map[string][]byte, _ string, _ string, _ xsql.PasswordProvider) xsql.DB {
 			return mockDB{
 				MockGetServerVersion: func(context.Context) (int, error) { return 0, errBoom },
 			}
@@ -128,7 +128,7 @@ func TestConnectDatabaseGrantTargetsDefaultDatabase(t *testing.T) {
 		kube:  kubeWithSecret("postgres"),
 		log:   logging.NewNopLogger(),
 		track: func(context.Context, resource.LegacyManaged) error { return nil },
-		newDB: func(_ map[string][]byte, database string, _ string) xsql.DB {
+		newDB: func(_ map[string][]byte, database string, _ string, _ xsql.PasswordProvider) xsql.DB {
 			connectedTo = database
 			return mockDB{}
 		},
@@ -177,7 +177,7 @@ func TestConnectObjectGrantTargetsGrantDatabase(t *testing.T) {
 				kube:  kubeWithSecret("postgres"),
 				log:   logging.NewNopLogger(),
 				track: func(context.Context, resource.LegacyManaged) error { return nil },
-				newDB: func(_ map[string][]byte, database string, _ string) xsql.DB {
+				newDB: func(_ map[string][]byte, database string, _ string, _ xsql.PasswordProvider) xsql.DB {
 					connectedTo = database
 					return mockDB{}
 				},

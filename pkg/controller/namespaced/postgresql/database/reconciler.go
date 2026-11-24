@@ -67,7 +67,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 		Connector: managed.WithTypedExternalConnector(&connector{
 			kube:  mgr.GetClient(),
 			track: t.Track,
-			newDB: postgresql.New,
+			newDB: postgresql.NewWithPasswordProvider,
 		}),
 	})
 }
@@ -75,7 +75,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 type connector struct {
 	kube  client.Client
 	track func(ctx context.Context, mg resource.ModernManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 var _ managed.TypedExternalConnector[*namespacedv1alpha1.Database] = &connector{}
@@ -92,7 +92,7 @@ func (c *connector) Connect(ctx context.Context, mg *namespacedv1alpha1.Database
 		return nil, err
 	}
 
-	return &external{db: c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode))}, nil
+	return &external{db: c.newDB(providerInfo.SecretData, providerInfo.DefaultDatabase, clients.ToString(providerInfo.SSLMode), providerInfo.PasswordProvider)}, nil
 }
 
 type external struct{ db xsql.DB }

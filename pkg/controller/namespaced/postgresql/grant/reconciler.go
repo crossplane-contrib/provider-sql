@@ -74,7 +74,7 @@ type connector struct {
 	kube  client.Client
 	log   logging.Logger
 	track func(ctx context.Context, mg resource.ModernManaged) error
-	newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+	newDB func(creds map[string][]byte, database string, sslmode string, password xsql.PasswordProvider) xsql.DB
 }
 
 type external struct {
@@ -107,7 +107,7 @@ func (c *connector) Connect(ctx context.Context, mg *v1alpha1.Grant) (managed.Ty
 		return nil, err
 	}
 
-	xdb := c.newDB(providerInfo.SecretData, connectDatabase(mg.Spec.ForProvider, providerInfo.DefaultDatabase), clients.ToString(providerInfo.SSLMode))
+	xdb := c.newDB(providerInfo.SecretData, connectDatabase(mg.Spec.ForProvider, providerInfo.DefaultDatabase), clients.ToString(providerInfo.SSLMode), providerInfo.PasswordProvider)
 
 	// A server that cannot report its version is not a reason to fail: only
 	// table grants are version dependent, and ExpandPrivilegesWithVersion
@@ -1127,7 +1127,7 @@ func Setup(mgr ctrl.Manager, o xpcontroller.Options) error {
 			kube:  mgr.GetClient(),
 			log:   o.Logger,
 			track: t.Track,
-			newDB: postgresql.New,
+			newDB: postgresql.NewWithPasswordProvider,
 		}),
 	})
 }
