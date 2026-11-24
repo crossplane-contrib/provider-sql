@@ -28,6 +28,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/meta"
@@ -1081,6 +1082,299 @@ func TestUpdate(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want.c, got, cmpopts.IgnoreMapEntries(func(key string, _ []byte) bool { return key == "password" })); diff != "" {
 				t.Errorf("\n%s\ne.Create(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// scanUserLimits answers the Observe query with the given mysql.user limits,
+// in the order Observe selects them: max_questions, max_updates,
+// max_connections, max_user_connections.
+func scanUserLimits(limits [4]int) func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+	return func(_ context.Context, _ xsql.Query, dest ...interface{}) error {
+		for i, v := range limits {
+			*dest[i].(**int) = ptr.To(v)
+		}
+		return nil
+	}
+}
+
+func TestChangedResourceOptions(t *testing.T) {
+	// Observe records every limit it reads from mysql.user.
+	observed := resourceOptionsToClauses(&v1alpha1.ResourceOptions{
+		MaxQueriesPerHour:     ptr.To(0),
+		MaxUpdatesPerHour:     ptr.To(100),
+		MaxConnectionsPerHour: ptr.To(0),
+		MaxUserConnections:    ptr.To(4),
+	})
+
+	cases := map[string]struct {
+		reason   string
+		existing []string
+		desired  *v1alpha1.ResourceOptions
+		want     []string
+		err      error
+	}{
+		"NilSpec": {
+			reason:   "No option is managed when the spec has no resourceOptions",
+			existing: observed,
+			desired:  nil,
+			want:     nil,
+		},
+		"NoOptionSet": {
+			reason:   "No option is managed when resourceOptions sets none of them",
+			existing: observed,
+			desired:  &v1alpha1.ResourceOptions{},
+			want:     nil,
+		},
+		"OneOptionUnchanged": {
+			reason:   "An option set in the spec must be compared with the same option in the observation, not with the observed clause at the same index",
+			existing: observed,
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			want:     nil,
+		},
+		"TwoOptionsUnchanged": {
+			reason:   "Options set in the spec must be compared by name when the spec sets only some of them",
+			existing: observed,
+			desired: &v1alpha1.ResourceOptions{
+				MaxUpdatesPerHour:  ptr.To(100),
+				MaxUserConnections: ptr.To(4),
+			},
+			want: nil,
+		},
+		"OneOptionChanged": {
+			reason:   "An option set in the spec to a new value must be reported as changed",
+			existing: observed,
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(5)},
+			want:     []string{"MAX_USER_CONNECTIONS 5"},
+		},
+		"AllOptionsUnchanged": {
+			reason:   "No option is reported when all four match the observation",
+			existing: observed,
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(0),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: nil,
+		},
+		"AllOptionsOneChanged": {
+			reason:   "Only the option whose value differs must be reported",
+			existing: observed,
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(10),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: []string{"MAX_CONNECTIONS_PER_HOUR 10"},
+		},
+		"DesiredOptionNotObserved": {
+			reason:   "An option set in the spec cannot be compared when it was not observed",
+			existing: nil,
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			err:      errors.New(errCompareResourceOptions),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := changedResourceOptions(tc.existing, resourceOptionsToClauses(tc.desired))
+			if diff := cmp.Diff(tc.err, err, test.EquateErrors()); diff != "" {
+				t.Errorf("\n%s\nchangedResourceOptions(...): -want error, +got error:\n%s\n", tc.reason, diff)
+			}
+			if diff := cmp.Diff(tc.want, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("\n%s\nchangedResourceOptions(...): -want, +got:\n%s\n", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestUpToDateResourceOptionsSetInSpec(t *testing.T) {
+	// Observe reads every limit from mysql.user, so all four are set.
+	observed := func() *v1alpha1.UserParameters {
+		return &v1alpha1.UserParameters{
+			ResourceOptions: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(0),
+				MaxUserConnections:    ptr.To(4),
+			},
+		}
+	}
+
+	cases := map[string]struct {
+		reason   string
+		observed *v1alpha1.UserParameters
+		desired  *v1alpha1.ResourceOptions
+		want     bool
+	}{
+		"NilSpec": {
+			reason:   "A User without resourceOptions is up to date",
+			observed: observed(),
+			desired:  nil,
+			want:     true,
+		},
+		"NoOptionSet": {
+			reason:   "A User whose resourceOptions sets none of the options is up to date",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{},
+			want:     true,
+		},
+		"OneOptionUnchanged": {
+			reason:   "Options left unset in the spec must not be compared",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			want:     true,
+		},
+		"OneOptionChanged": {
+			reason:   "An option set in the spec to another value is drift",
+			observed: observed(),
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(5)},
+			want:     false,
+		},
+		"AllOptionsUnchanged": {
+			reason:   "Options must be compared by value, not by pointer",
+			observed: observed(),
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(0),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: true,
+		},
+		"AllOptionsOneChanged": {
+			reason:   "One option set in the spec to another value is drift",
+			observed: observed(),
+			desired: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(0),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(10),
+				MaxUserConnections:    ptr.To(4),
+			},
+			want: false,
+		},
+		"DesiredOptionNotObserved": {
+			reason:   "An option set in the spec that was not observed is not up to date",
+			observed: &v1alpha1.UserParameters{ResourceOptions: &v1alpha1.ResourceOptions{}},
+			desired:  &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			want:     false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := upToDate(tc.observed, &v1alpha1.UserParameters{ResourceOptions: tc.desired})
+			if got != tc.want {
+				t.Errorf("\n%s\nupToDate(...): want %t, got %t\n", tc.reason, tc.want, got)
+			}
+		})
+	}
+}
+
+// TestObserveUpdateResourceOptions runs Observe and then, if Observe reports
+// the User as not up to date, Update, as the managed reconciler does. The
+// database already holds the given limits, so ALTER USER must only be issued
+// when an option set in the spec has a different value there.
+func TestObserveUpdateResourceOptions(t *testing.T) {
+	cases := map[string]struct {
+		reason string
+		// limits are max_questions, max_updates, max_connections and
+		// max_user_connections as stored in mysql.user.
+		limits       [4]int
+		spec         *v1alpha1.ResourceOptions
+		wantUpToDate bool
+		wantQueries  []string
+	}{
+		"NoResourceOptions": {
+			reason:       "No ALTER USER must be issued when the spec has no resourceOptions",
+			limits:       [4]int{0, 0, 0, 10},
+			spec:         nil,
+			wantUpToDate: true,
+		},
+		"OneOptionMatches": {
+			reason:       "No ALTER USER must be issued when the only option set in the spec already has its value",
+			limits:       [4]int{0, 0, 0, 4},
+			spec:         &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			wantUpToDate: true,
+		},
+		"UnsetOptionsAreNotManaged": {
+			reason:       "Options left unset in the spec must not be changed, whatever their value",
+			limits:       [4]int{1000, 0, 0, 4},
+			spec:         &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(4)},
+			wantUpToDate: true,
+		},
+		"AllOptionsMatch": {
+			reason: "No ALTER USER must be issued when all four options already have their values",
+			limits: [4]int{1000, 100, 10, 4},
+			spec: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(1000),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(10),
+				MaxUserConnections:    ptr.To(4),
+			},
+			wantUpToDate: true,
+		},
+		"OneOptionDiffers": {
+			reason:      "ALTER USER must set the option set in the spec when its value differs",
+			limits:      [4]int{0, 0, 0, 4},
+			spec:        &v1alpha1.ResourceOptions{MaxUserConnections: ptr.To(5)},
+			wantQueries: []string{"ALTER USER 'example'@'%' WITH MAX_USER_CONNECTIONS 5"},
+		},
+		"AllOptionsOneDiffers": {
+			reason: "ALTER USER must set the options from the spec when one of them differs",
+			limits: [4]int{1000, 100, 10, 4},
+			spec: &v1alpha1.ResourceOptions{
+				MaxQueriesPerHour:     ptr.To(1000),
+				MaxUpdatesPerHour:     ptr.To(100),
+				MaxConnectionsPerHour: ptr.To(20),
+				MaxUserConnections:    ptr.To(4),
+			},
+			wantQueries: []string{"ALTER USER 'example'@'%' WITH MAX_QUERIES_PER_HOUR 1000 MAX_UPDATES_PER_HOUR 100 MAX_CONNECTIONS_PER_HOUR 20 MAX_USER_CONNECTIONS 4"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var queries []string
+			e := external{
+				db: mockDB{
+					MockScan: scanUserLimits(tc.limits),
+					MockExec: func(_ context.Context, q xsql.Query) error {
+						queries = append(queries, q.String)
+						return nil
+					},
+				},
+			}
+			mg := &v1alpha1.User{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						meta.AnnotationKeyExternalName: "example",
+					},
+				},
+				Spec: v1alpha1.UserSpec{
+					ForProvider: v1alpha1.UserParameters{
+						ResourceOptions: tc.spec,
+					},
+				},
+			}
+
+			obs, err := e.Observe(context.Background(), mg)
+			if err != nil {
+				t.Fatalf("\n%s\ne.Observe(...): unexpected error: %v", tc.reason, err)
+			}
+			if obs.ResourceUpToDate != tc.wantUpToDate {
+				t.Errorf("\n%s\ne.Observe(...): want ResourceUpToDate %t, got %t\n", tc.reason, tc.wantUpToDate, obs.ResourceUpToDate)
+			}
+			if !obs.ResourceUpToDate {
+				if _, err := e.Update(context.Background(), mg); err != nil {
+					t.Fatalf("\n%s\ne.Update(...): unexpected error: %v", tc.reason, err)
+				}
+			}
+			if diff := cmp.Diff(tc.wantQueries, queries, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("\n%s\nexecuted queries: -want, +got:\n%s\n", tc.reason, diff)
 			}
 		})
 	}
