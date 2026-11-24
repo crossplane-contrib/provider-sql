@@ -19,6 +19,8 @@ package database
 import (
 	"context"
 	"database/sql"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/crossplane-contrib/provider-sql/apis/cluster/postgresql/v1alpha1"
@@ -73,10 +75,26 @@ func TestConnect(t *testing.T) {
 	errBoom := errors.New("boom")
 	nopUsage := func(ctx context.Context, mg resource.LegacyManaged) error { return nil }
 
+	// Keep this real-signing test independent of the developer's AWS configuration.
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "AWS_") {
+			t.Setenv(key, "")
+		}
+	}
+	for key, value := range map[string]string{
+		"AWS_ACCESS_KEY_ID": "SYNTHETIC-TEST-KEY", "AWS_SECRET_ACCESS_KEY": "synthetic-test-secret",
+		"AWS_SESSION_TOKEN": "synthetic-session", "AWS_REGION": "eu-central-1", "AWS_EC2_METADATA_DISABLED": "true",
+		"AWS_CONFIG_FILE": os.DevNull, "AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
+		"AWS_PROFILE": "", "AWS_DEFAULT_PROFILE": "",
+	} {
+		t.Setenv(key, value)
+	}
+
 	type fields struct {
 		kube  client.Client
 		track func(context.Context, resource.LegacyManaged) error
-		newDB func(creds map[string][]byte, database string, sslmode string) xsql.DB
+		newDB func(creds map[string][]byte, database string, sslmode string, _ xsql.PasswordProvider) xsql.DB
 	}
 
 	type args struct {
@@ -168,11 +186,93 @@ func TestConnect(t *testing.T) {
 			},
 			want: errors.Wrap(errBoom, errGetSecret),
 		},
+		"SuccessAWSIAMAuth": {
+			reason: "When source is AWSIAMAuth, a token is injected as the password and an unset sslmode requires encryption.",
+			fields: fields{
+				kube: &test.MockClient{
+					MockGet: test.NewMockGetFn(nil, func(obj client.Object) error {
+						switch o := obj.(type) {
+						case *v1alpha1.ProviderConfig:
+							o.Spec.Credentials.Source = v1alpha1.CredentialsSourceAWSIAMAuth
+							o.Spec.Credentials.ConnectionSecretRef = &xpv2.SecretReference{Namespace: "ns", Name: "s"}
+						case *corev1.Secret:
+							o.Data = map[string][]byte{
+								xpv2.CredentialsSecretEndpointKey: []byte("db.example.rds.amazonaws.com"),
+								xpv2.CredentialsSecretPortKey:     []byte("5432"),
+								xpv2.CredentialsSecretUserKey:     []byte("crossplane_admin"),
+							}
+						}
+						return nil
+					}),
+				},
+				track: nopUsage,
+				newDB: func(creds map[string][]byte, _ string, sslmode string, password xsql.PasswordProvider) xsql.DB {
+					if sslmode != "require" {
+						t.Errorf("expected sslmode forced to require, got %q", sslmode)
+					}
+					if password == nil {
+						t.Fatal("missing per-connection password provider")
+					}
+					if got, err := password(context.Background()); err != nil || !strings.Contains(got, "X-Amz-Signature=") {
+						t.Errorf("token: %q, %v", got, err)
+					}
+					if _, ok := creds[xpv2.CredentialsSecretPasswordKey]; ok {
+						t.Error("token must not be cached in credentials")
+					}
+					return mockDB{}
+				},
+			},
+			args: args{
+				ctx: context.Background(),
+				mg: &v1alpha1.Database{
+					Spec: v1alpha1.DatabaseSpec{
+						ClusterManagedResourceSpec: xpv2.ClusterManagedResourceSpec{
+							ProviderConfigReference: &xpv2.Reference{},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+	}
+
+	for _, mode := range []string{"", "disable", "require", "verify-ca", "verify-full"} {
+		tc := cases["SuccessAWSIAMAuth"]
+		baseGet := tc.fields.kube.(*test.MockClient).MockGet
+		tc.fields.kube = &test.MockClient{MockGet: func(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+			if err := baseGet(ctx, key, obj); err != nil {
+				return err
+			}
+			if pc, ok := obj.(*v1alpha1.ProviderConfig); ok {
+				pc.Spec.SSLMode = &mode
+			}
+			return nil
+		}}
+		wantMode := mode
+		if mode == "" || mode == "disable" {
+			wantMode = "require"
+		}
+		tc.fields.newDB = func(creds map[string][]byte, _ string, got string, password xsql.PasswordProvider) xsql.DB {
+			if got != wantMode {
+				t.Errorf("IAM sslmode: want %q, got %q", wantMode, got)
+			}
+			if password == nil {
+				t.Fatal("missing per-connection password provider")
+			}
+			if got, err := password(context.Background()); err != nil || !strings.Contains(got, "X-Amz-Signature=") {
+				t.Errorf("token: %q, %v", got, err)
+			}
+			return mockDB{}
+		}
+		cases["AWSIAMAuth/"+mode] = tc
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := &connector{kube: tc.fields.kube, track: tc.fields.track, newDB: tc.fields.newDB}
+			if tc.args.ctx == nil {
+				tc.args.ctx = context.Background()
+			}
 			_, err := e.Connect(tc.args.ctx, tc.args.mg)
 			if diff := cmp.Diff(tc.want, err, test.EquateErrors()); diff != "" {
 				t.Errorf("\n%s\ne.Connect(...): -want error, +got error:\n%s\n", tc.reason, diff)
