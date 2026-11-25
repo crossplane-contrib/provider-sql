@@ -1,0 +1,23 @@
+# Grant an existing role to a user.
+# Create reporting_reader before applying this example.
+# Activate the role separately, for example with SET ROLE or a default role.
+# The provider needs WITH ADMIN OPTION for the role (or equivalent admin rights)
+# and SELECT on mysql.roles_mapping (MariaDB) or mysql.role_edges (MySQL).
+# Deleting this Grant removes the role from this user without deleting either account.
+# To change roles without keeping the old role assigned, delete and recreate the Grant.
+apiVersion: mysql.sql.m.crossplane.io/v1alpha1
+kind: Grant
+metadata:
+  name: example-grant-member-of
+  namespace: default
+spec:
+  forProvider:
+    userRef:
+      name: example-user
+    # MySQL roles may use role@host; the default host is %. Use bare roles on MariaDB.
+    # For Aurora S3 exports, use AWS_SELECT_S3_ACCESS instead.
+    # Set up IAM/S3 access separately.
+    memberOf: reporting_reader
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
