@@ -349,6 +349,57 @@ func TestObserve(t *testing.T) {
 				o: managed.ExternalObservation{ResourceExists: false},
 			},
 		},
+		"SuccessDatabaseDoesNotExist": {
+			reason: "We should return ResourceExists: false when the grant's database does not exist, so the grant can be deleted",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						return &pq.Error{Code: "3D000", Message: `database "test-example" does not exist`}
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Role:       ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{privAll},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{ResourceExists: false},
+			},
+		},
+		"SuccessWildcardDatabaseDoesNotExist": {
+			reason: "We should return ResourceExists: false when a wildcard grant's database does not exist",
+			fields: fields{
+				db: mockDB{
+					MockScan: func(ctx context.Context, q xsql.Query, dest ...interface{}) error {
+						return &pq.Error{Code: "3D000", Message: `database "test-example" does not exist`}
+					},
+				},
+			},
+			args: args{
+				mg: &v1alpha1.Grant{
+					Spec: v1alpha1.GrantSpec{
+						ForProvider: v1alpha1.GrantParameters{
+							Database:   ptr.To("test-example"),
+							Schema:     ptr.To("test-example"),
+							Tables:     []string{"*"},
+							Role:       ptr.To("test-example"),
+							Privileges: v1alpha1.GrantPrivileges{privSelect},
+						},
+					},
+				},
+			},
+			want: want{
+				o: managed.ExternalObservation{ResourceExists: false},
+			},
+		},
 		"AllMapsToExpandedPrivileges": {
 			reason: "We expand ALL to CREATE, TEMPORARY, CONNECT when checking for existing grants",
 			fields: fields{
