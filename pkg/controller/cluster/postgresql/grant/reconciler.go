@@ -625,14 +625,14 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 	if isWildcardGrant(gp) {
 		var matching, total int
 		if err := c.db.Scan(ctx, query, &matching, &total); err != nil {
-			return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
+			return observeScanError(err)
 		}
 		exists = matching == total
 		if mg.GetDeletionTimestamp() != nil {
 			exists = matching > 0
 		}
 	} else if err := c.db.Scan(ctx, query, &exists); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
+		return observeScanError(err)
 	}
 
 	if !exists {
@@ -647,6 +647,16 @@ func (c *external) Observe(ctx context.Context, mg *v1alpha1.Grant) (managed.Ext
 		ResourceUpToDate:        true,
 		ResourceLateInitialized: false,
 	}, nil
+}
+
+// observeScanError turns an error from the Observe query into an observation.
+// If the database the grant is in no longer exists, neither does the grant,
+// so a Grant whose database was dropped first can still be deleted.
+func observeScanError(err error) (managed.ExternalObservation, error) {
+	if postgresql.IsInvalidCatalog(err) {
+		return managed.ExternalObservation{ResourceExists: false}, nil
+	}
+	return managed.ExternalObservation{}, errors.Wrap(err, errSelectGrant)
 }
 
 // isWildcardGrant reports whether the grant targets every object of its kind
