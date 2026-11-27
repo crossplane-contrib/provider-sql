@@ -241,8 +241,8 @@ func (c postgresDB) GetConnectionDetails(username, password string) managed.Conn
 	}
 }
 
-// GetServerVersion returns the PostgreSQL server version as an integer
-// For example, PostgreSQL 16.2 would return 160200.
+// GetServerVersion returns the PostgreSQL server version as an integer.
+// For example, PostgreSQL 16.2 returns 160002 (major*10000 + minor).
 func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
 	db, err := c.open()
 	if err != nil {
@@ -251,8 +251,11 @@ func (c postgresDB) GetServerVersion(ctx context.Context) (int, error) {
 	defer db.Close() //nolint:errcheck
 
 	var version int
-	err = db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version)
-	return version, err
+	if err := db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version); err != nil {
+		return 0, err
+	}
+
+	return version, nil
 }
 
 // IsInvalidCatalog returns true if passed a pq error indicating
