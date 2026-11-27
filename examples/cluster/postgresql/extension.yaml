@@ -19,6 +19,7 @@ spec:
   forProvider:
     extension: ltree
     version: "1.1"
+    schema: my-schema
     databaseRef:
       name: example
   providerConfigRef:
