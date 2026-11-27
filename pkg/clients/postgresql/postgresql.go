@@ -21,10 +21,14 @@ const (
 	// https://www.postgresql.org/docs/current/errcodes-appendix.html
 	// These are not available as part of the pq library.
 	pqInvalidCatalog = pqerror.Code("3D000")
+
+	// redactedPassword replaces the password in the DSN that error messages show.
+	redactedPassword = "xxxxx"
 )
 
 type postgresDB struct {
 	dsn              string
+	redacted         string // dsn with the password masked, for error messages
 	endpoint         string
 	port             string
 	sslmode          string
@@ -53,8 +57,14 @@ func newPostgresDB(creds map[string][]byte, database, sslmode string, passwordPr
 		// Parse connection settings without retaining a password in the DSN.
 		password = ""
 	}
+	masked := redactedPassword
+	if password == "" {
+		// Nothing to mask, as with a password provider.
+		masked = ""
+	}
 	return postgresDB{
 		dsn:      DSN(username, password, endpoint, port, database, connectionSSLMode(sslmode)),
+		redacted: DSN(username, masked, endpoint, port, database, connectionSSLMode(sslmode)),
 		endpoint: endpoint, port: port, sslmode: sslmode, passwordProvider: passwordProvider,
 	}
 }
@@ -62,7 +72,7 @@ func newPostgresDB(creds map[string][]byte, database, sslmode string, passwordPr
 func (c postgresDB) open() (*sql.DB, error) {
 	cfg, err := pq.NewConfig(c.dsn)
 	if err != nil {
-		return nil, withoutConnectionURL(err)
+		return nil, c.redact(err)
 	}
 	if strings.HasPrefix(c.sslmode, "pqgo-provider-sql-postgresql-") {
 		// Apply the selected CA after parsing environment defaults. In particular,
@@ -98,14 +108,36 @@ func connectionSSLMode(mode string) string {
 	return mode
 }
 
-// URL parser errors quote the complete DSN, including its password.
-func withoutConnectionURL(err error) error {
-	var parseErr *url.Error
-	if errors.As(err, &parseErr) {
-		return parseErr.Err
+// redact masks the password in DSN parse errors. lib/pq reports a DSN it
+// cannot parse as a *url.Error that carries the whole DSN, and the error
+// ends up in status conditions and events. Text that wraps the *url.Error
+// is kept.
+func (c postgresDB) redact(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
 	}
-	return err
+	masked := *uerr
+	masked.URL = c.redacted
+	msg := err.Error()
+	if !strings.Contains(msg, uerr.Error()) {
+		// The wrapper doesn't print the *url.Error as is, so its text might
+		// still carry the password in another form.
+		return &masked
+	}
+	return &redactedError{msg: strings.Replace(msg, uerr.Error(), masked.Error(), 1), err: &masked}
 }
+
+// redactedError is an error that wrapped a DSN parse error, with the
+// password masked in its message. It unwraps to the masked *url.Error.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+
+func (e *redactedError) Unwrap() error { return e.err }
 
 // EnsureTLS requires encryption without weakening configured verification.
 // Kubernetes defaults an omitted sslMode to verify-full; empty handles callers
